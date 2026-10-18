@@ -1,0 +1,292 @@
+"""三色裁决的规则表：R01—R11 的数据定义与顺序。
+
+对应文档：docs/05_安全层实现规格.md 5.1/5.2、docs/06_工具层实现规格.md 6.1。
+
+顺序即优先级：decide() 自上而下短路求值，第一条 when 命中的规则直接产出 Decision。
+本模块是纯数据加纯函数，不碰数据库、网络与时钟；时间与今日累计由 PolicyContext 传入，
+这样同一条 Action 在任何时候重放都得到同一个裁决。
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Callable, Final
+
+from app.models import Action, Decision, RiskLevel
+from app.money import fen_to_yuan_str
+
+# docs/05 5.1：单笔与日累计同一条 1000 元线；> 1000 元转红，含等于仍为黄
+SINGLE_LIMIT_FEN: Final[int] = 100_000
+DAILY_LIMIT_FEN: Final[int] = 100_000
+
+# docs/06 6.1 的权威工具表：只读 6 个 + 写 4 个
+READONLY_TOOLS: Final[frozenset[str]] = frozenset(
+    {"query_balance", "query_transactions", "analyze_bill", "list_subs", "list_cards", "resolve_payee"}
+)
+SPEND_TOOLS: Final[frozenset[str]] = frozenset({"transfer", "reserve_funds", "pay_merchant"})
+CONFIRM_ONLY_TOOLS: Final[frozenset[str]] = frozenset({"cancel_subscription"})
+# 账户安全类：改限额 / 解绑卡 / 改联系方式 / 改密码，三重验证
+SENSITIVE_TOOLS: Final[frozenset[str]] = frozenset(
+    {"change_transfer_limit", "unbind_card", "update_contact", "reset_password"}
+)
+# 理财类：人脸 + 动态口令
+INVEST_TOOLS: Final[frozenset[str]] = frozenset({"buy_fund", "redeem_fund"})
+# 已登记但本轮未实现的扩展工具（docs/06 6.1 脚注）：故意不配任何规则，
+# 用来证明 R11 默认拒绝是活的兜底，而不是一行永远走不到的死代码。
+PENDING_TOOLS: Final[frozenset[str]] = frozenset({"apply_virtual_card", "set_daily_limit"})
+
+KNOWN_TOOLS: Final[frozenset[str]] = (
+    READONLY_TOOLS | SPEND_TOOLS | CONFIRM_ONLY_TOOLS | SENSITIVE_TOOLS | INVEST_TOOLS | PENDING_TOOLS
+)
+
+
+@dataclass(frozen=True)
+class PolicyContext:
+    """裁决所需的外部事实；由调用方查好塞进来，保证 decide 可重放。"""
+
+    spent_today_fen: int = 0
+    limit_fen: int = DAILY_LIMIT_FEN
+    single_limit_fen: int = SINGLE_LIMIT_FEN
+    # 演示与审计用；引擎自己不取时间（docs/05 5.2 要求纯函数）
+    now_ms: int = 0
+
+
+@dataclass(frozen=True)
+class Rule:
+    """一条规则：命中条件 when + 产出裁决的 emit。"""
+
+    rule_id: str
+    level: RiskLevel
+    reason_code: str
+    when: Callable[[Action, PolicyContext], bool]
+    emit: Callable[[Action, PolicyContext], Decision]
+
+
+def _yuan(fen: int) -> str:
+    """只在出口把分格式化成「1,000.00 元」，引擎内部全程 int 分。"""
+    return f"{fen_to_yuan_str(fen)} 元"
+
+
+def _payee_label(action: Action) -> str:
+    """收款方展示名：params 里有人名用人名，只有 id 就显示 id，都没有就说「对方」。"""
+    for key in ("payee_name", "merchant_name", "payee_id"):
+        value = action.params.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return "对方"
+
+
+def _is_spend(action: Action) -> bool:
+    return action.tool in SPEND_TOOLS
+
+
+def _amount(action: Action) -> int:
+    return action.amount_fen or 0
+
+
+def _over_daily(action: Action, ctx: PolicyContext) -> bool:
+    return ctx.spent_today_fen + _amount(action) > ctx.limit_fen
+
+
+def _decision(
+    level: RiskLevel,
+    rule_id: str,
+    reason_code: str,
+    reason_text: str,
+    ctx: PolicyContext,
+    factors: tuple[str, ...] = (),
+) -> Decision:
+    return Decision(
+        level=level,
+        rule_id=rule_id,
+        reason_code=reason_code,
+        reason_text=reason_text,
+        required_factors=list(factors),
+        limit_fen=ctx.limit_fen,
+        spent_today_fen=ctx.spent_today_fen,
+    )
+
+
+def _emit_readonly(action: Action, ctx: PolicyContext) -> Decision:
+    return _decision("green", "R01_readonly", "READONLY", "这一步只是查询，我直接帮你看。", ctx)
+
+
+def _emit_invalid_amount(action: Action, ctx: PolicyContext) -> Decision:
+    return _decision("red", "R02_invalid_amount", "INVALID_AMOUNT", "金额不正确，请重新输入", ctx)
+
+
+def _emit_unknown_tool(action: Action, ctx: PolicyContext) -> Decision:
+    return _decision("red", "R03_unknown_tool", "UNKNOWN_TOOL", "我还不会这个操作", ctx)
+
+
+def _emit_untrusted(action: Action, ctx: PolicyContext) -> Decision:
+    fields = "、".join(action.untrusted_fields)
+    return _decision(
+        "red",
+        "R04_untrusted_amount",
+        "UNTRUSTED_SOURCE",
+        f"这笔请求的来源需要人工核实（可疑字段：{fields}）",
+        ctx,
+        ("face", "sms"),
+    )
+
+
+def _emit_confirm_only(action: Action, ctx: PolicyContext) -> Decision:
+    return _decision("yellow", "R05_confirm_only", "CONFIRM_ONLY", "即将为你执行，请确认", ctx)
+
+
+def _emit_yellow_transfer(action: Action, ctx: PolicyContext) -> Decision:
+    return _decision(
+        "yellow",
+        "R06_transfer_yellow",
+        "TRANSFER_YELLOW",
+        f"即将向 {_payee_label(action)} 转出 {_yuan(_amount(action))}，需要你确认",
+        ctx,
+    )
+
+
+def _emit_red_daily(action: Action, ctx: PolicyContext) -> Decision:
+    text = (
+        f"今日已用 {_yuan(ctx.spent_today_fen)}，这笔 {_yuan(_amount(action))} 会超过日累计线，我先不做"
+    )
+    return _decision("red", "R07_transfer_red_daily", "TRANSFER_DAILY_RED", text, ctx, ("face", "sms"))
+
+
+def _emit_red_single(action: Action, ctx: PolicyContext) -> Decision:
+    text = f"单笔 {_yuan(_amount(action))} 超过 {_yuan(ctx.single_limit_fen)}上限，这笔我不能直接做"
+    return _decision("red", "R08_transfer_red_single", "TRANSFER_SINGLE_RED", text, ctx, ("face", "sms"))
+
+
+def _emit_sensitive(action: Action, ctx: PolicyContext) -> Decision:
+    return _decision(
+        "red",
+        "R09_sensitive_red",
+        "SENSITIVE_TOOL",
+        "这是账户安全操作，需要三重验证",
+        ctx,
+        ("face", "sms", "otp"),
+    )
+
+
+def _emit_invest(action: Action, ctx: PolicyContext) -> Decision:
+    return _decision(
+        "red", "R10_invest_red", "INVEST_TOOL", "理财操作需要人脸与动态口令", ctx, ("face", "otp")
+    )
+
+
+def _emit_default_deny(action: Action, ctx: PolicyContext) -> Decision:
+    return _decision("red", "R11_default_deny", "DEFAULT_DENY", "这个操作我不确定是否安全，先不做", ctx)
+
+
+def _rule(
+    rule_id: str,
+    level: RiskLevel,
+    reason_code: str,
+    when: Callable[[Action, PolicyContext], bool],
+    emit: Callable[[Action, PolicyContext], Decision],
+) -> Rule:
+    return Rule(rule_id=rule_id, level=level, reason_code=reason_code, when=when, emit=emit)
+
+
+# R01—R11：元组顺序即求值顺序（docs/05 5.2 的 for 循环直接吃它）
+RULES: Final[tuple[Rule, ...]] = (
+    _rule(
+        "R01_readonly",
+        "green",
+        "READONLY",
+        lambda action, ctx: action.tool in READONLY_TOOLS,
+        _emit_readonly,
+    ),
+    _rule(
+        "R02_invalid_amount",
+        "red",
+        "INVALID_AMOUNT",
+        lambda action, ctx: _is_spend(action) and _amount(action) <= 0,
+        _emit_invalid_amount,
+    ),
+    _rule(
+        "R03_unknown_tool",
+        "red",
+        "UNKNOWN_TOOL",
+        lambda action, ctx: action.tool not in KNOWN_TOOLS,
+        _emit_unknown_tool,
+    ),
+    _rule(
+        "R04_untrusted_amount",
+        "red",
+        "UNTRUSTED_SOURCE",
+        lambda action, ctx: _is_spend(action) and bool(action.untrusted_fields),
+        _emit_untrusted,
+    ),
+    _rule(
+        "R05_confirm_only",
+        "yellow",
+        "CONFIRM_ONLY",
+        lambda action, ctx: action.tool in CONFIRM_ONLY_TOOLS,
+        _emit_confirm_only,
+    ),
+    _rule(
+        "R06_transfer_yellow",
+        "yellow",
+        "TRANSFER_YELLOW",
+        lambda action, ctx: _is_spend(action)
+        and 0 < _amount(action) <= ctx.single_limit_fen
+        and not _over_daily(action, ctx),
+        _emit_yellow_transfer,
+    ),
+    _rule(
+        "R07_transfer_red_daily",
+        "red",
+        "TRANSFER_DAILY_RED",
+        # spent_today_fen > 0 是守卫：否则「单笔刚过线」的请求会被误判成日累计超限，
+        # 与 docs/05 5.1 边界表里 1000.01 -> R08 的要求冲突
+        lambda action, ctx: _is_spend(action) and ctx.spent_today_fen > 0 and _over_daily(action, ctx),
+        _emit_red_daily,
+    ),
+    _rule(
+        "R08_transfer_red_single",
+        "red",
+        "TRANSFER_SINGLE_RED",
+        lambda action, ctx: _is_spend(action) and _amount(action) > ctx.single_limit_fen,
+        _emit_red_single,
+    ),
+    _rule(
+        "R09_sensitive_red",
+        "red",
+        "SENSITIVE_TOOL",
+        lambda action, ctx: action.tool in SENSITIVE_TOOLS,
+        _emit_sensitive,
+    ),
+    _rule(
+        "R10_invest_red",
+        "red",
+        "INVEST_TOOL",
+        lambda action, ctx: action.tool in INVEST_TOOLS,
+        _emit_invest,
+    ),
+    _rule(
+        "R11_default_deny",
+        "red",
+        "DEFAULT_DENY",
+        lambda action, ctx: True,
+        _emit_default_deny,
+    ),
+)
+
+RULES_BY_ID: Final[dict[str, Rule]] = {rule.rule_id: rule for rule in RULES}
+
+__all__ = [
+    "CONFIRM_ONLY_TOOLS",
+    "DAILY_LIMIT_FEN",
+    "INVEST_TOOLS",
+    "KNOWN_TOOLS",
+    "PENDING_TOOLS",
+    "PolicyContext",
+    "READONLY_TOOLS",
+    "RULES",
+    "RULES_BY_ID",
+    "Rule",
+    "SENSITIVE_TOOLS",
+    "SINGLE_LIMIT_FEN",
+    "SPEND_TOOLS",
+]
