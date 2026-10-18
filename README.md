@@ -124,6 +124,10 @@ python3.12 -m uvicorn app.main:app --port 8000  # 起服务
 
 任何一步不过都写一条 `token.rejected` 审计再抛错；没有令牌直接调用动钱工具，记 `TOKEN_MISSING` 并拒绝。
 
+**签名密钥不是配置项，是硬前置。** 签发密钥只从环境变量 `CAPABILITY_SECRET` 读取（`app/security/token.py` 的 `load_secret()`），代码里没有内置默认密钥、`.env` 不入库。缺失或不是 64 位十六进制时，系统**按设计 fail closed**：`raise MissingCapability(reason="CAPABILITY_SECRET_MISSING")`，黄灯/红灯在用户点确认后直接返回 `MISSING_CAPABILITY`，一条动钱指令都执行不了——缺了就整个链路停摆，而不是降级放行、绿灯兜底。绿灯的只读查询不依赖该密钥，仍然可用。
+
+> 评委追问点：密钥不在代码里、不进 git、缺失即全链路停摆。这是刻意的 fail-closed 设计，不是可以「先临时配一个」的开关。
+
 ### 审计哈希链
 
 每条审计记录带 `seq / ts_ms / session_id / task_id / event_type / payload_json / prev_hash / hash`，其中 `hash = sha256(prev_hash + ts_ms + event_type + payload_json)`，数据库层用触发器**只许插入、禁止改写**。前端右下角实时追加显示 seq 与短哈希前 8 位。
