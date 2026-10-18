@@ -4,8 +4,10 @@ import os
 import re
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Final
 
 _ENV_LINE = re.compile(r"^\s*([A-Z0-9_]+)\s*=\s*(.*)$")
+_TRUTHY: Final[frozenset[str]] = frozenset({"1", "true", "yes", "on"})
 
 
 def load_env(path: Path) -> None:
@@ -35,7 +37,7 @@ class Settings:
     model_backup: str = os.getenv("MODEL_BACKUP", "MiniMax-M2.1")
     temperature: float = float(os.getenv("LLM_TEMPERATURE", "0") or "0")
     timeout: int = int(os.getenv("LLM_TIMEOUT", "60") or "60")
-    mock: bool = os.getenv("MOCK_MODE", "false").strip().lower() == "true"
+    mock: bool = os.getenv("MOCK_MODE", "false").strip().lower() in _TRUTHY
 
     @property
     def endpoint(self) -> str:
