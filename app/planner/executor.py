@@ -157,12 +157,23 @@ async def _step(
     return await execute_node(state, node, rec, params, action, token, emit)
 
 
+def log_injection_hit(field: str, result: Any) -> None:
+    """注入命中的日志回调：签名是 (字段名, 扫描结果) 两个位置参数。
+
+    它是回调，不是 Logger。把 logging.Logger 实例直接传进 mark_from_params，
+    用户备注里一出现注入词就会抛 TypeError: 'Logger' object is not callable，
+    整轮被兜底成 INTERNAL 返回 500（t13 blocker）。
+    """
+    patterns = getattr(result, "patterns", ())
+    log.info("injection.detected field=%s patterns=%s", field, ",".join(patterns))
+
+
 def build_node_action(state: RunState, node: Any, params: dict[str, Any]) -> Action:
     """构造 Action；命中的注入字段交给 R04 自己升级验证等级。"""
     action = tool_base.build_action(node.tool, params, state.account_id, params.get("amount_fen"))
     hits = injection.scan_params(params)
     if hits:
-        action = injection.mark_from_params(action, hits, log_hits=log)
+        action = injection.mark_from_params(action, hits, log_hits=log_injection_hit)
     return action
 
 

@@ -125,9 +125,14 @@ def mark_from_params(
     action: Action,
     results: dict[str, ScanResult],
     *,
-    log_hits: Any = None,
+    log_hits: Callable[[str, ScanResult], None] | None = None,
 ) -> Action:
-    """把 scan_params 的结果一次性写进 Action，并按需记 injection.detected 审计。"""
+    """把 scan_params 的命中字段一次性登记进 Action.untrusted_fields。
+
+    只登记，不拒绝，也不写审计：升不升级验证等级由 R04 判定，审计事件由
+    调用方所在层负责。log_hits 给定时，每个命中字段按 (字段名, 扫描结果)
+    两个位置参数回调一次，用来把命中写进行内日志——它是回调不是 Logger。
+    """
     marked = action
     for field_name, result in results.items():
         marked = mark_untrusted(marked, field_name)
