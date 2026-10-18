@@ -1,0 +1,1148 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>银行 AI 智能体 · 决策剧场</title>
+<!-- 单文件前端：无 CDN、无框架、无构建工具，断网也能整页打开演示。
+     两条后端文本渲染路径：innerHTML 模板里的每个后端值都过 escapeHtml；
+     textContent 路径由浏览器按纯文本处理，本身不解析 HTML，无需转义。 -->
+<style>
+  :root {
+    --green: #16a34a;
+    --amber: #d97706;
+    --red: #dc2626;
+    --bg: #0d1117;
+    --bg-2: #10161f;
+    --panel: #161b22;
+    --panel-2: #1b2230;
+    --line: #2a3441;
+    --text: #e6edf3;
+    --muted: #8c9bad;
+    --blue: #388bfd;
+    --lv: var(--muted);
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body { height: 100%; margin: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font: 14px/1.65 "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Segoe UI", system-ui, sans-serif;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .topbar {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 18px;
+    border-bottom: 1px solid var(--line);
+    background: var(--bg-2);
+    flex: 0 0 auto;
+  }
+  .topbar h1 { font-size: 16px; margin: 0; letter-spacing: .5px; }
+  .topbar .tagline { color: var(--muted); font-size: 12px; }
+  .topbar .spacer { flex: 1; }
+  .lamps { display: flex; gap: 8px; }
+  .lamp {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    color: var(--muted);
+    padding: 3px 9px;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+  }
+  .lamp .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
+
+  .stage {
+    flex: 1 1 auto;
+    min-height: 0;
+    display: grid;
+    grid-template-columns: 55fr 45fr;
+  }
+
+  .col-left {
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    border-right: 1px solid var(--line);
+  }
+  .col-right {
+    min-width: 0;
+    overflow-y: auto;
+    padding: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    background: var(--bg-2);
+  }
+
+  .chat-log {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .bubble { max-width: 88%; border-radius: 10px; padding: 9px 12px; border: 1px solid var(--line); }
+  .bubble-user { align-self: flex-end; background: #1f6feb22; border-color: #1f6feb66; }
+  .bubble-agent { align-self: flex-start; background: var(--panel-2); }
+  .bubble-sys { align-self: flex-start; background: #d977061a; border-color: #d9770655; }
+  .bubble-role { font-size: 11px; color: var(--muted); margin-bottom: 3px; }
+  .bubble-body { white-space: pre-wrap; word-break: break-word; }
+  .bubble-tag { font-size: 11px; color: var(--muted); margin-top: 4px; }
+
+  .caps { flex: 0 0 auto; padding: 0 16px 6px; }
+  .caps-title { font-size: 11px; color: var(--muted); margin-bottom: 4px; }
+  .cap-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+  .cap-chip {
+    font-size: 11px;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    padding: 2px 7px;
+    color: var(--muted);
+  }
+
+  .composer {
+    flex: 0 0 auto;
+    display: flex;
+    gap: 8px;
+    padding: 12px 16px;
+    border-top: 1px solid var(--line);
+    background: var(--bg-2);
+  }
+  #chat-input {
+    flex: 1 1 auto;
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    color: var(--text);
+    padding: 9px 12px;
+    font-size: 14px;
+    outline: none;
+  }
+  #chat-input:focus { border-color: var(--blue); }
+
+  .btn {
+    border: 1px solid var(--line);
+    background: var(--panel-2);
+    color: var(--text);
+    border-radius: 8px;
+    padding: 8px 14px;
+    font-size: 13px;
+    cursor: pointer;
+  }
+  .btn:disabled { opacity: .45; cursor: not-allowed; }
+  .btn-green { border-color: var(--green); color: var(--green); }
+  .btn-amber { border-color: var(--amber); color: var(--amber); font-weight: 600; }
+  .btn-red { border-color: var(--red); color: var(--red); }
+  .btn-ghost { background: transparent; }
+  .btn-mini { padding: 3px 9px; font-size: 11px; }
+
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-left: 3px solid var(--lv);
+    border-radius: 10px;
+    overflow: hidden;
+  }
+  .panel-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 9px 12px;
+    border-bottom: 1px solid var(--line);
+    background: var(--panel-2);
+  }
+  .panel-head h2 { font-size: 13px; margin: 0; letter-spacing: .5px; }
+  .panel-head .spacer { flex: 1; }
+  .panel-badge { font-size: 11px; color: var(--muted); }
+  .panel-body { padding: 10px 12px; font-size: 13px; }
+  .panel-body:empty::after { content: "等待事件…"; color: var(--muted); font-size: 12px; }
+
+  .lv-green { --lv: var(--green); }
+  .lv-amber { --lv: var(--amber); }
+  .lv-red { --lv: var(--red); }
+  .lv-unknown { --lv: var(--muted); }
+
+  @keyframes flash {
+    0% { background: #388bfd33; }
+    100% { background: var(--panel); }
+  }
+  .panel.flash .panel-body { animation: flash 480ms ease-out; }
+
+  .kv { display: flex; gap: 8px; padding: 3px 0; border-bottom: 1px dashed #223; }
+  .kv:last-child { border-bottom: none; }
+  .kv-key { flex: 0 0 76px; color: var(--muted); }
+  .kv-val { flex: 1 1 auto; word-break: break-word; }
+  .kv-val.mono { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12px; }
+  .slot-grid { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+  .slot {
+    font-size: 12px;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    padding: 2px 7px;
+  }
+  .slot b { color: var(--blue); font-weight: 600; }
+  .warn { color: var(--amber); }
+
+  .lamp-big {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--lv);
+  }
+  .lamp-big .bulb {
+    width: 16px; height: 16px; border-radius: 50%;
+    background: var(--lv);
+    box-shadow: 0 0 10px var(--lv);
+  }
+
+  .plan-list { list-style: none; margin: 0; padding: 0; }
+  .plan-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 5px 0;
+    border-bottom: 1px dashed #223;
+  }
+  .plan-item:last-child { border-bottom: none; }
+  .plan-node { font-family: ui-monospace, Menlo, Consolas, monospace; color: var(--muted); flex: 0 0 34px; }
+  .plan-tool { flex: 1 1 auto; }
+  .plan-status { font-size: 11px; color: var(--muted); }
+
+  .audit-list { display: flex; flex-direction: column; gap: 3px; max-height: 230px; overflow-y: auto; }
+  .audit-row {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    font-family: ui-monospace, Menlo, Consolas, monospace;
+    font-size: 11.5px;
+    padding: 2px 0;
+  }
+  .audit-seq { color: var(--muted); flex: 0 0 46px; }
+  .audit-type { flex: 1 1 auto; color: var(--text); word-break: break-all; }
+  .audit-hash { color: var(--blue); flex: 0 0 auto; }
+  .audit-head { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; }
+  .audit-head .spacer { flex: 1; }
+
+  .confirm-card {
+    align-self: flex-start;
+    width: 100%;
+    max-width: 92%;
+    border: 1px solid var(--amber);
+    border-left-width: 4px;
+    border-radius: 10px;
+    padding: 12px;
+    background: #d9770612;
+  }
+  .confirm-head { font-weight: 700; color: var(--amber); margin-bottom: 8px; font-size: 14px; }
+  .confirm-row { display: flex; gap: 10px; padding: 4px 0; border-bottom: 1px dashed #d9770644; }
+  .confirm-row:last-of-type { border-bottom: none; }
+  .confirm-key { flex: 0 0 108px; color: var(--muted); font-size: 12px; }
+  .confirm-val { flex: 1 1 auto; word-break: break-all; }
+  .confirm-amount { font-weight: 700; color: var(--amber); }
+  .confirm-payee { font-weight: 700; color: var(--text); }
+  .confirm-action { color: var(--text); }
+  .confirm-actions { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+  .confirm-timer { font-size: 11px; color: var(--muted); margin-top: 6px; }
+
+  .factor-list { list-style: none; margin: 0 0 8px; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; }
+  .factor-item {
+    font-size: 12px;
+    border: 1px solid var(--red);
+    color: var(--red);
+    border-radius: 6px;
+    padding: 2px 8px;
+  }
+  .factor-input {
+    width: 100%;
+    background: var(--panel-2);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    color: var(--text);
+    padding: 8px 10px;
+    font-size: 13px;
+    outline: none;
+    margin-bottom: 8px;
+  }
+  .factor-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+
+  .side-actions { display: flex; gap: 6px; }
+</style>
+</head>
+<body>
+<header class="topbar">
+  <h1>银行 AI 智能体 · 决策剧场</h1>
+  <span class="tagline">左栏对话，右栏实时展示意图、计划、权限灯、多因子与审计链</span>
+  <span class="spacer"></span>
+  <div class="lamps" aria-label="三色图例">
+    <span class="lamp"><span class="dot" style="background: var(--green)"></span>绿灯直接放行</span>
+    <span class="lamp"><span class="dot" style="background: var(--amber)"></span>黄灯需确认</span>
+    <span class="lamp"><span class="dot" style="background: var(--red)"></span>红灯需多因子</span>
+  </div>
+</header>
+
+<main class="stage">
+  <section class="col-left">
+    <div id="chat-log" class="chat-log" role="log" aria-live="polite"></div>
+
+    <div class="caps">
+      <div class="caps-title">我能做什么</div>
+      <div id="cap-list" class="cap-chips"><span class="cap-chip">工具清单加载中…</span></div>
+    </div>
+
+    <form id="chat-form" class="composer" autocomplete="off">
+      <input id="chat-input" type="text" maxlength="500" placeholder="例如：帮我给张三转 800 元" />
+      <button id="chat-send" class="btn btn-green" type="submit">发送</button>
+      <button id="chat-cancel" class="btn btn-red" type="button" disabled>中断</button>
+    </form>
+  </section>
+
+  <section class="col-right">
+    <section class="panel lv-unknown" id="panel-intent">
+      <div class="panel-head"><h2>意图</h2><span class="spacer"></span><span class="panel-badge" data-role="badge">等待</span></div>
+      <div class="panel-body" data-role="body"></div>
+    </section>
+
+    <section class="panel lv-unknown" id="panel-plan">
+      <div class="panel-head"><h2>计划</h2><span class="spacer"></span><span class="panel-badge" data-role="badge">0 个节点</span></div>
+      <div class="panel-body" data-role="body"></div>
+    </section>
+
+    <section class="panel lv-unknown" id="panel-policy">
+      <div class="panel-head"><h2>权限灯</h2><span class="spacer"></span><span class="panel-badge" data-role="badge">等待</span></div>
+      <div class="panel-body" data-role="body"></div>
+    </section>
+
+    <section class="panel lv-unknown" id="panel-factor">
+      <div class="panel-head"><h2>多因子验证</h2><span class="spacer"></span><span class="panel-badge" data-role="badge">未触发</span></div>
+      <div class="panel-body" data-role="body"></div>
+    </section>
+
+    <section class="panel lv-unknown" id="panel-audit">
+      <div class="panel-head"><h2>审计链</h2><span class="spacer"></span>
+        <div class="side-actions">
+          <button id="btn-audit-pull" class="btn btn-mini" type="button">拉取审计链</button>
+          <button id="btn-audit-verify" class="btn btn-mini" type="button">校验</button>
+        </div>
+        <span class="panel-badge" data-role="badge">0 条</span>
+      </div>
+      <div class="panel-body" data-role="body"></div>
+    </section>
+  </section>
+</main>
+
+<script>
+(function () {
+  'use strict';
+
+  /* ------------------------------------------------------------------ 常量 */
+  const API_CHAT = '/api/chat';
+  const API_CONFIRM = '/api/confirm';
+  const API_CANCEL = '/api/cancel';
+  const API_AUDIT = '/api/audit';
+  const API_AUDIT_VERIFY = '/api/audit/verify';
+  const API_TOOLS = '/api/tools';
+
+  /* 颜色由后端的 decision.level 决定，前端只做「等级 → 样式类」映射，不自己判色 */
+  const LEVEL_CLASS = { green: 'lv-green', yellow: 'lv-amber', red: 'lv-red' };
+  const LEVEL_LABEL = { green: '绿灯：直接放行', yellow: '黄灯：需要你确认', red: '红灯：需要多因子' };
+  const LEVEL_DOT = { green: '绿灯', yellow: '黄灯', red: '红灯' };
+  const LEVEL_DEFAULT = 'lv-unknown';
+
+  /* 仅用于把后端给的意图代号显示成人话，判定逻辑全在后端 */
+  const INTENT_LABEL = {
+    query_balance: '查余额',
+    transfer: '转账',
+    bill_analysis: '账单分析',
+    subscription: '订阅管理',
+    birthday_plan: '生日理财计划',
+    unknown: '未识别'
+  };
+
+  const AMOUNT_KEYS = ['amount_text', 'amount_yuan', 'amount', 'amount_fen'];
+  const PAYEE_KEYS = ['payee_name', 'payee_text', 'payee', 'recipient_name', 'counterparty'];
+  const NESTED_KEYS = ['action', 'params', 'detail', 'action_json', 'confirmation', 'context', 'slots'];
+
+  /* -------------------------------------------------------------- 运行状态 */
+  let sessionId = null;
+  let streaming = false;
+  let localSeq = 0;
+  let planNodes = [];
+  const auditIndex = new Map();
+  let auditCount = 0;
+
+  /* -------------------------------------------------------------- 基础工具 */
+  function $(id) {
+    return document.getElementById(id);
+  }
+
+  /* 所有来自后端的文本，进 innerHTML 模板前必过这里 */
+  function escapeHtml(value) {
+    if (value === null || value === undefined) { return ''; }
+    return String(value)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+
+  /* textContent 路径：浏览器不解析 HTML，纯字符串直出 */
+  function textOf(value) {
+    if (value === null || value === undefined) { return ''; }
+    if (typeof value === 'object') { return JSON.stringify(value); }
+    return String(value);
+  }
+
+  function setText(node, value) {
+    if (node) { node.textContent = textOf(value); }
+  }
+
+  function el(tag, className, text) {
+    const node = document.createElement(tag);
+    if (className) { node.className = className; }
+    if (text !== undefined) { node.textContent = textOf(text); }
+    return node;
+  }
+
+  /* 从事件 data 里取字段，命中返回 {key, value}，未命中返回空 */
+  function fieldInfo(data, keys) {
+    if (!data || typeof data !== 'object') { return { key: '', value: '' }; }
+    let i;
+    for (i = 0; i < keys.length; i += 1) {
+      const hit = data[keys[i]];
+      if (hit !== undefined && hit !== null && hit !== '') { return { key: keys[i], value: textOf(hit) }; }
+    }
+    for (let c = 0; c < NESTED_KEYS.length; c += 1) {
+      let box = data[NESTED_KEYS[c]];
+      if (typeof box === 'string') {
+        try { box = JSON.parse(box); } catch (err) { box = null; }
+      }
+      if (box && typeof box === 'object') {
+        for (i = 0; i < keys.length; i += 1) {
+          const nested = box[keys[i]];
+          if (nested !== undefined && nested !== null && nested !== '') {
+            return { key: keys[i], value: textOf(nested) };
+          }
+        }
+      }
+    }
+    return { key: '', value: '' };
+  }
+
+  function fieldVal(data, keys) {
+    return fieldInfo(data, keys).value;
+  }
+
+  function asList(value) {
+    if (value === null || value === undefined || value === '') { return []; }
+    if (Array.isArray(value)) { return value; }
+    return [textOf(value)];
+  }
+
+  function levelClass(level) {
+    const key = textOf(level).toLowerCase();
+    return LEVEL_CLASS[key] || LEVEL_DEFAULT;
+  }
+
+  function levelText(level) {
+    const key = textOf(level).toLowerCase();
+    return LEVEL_LABEL[key] || '未裁决';
+  }
+
+  function errorText(err) {
+    if (!err) { return '未知错误'; }
+    if (typeof err === 'string') { return err; }
+    return err.message ? err.message : String(err);
+  }
+
+  function panelOf(panelId) {
+    return $(panelId);
+  }
+
+  function panelBody(panelId) {
+    const panel = panelOf(panelId);
+    return panel ? panel.querySelector('[data-role="body"]') : null;
+  }
+
+  function panelBadge(panelId, text) {
+    const panel = panelOf(panelId);
+    if (!panel) { return; }
+    setText(panel.querySelector('[data-role="badge"]'), text);
+  }
+
+  function setPanelLevel(panelId, level) {
+    const panel = panelOf(panelId);
+    if (!panel) { return; }
+    panel.className = 'panel ' + levelClass(level);
+  }
+
+  /* 事件到达即刻渲染，100ms 内完成；这里用一次短闪回提示「这行刚被更新」 */
+  function flash(panelId) {
+    const panel = panelOf(panelId);
+    if (!panel) { return; }
+    panel.classList.remove('flash');
+    void panel.offsetWidth;
+    panel.classList.add('flash');
+  }
+
+  function kvRow(key, value, mono) {
+    const row = el('div', 'kv');
+    row.appendChild(el('span', 'kv-key', key));
+    row.appendChild(el('span', 'kv-val' + (mono ? ' mono' : ''), value));
+    return row;
+  }
+
+  /* ------------------------------------------------------------ 左栏：对话 */
+  function scrollChat() {
+    const log = $('chat-log');
+    if (log) { log.scrollTop = log.scrollHeight; }
+  }
+
+  function appendBubble(role, text, tag) {
+    const log = $('chat-log');
+    if (!log) { return null; }
+    const wrap = el('div', 'bubble bubble-' + role);
+    wrap.appendChild(el('div', 'bubble-role', role === 'user' ? '你' : (role === 'agent' ? '智能体' : '系统')));
+    wrap.appendChild(el('div', 'bubble-body', text));
+    if (tag) { wrap.appendChild(el('div', 'bubble-tag', tag)); }
+    log.appendChild(wrap);
+    scrollChat();
+    return wrap;
+  }
+
+  function appendNode(node) {
+    const log = $('chat-log');
+    if (!log) { return; }
+    log.appendChild(node);
+    scrollChat();
+  }
+
+  function resetTheater() {
+    planNodes = [];
+    ['panel-intent', 'panel-plan', 'panel-policy', 'panel-factor'].forEach(function (id) {
+      setPanelLevel(id, '');
+      const body = panelBody(id);
+      if (body) { body.replaceChildren(); }
+      panelBadge(id, '等待');
+    });
+    panelBadge('panel-plan', '0 个节点');
+  }
+
+  function setBusy(busy) {
+    streaming = busy;
+    const send = $('chat-send');
+    const cancel = $('chat-cancel');
+    if (send) { send.disabled = busy; }
+    if (cancel) { cancel.disabled = !(busy && sessionId); }
+  }
+
+  /* ------------------------------------------------------- SSE 手工解析 */
+  /* /api/chat 是 POST，浏览器内置的事件流对象不支持 POST，所以用 fetch 拿 ReadableStream 自己切包 */
+  async function pumpSse(response) {
+    if (!response.body || typeof response.body.getReader !== 'function') {
+      appendBubble('sys', '这个浏览器不支持流式响应（ReadableStream），请换 Chrome 或 Edge 再试。');
+      return;
+    }
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder('utf-8');
+    let buffer = '';
+    let carry = '';
+    for (;;) {
+      const chunk = await reader.read();
+      if (chunk.done) { break; }
+      carry += decoder.decode(chunk.value, { stream: true });
+      let piece = carry.split('\r\n').join('\n');
+      if (piece.charAt(piece.length - 1) === '\r') {
+        /* 末尾的 \r 可能是 \r\n 的前半截，留到下一块再归一化 */
+        carry = '\r';
+        piece = piece.slice(0, -1);
+      } else {
+        carry = '';
+      }
+      buffer += piece;
+      let cut = buffer.indexOf('\n\n');
+      while (cut !== -1) {
+        dispatchBlock(buffer.slice(0, cut));
+        buffer = buffer.slice(cut + 2);
+        cut = buffer.indexOf('\n\n');
+      }
+    }
+    carry += decoder.decode();
+    buffer += carry.split('\r\n').join('\n');
+    if (buffer.trim()) { dispatchBlock(buffer); }
+  }
+
+  /* 一个 SSE 块：event 行给事件名，data 行给 JSON */
+  function dispatchBlock(block) {
+    if (!block) { return; }
+    let name = '';
+    let rawData = '';
+    const lines = block.split('\n');
+    let i;
+    for (i = 0; i < lines.length; i += 1) {
+      const line = lines[i];
+      if (!line || line.charAt(0) === ':') { continue; }
+      const at = line.indexOf(':');
+      const field = at === -1 ? line : line.slice(0, at);
+      let value = at === -1 ? '' : line.slice(at + 1);
+      if (value.charAt(0) === ' ') { value = value.slice(1); }
+      if (field === 'event') {
+        name = value.trim();
+      } else if (field === 'data') {
+        rawData = rawData === '' ? value : rawData + '\n' + value;
+      }
+    }
+    if (!name && !rawData) { return; }
+    let data = {};
+    if (rawData) {
+      try {
+        data = JSON.parse(rawData);
+      } catch (err) {
+        data = { user_text: '收到一段无法解析的数据：' + rawData };
+      }
+    }
+    handleEvent(name, data);
+  }
+
+  function handleEvent(name, data) {
+    switch (name) {
+      case 'start': onStart(data); break;
+      case 'intent': renderIntent(data); break;
+      case 'trace': renderPlan(data); renderPolicy(data); renderAudit(fromEvent('policy.decided', data)); break;
+      case 'confirm': renderConfirm(data); renderAudit(fromEvent('confirm.requested', data)); break;
+      case 'factor': renderFactor(data); renderAudit(fromEvent('factor.required', data)); break;
+      case 'tool': renderToolResult(data); renderAudit(fromEvent('tool.done', data)); break;
+      case 'done': renderDone(data); renderAudit(fromEvent('plan.done', data)); break;
+      case 'error': renderError(data); renderAudit(fromEvent('request.failed', data)); break;
+      default: renderAudit(fromEvent('unknown.' + textOf(name), data)); break;
+    }
+  }
+
+  /* 事件统一入账：seq 与短哈希前 8 位，能拿到就显示，拿不到显示占位符 */
+  function fromEvent(eventType, data) {
+    const box = data && typeof data === 'object' ? data : {};
+    let seq = box.seq;
+    if (seq === undefined || seq === null || seq === '') { seq = box.audit_seq; }
+    if (seq === undefined || seq === null || seq === '') { seq = ++localSeq; }
+    return {
+      seq: textOf(seq),
+      event_type: eventType,
+      hash: fieldVal(box, ['hash', 'entry_hash', 'audit_hash']),
+      ts_ms: fieldVal(box, ['ts_ms'])
+    };
+  }
+
+  function shortHash(hash) {
+    const text = textOf(hash);
+    return text ? text.slice(0, 8) : '—';
+  }
+
+  function renderAudit(row) {
+    const host = panelBody('panel-audit');
+    if (!host) { return; }
+    if (!host.querySelector('.audit-list')) {
+      host.replaceChildren();
+      host.appendChild(el('div', 'audit-list'));
+    }
+    const list = host.querySelector('.audit-list');
+    const key = row.seq + '|' + row.event_type;
+    const known = auditIndex.get(key);
+    if (known) {
+      if (row.hash && !known.dataset.hash) {
+        known.dataset.hash = '1';
+        setText(known.querySelector('.audit-hash'), shortHash(row.hash));
+        known.querySelector('.audit-hash').title = textOf(row.hash);
+      }
+      return;
+    }
+    const node = el('div', 'audit-row');
+    if (row.hash) { node.dataset.hash = '1'; } else { node.dataset.hash = ''; }
+    /* 结构用 innerHTML，每个后端值都过 escapeHtml */
+    node.innerHTML =
+      '<span class="audit-seq">#' + escapeHtml(row.seq) + '</span>' +
+      '<span class="audit-type">' + escapeHtml(row.event_type) + '</span>' +
+      '<span class="audit-hash" title="' + escapeHtml(row.hash) + '">' + escapeHtml(shortHash(row.hash)) + '</span>';
+    list.appendChild(node);
+    list.scrollTop = list.scrollHeight;
+    auditIndex.set(key, node);
+    auditCount += 1;
+    panelBadge('panel-audit', auditCount + ' 条');
+    flash('panel-audit');
+  }
+
+  /* ------------------------------------------------------------ 各面板渲染 */
+  function renderIntent(data) {
+    const host = panelBody('panel-intent');
+    if (!host) { return; }
+    host.replaceChildren();
+    const intent = fieldVal(data, ['intent']);
+    host.appendChild(kvRow('意图', (INTENT_LABEL[intent] || '未识别') + '（' + intent + '）'));
+    const confidence = fieldVal(data, ['confidence']);
+    if (confidence) { host.appendChild(kvRow('置信度', confidence, true)); }
+    const missing = asList(data && data.missing);
+    if (missing.length) {
+      const row = kvRow('缺什么', missing.join('、'), false);
+      row.querySelector('.kv-val').className = 'kv-val warn';
+      host.appendChild(row);
+    }
+    const slots = data && data.slots && typeof data.slots === 'object' ? data.slots : null;
+    if (slots) {
+      const grid = el('div', 'slot-grid');
+      Object.keys(slots).forEach(function (key) {
+        const chip = el('span', 'slot');
+        chip.appendChild(el('b', null, key + '='));
+        chip.appendChild(document.createTextNode(textOf(slots[key])));
+        grid.appendChild(chip);
+      });
+      host.appendChild(grid);
+    }
+    panelBadge('panel-intent', intent || '已解析');
+    setPanelLevel('panel-intent', missing.length ? 'yellow' : 'green');
+    flash('panel-intent');
+  }
+
+  function planUpsert(data) {
+    const nodeId = fieldVal(data, ['node_id', 'id']) || ('n' + (planNodes.length + 1));
+    const tool = fieldVal(data, ['tool', 'tool_name']);
+    let node = null;
+    let i;
+    for (i = 0; i < planNodes.length; i += 1) {
+      if (planNodes[i].nodeId === nodeId) { node = planNodes[i]; }
+    }
+    if (!node) {
+      node = { nodeId: nodeId, tool: tool, status: '待执行', level: '' };
+      planNodes.push(node);
+    }
+    if (tool) { node.tool = tool; }
+    const level = fieldVal(data, ['level']);
+    if (level) { node.level = level; }
+    const ok = data && data.ok !== undefined ? data.ok : undefined;
+    if (ok === true) { node.status = '成功'; }
+    else if (ok === false) { node.status = '失败'; }
+    else if (data && typeof data.summary === 'string' && data.summary) { node.status = '已执行'; }
+    return node;
+  }
+
+  function renderPlan(data) {
+    planUpsert(data);
+    const host = panelBody('panel-plan');
+    if (!host) { return; }
+    host.replaceChildren();
+    const list = el('ul', 'plan-list');
+    planNodes.forEach(function (node) {
+      const item = el('li', 'plan-item ' + levelClass(node.level));
+      item.appendChild(el('span', 'plan-node', node.nodeId));
+      item.appendChild(el('span', 'plan-tool', node.tool));
+      item.appendChild(el('span', 'plan-status', node.status));
+      list.appendChild(item);
+    });
+    host.appendChild(list);
+    panelBadge('panel-plan', planNodes.length + ' 个节点');
+    const last = planNodes[planNodes.length - 1];
+    setPanelLevel('panel-plan', last ? last.level : '');
+    flash('panel-plan');
+  }
+
+  function renderPolicy(data) {
+    const host = panelBody('panel-policy');
+    if (!host) { return; }
+    const level = fieldVal(data, ['level', 'decision']);
+    host.replaceChildren();
+    const lamp = el('div', 'lamp-big');
+    lamp.appendChild(el('span', 'bulb'));
+    lamp.appendChild(document.createTextNode(levelText(level)));
+    host.appendChild(lamp);
+    host.appendChild(kvRow('节点', fieldVal(data, ['node_id', 'id']), true));
+    host.appendChild(kvRow('工具', fieldVal(data, ['tool', 'tool_name']), true));
+    const ruleId = fieldVal(data, ['rule_id', 'rule']);
+    if (ruleId) { host.appendChild(kvRow('规则', ruleId, true)); }
+    host.appendChild(kvRow('理由', fieldVal(data, ['reason_text', 'reason'])));
+    panelBadge('panel-policy', LEVEL_DOT[textOf(level).toLowerCase()] || '已裁决');
+    setPanelLevel('panel-policy', level);
+    flash('panel-policy');
+  }
+
+  function factorValue() {
+    const input = document.querySelector('#panel-factor .factor-input');
+    return input ? input.value.trim() : '';
+  }
+
+  function renderConfirm(data) {
+    const cid = fieldVal(data, ['confirmation_id', 'id']);
+    const actionText = fieldVal(data, ['action_text', 'action', 'summary']);
+    const expiresRaw = fieldVal(data, ['expires_in_s', 'expires_in']);
+    const amountInfo = fieldInfo(data, AMOUNT_KEYS);
+    const payeeInfo = fieldInfo(data, PAYEE_KEYS);
+    const amountUnit = amountInfo.key.indexOf('fen') !== -1 ? ' 分' : '';
+    /* 金额与收款人必须显式出现在卡片和按钮上：拿不到原文就指向操作说明全文，不做二次计算 */
+    const amountText = amountInfo.value ? amountInfo.value + amountUnit : '见操作说明全文';
+    const payeeText = payeeInfo.value ? payeeInfo.value : '见操作说明全文';
+
+    const card = el('div', 'confirm-card');
+    const rows = [
+      ['金额（后端原文）', amountText, 'confirm-amount'],
+      ['收款人（后端原文）', payeeText, 'confirm-payee'],
+      ['操作说明（全文）', actionText, 'confirm-action'],
+      ['有效期', expiresRaw ? expiresRaw + ' 秒' : '以后端为准', 'confirm-expire']
+    ];
+    rows.forEach(function (row) {
+      const line = el('div', 'confirm-row');
+      line.appendChild(el('span', 'confirm-key', row[0]));
+      line.appendChild(el('span', 'confirm-val ' + row[2], row[1]));
+      card.appendChild(line);
+    });
+
+    const actions = el('div', 'confirm-actions');
+    const okBtn = el('button', 'btn btn-green', '确认：' + amountText + ' → ' + payeeText);
+    okBtn.type = 'button';
+    okBtn.addEventListener('click', function () {
+      confirmAction(cid, true, factorValue());
+    });
+    const noBtn = el('button', 'btn btn-red', '拒绝');
+    noBtn.type = 'button';
+    noBtn.addEventListener('click', function () {
+      confirmAction(cid, false, null);
+    });
+    actions.appendChild(okBtn);
+    actions.appendChild(noBtn);
+    card.appendChild(actions);
+
+    const timer = el('div', 'confirm-timer', cid ? '确认号 ' + cid : '');
+    card.appendChild(timer);
+    appendNode(card);
+
+    let left = parseInt(expiresRaw, 10);
+    if (left > 0) {
+      const tick = setInterval(function () {
+        left -= 1;
+        timer.textContent = '确认号 ' + cid + ' · 剩余 ' + Math.max(left, 0) + ' 秒（到期以后端为准）';
+        if (left <= 0) {
+          clearInterval(tick);
+          okBtn.disabled = true;
+          noBtn.disabled = true;
+        }
+      }, 1000);
+    }
+
+    panelBadge('panel-factor', '等待确认');
+    flash('panel-factor');
+  }
+
+  function renderFactor(data) {
+    const cid = fieldVal(data, ['confirmation_id', 'id']);
+    const required = asList(fieldVal(data, ['required', 'required_factors', 'factors']));
+    const host = panelBody('panel-factor');
+    if (!host) { return; }
+    host.replaceChildren();
+    host.appendChild(el('div', 'field-label', '这一步需要多因子验证'));
+    const list = el('ul', 'factor-list');
+    required.forEach(function (item) {
+      list.appendChild(el('li', 'factor-item', textOf(item)));
+    });
+    host.appendChild(list);
+
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.className = 'factor-input';
+    input.placeholder = '输入人脸 / 短信 / U盾 的验证结果';
+    host.appendChild(input);
+
+    const actions = el('div', 'factor-actions');
+    const okBtn = el('button', 'btn btn-red', '提交验证结果');
+    okBtn.type = 'button';
+    okBtn.addEventListener('click', function () {
+      const value = input.value.trim();
+      if (!value) {
+        appendBubble('sys', '请先填写验证结果再提交。');
+        return;
+      }
+      confirmAction(cid, true, value);
+    });
+    const noBtn = el('button', 'btn btn-ghost', '拒绝并终止');
+    noBtn.type = 'button';
+    noBtn.addEventListener('click', function () {
+      confirmAction(cid, false, null);
+    });
+    actions.appendChild(okBtn);
+    actions.appendChild(noBtn);
+    host.appendChild(actions);
+
+    panelBadge('panel-factor', required.length ? required.join('/') : '需要验证');
+    setPanelLevel('panel-factor', 'red');
+    flash('panel-factor');
+  }
+
+  function renderToolResult(data) {
+    const nodeId = fieldVal(data, ['node_id', 'id']);
+    const ok = data && data.ok === true;
+    const summary = fieldVal(data, ['summary', 'reason_text', 'error_text']);
+    appendBubble(ok ? 'agent' : 'sys', summary || (ok ? '已完成。' : '这一步没有成功。'),
+      nodeId ? nodeId : '');
+    renderPlan(data);
+  }
+
+  function renderDone(data) {
+    const summary = fieldVal(data, ['summary']);
+    const balance = fieldVal(data, ['balance_after_fen']);
+    const lines = [summary || '本次请求处理完毕。'];
+    if (balance) { lines.push('交易后余额（后端原文）：' + balance); }
+    appendBubble('agent', lines.join('\n'), 'done');
+    ['panel-intent', 'panel-plan', 'panel-policy'].forEach(function (id) {
+      panelBadge(id, '已完成');
+    });
+    setPanelLevel('panel-policy', 'green');
+  }
+
+  function renderError(data) {
+    const code = fieldVal(data, ['code']);
+    const userText = fieldVal(data, ['user_text', 'message']) || '系统开小差了，已经记录。';
+    appendBubble('sys', userText, code ? 'code=' + code : '');
+    setPanelLevel('panel-policy', 'red');
+    panelBadge('panel-policy', '已拦截');
+    setBusy(false);
+  }
+
+  function onStart(data) {
+    const sid = fieldVal(data, ['session_id', 'id']);
+    if (sid) { sessionId = sid; }
+    panelBadge('panel-audit', auditCount + ' 条');
+    appendBubble('sys', '已建立会话：' + (sid || '未回传 session_id'), 'start');
+    setBusy(streaming);
+    renderAudit(fromEvent('session.start', data));
+  }
+
+  /* --------------------------------------------------------------- 网络动作 */
+  async function reportHttpError(response) {
+    let code = '';
+    let userText = '';
+    try {
+      const text = await response.text();
+      try {
+        const json = JSON.parse(text);
+        code = textOf(json.code);
+        userText = textOf(json.user_text);
+      } catch (err) {
+        userText = text;
+      }
+    } catch (err) {
+      userText = '';
+    }
+    if (!userText) {
+      userText = response.status === 429 ? '请求太频繁，请稍后再试。'
+        : (response.status >= 500 ? '系统开小差了，已经记录。' : '请求没通过，请换个说法再试。');
+    }
+    appendBubble('sys', userText, code ? ('HTTP ' + response.status + ' · code=' + code) : ('HTTP ' + response.status));
+  }
+
+  async function sendMessage() {
+    const input = $('chat-input');
+    if (!input || streaming) { return; }
+    const text = input.value.trim();
+    if (!text) {
+      appendBubble('sys', '请先输入一句话再发送。');
+      return;
+    }
+    appendBubble('user', text);
+    input.value = '';
+    resetTheater();
+    setBusy(true);
+    try {
+      const response = await fetch(API_CHAT, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream' },
+        body: JSON.stringify({ session_id: sessionId, text: text })
+      });
+      if (!response.ok) {
+        await reportHttpError(response);
+        return;
+      }
+      await pumpSse(response);
+    } catch (err) {
+      appendBubble('sys', '连不上后端：' + errorText(err) + '。请确认服务已启动，然后重试。');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function confirmAction(confirmationId, approve, factor) {
+    if (!confirmationId) {
+      appendBubble('sys', '这条确认没有确认号，无法提交。');
+      return;
+    }
+    if (!sessionId) {
+      appendBubble('sys', '会话还没建立，无法提交确认。');
+      return;
+    }
+    const body = {
+      session_id: sessionId,
+      confirmation_id: confirmationId,
+      approve: approve === true,
+      factor: factor ? String(factor) : null
+    };
+    try {
+      const response = await fetch(API_CONFIRM, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      });
+      if (!response.ok) {
+        await reportHttpError(response);
+        return;
+      }
+      appendBubble('sys', approve ? '已提交确认，后续步骤继续执行。' : '已拒绝，当前节点标记为跳过。');
+    } catch (err) {
+      appendBubble('sys', '提交确认失败：' + errorText(err) + '。请重试。');
+    }
+  }
+
+  async function cancelSession() {
+    if (!sessionId) {
+      appendBubble('sys', '当前没有进行中的会话。');
+      return;
+    }
+    try {
+      const response = await fetch(API_CANCEL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ session_id: sessionId })
+      });
+      if (!response.ok) {
+        await reportHttpError(response);
+        return;
+      }
+      appendBubble('sys', '已发出中断请求，后端会释放未完成的占位。');
+    } catch (err) {
+      appendBubble('sys', '中断失败：' + errorText(err) + '。请重试。');
+    }
+  }
+
+  async function pullAudit() {
+    if (!sessionId) {
+      appendBubble('sys', '还没有会话号，先发一句话再拉审计链。');
+      return;
+    }
+    try {
+      const response = await fetch(API_AUDIT + '?session_id=' + encodeURIComponent(sessionId));
+      if (!response.ok) {
+        await reportHttpError(response);
+        return;
+      }
+      const json = await response.json();
+      let rows = [];
+      if (Array.isArray(json)) { rows = json; }
+      else if (json && Array.isArray(json.items)) { rows = json.items; }
+      else if (json && Array.isArray(json.rows)) { rows = json.rows; }
+      rows.forEach(function (row) {
+        const box = row && typeof row === 'object' ? row : { event_type: textOf(row) };
+        renderAudit({
+          seq: fieldVal(box, ['seq']),
+          event_type: fieldVal(box, ['event_type', 'type', 'event']),
+          hash: fieldVal(box, ['hash', 'entry_hash']),
+          ts_ms: fieldVal(box, ['ts_ms'])
+        });
+      });
+      if (!rows.length) {
+        appendBubble('sys', '后端没有返回审计条目。');
+      }
+    } catch (err) {
+      appendBubble('sys', '拉取审计链失败：' + errorText(err) + '。请重试。');
+    }
+  }
+
+  async function verifyAudit() {
+    try {
+      const response = await fetch(API_AUDIT_VERIFY);
+      if (!response.ok) {
+        await reportHttpError(response);
+        return;
+      }
+      const json = await response.json();
+      const ok = json && json.ok === true;
+      appendBubble('sys',
+        (ok ? '审计链校验通过。' : '审计链校验没通过。') +
+        ' 条目数 ' + textOf(json && json.count) +
+        '，链头 ' + shortHash(json && json.head));
+    } catch (err) {
+      appendBubble('sys', '校验失败：' + errorText(err) + '。请重试。');
+    }
+  }
+
+  async function loadTools() {
+    const host = $('cap-list');
+    if (!host) { return; }
+    try {
+      const response = await fetch(API_TOOLS);
+      if (!response.ok) {
+        host.replaceChildren(el('span', 'cap-chip', '工具清单暂时拿不到'));
+        return;
+      }
+      const json = await response.json();
+      let rows = [];
+      if (Array.isArray(json)) { rows = json; }
+      else if (json && Array.isArray(json.tools)) { rows = json.tools; }
+      host.replaceChildren();
+      if (!rows.length) {
+        host.appendChild(el('span', 'cap-chip', '工具清单为空'));
+        return;
+      }
+      rows.forEach(function (row) {
+        const box = row && typeof row === 'object' ? row : { name: textOf(row) };
+        const name = fieldVal(box, ['name', 'tool', 'title']);
+        const desc = fieldVal(box, ['description', 'desc', 'summary']);
+        const chip = el('span', 'cap-chip');
+        chip.title = desc;
+        chip.textContent = desc ? (name + '：' + desc) : name;
+        host.appendChild(chip);
+      });
+    } catch (err) {
+      host.replaceChildren(el('span', 'cap-chip', '工具清单暂时拿不到'));
+    }
+  }
+
+  /* ------------------------------------------------------------------ 启动 */
+  function boot() {
+    const form = $('chat-form');
+    if (form) {
+      form.addEventListener('submit', function (ev) {
+        ev.preventDefault();
+        sendMessage();
+      });
+    }
+    const cancel = $('chat-cancel');
+    if (cancel) {
+      cancel.addEventListener('click', function () { cancelSession(); });
+    }
+    const pull = $('btn-audit-pull');
+    if (pull) {
+      pull.addEventListener('click', function () { pullAudit(); });
+    }
+    const verify = $('btn-audit-verify');
+    if (verify) {
+      verify.addEventListener('click', function () { verifyAudit(); });
+    }
+    appendBubble('sys', '我在。说一句人话就行，比如「帮我给张三转 800 元」，右栏会同步亮灯。');
+    loadTools();
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', boot);
+  } else {
+    boot();
+  }
+}());
+</script>
+</body>
+</html>
