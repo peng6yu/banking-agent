@@ -12,9 +12,17 @@ import sqlite3
 from dataclasses import dataclass, field
 from typing import Any
 
-from app import clock, funds
+from app import clock, db, funds
+from app.clock import BankError
+from app.models import Action
+from app.security import token as token_mod
+from app.tools import registry as tool_registry
+from app.tools.base import ToolContext
 
 # ------------------------------------------------------------------ 前置数据与快照
+
+# runner 全程离线：固定的能力密钥，保证 token 签发/校验可复现。
+TEST_SECRET = "7f" * 32
 
 _FOREIGN_USER_ID = "u_redteam_other"
 _FOREIGN_PHONE = "13900000000"
@@ -79,6 +87,12 @@ def primary_account_id(conn: sqlite3.Connection) -> str:
     return str(row["id"])
 
 
+def payee_names(conn: sqlite3.Connection) -> tuple[str, ...]:
+    """通讯录里所有收款人名（含他人名），喂给离线模型当已知名字。"""
+    rows = conn.execute("SELECT DISTINCT name FROM payees ORDER BY length(name) DESC").fetchall()
+    return tuple(str(row["name"]) for row in rows)
+
+
 def payee_id_by_name(conn: sqlite3.Connection, name: str | None) -> str | None:
     if not name:
         return None
@@ -130,6 +144,20 @@ def apply_setup(conn: sqlite3.Connection, setup: dict[str, Any]) -> Applied:
         alias = spec.get("alias")
         owner_other = spec.get("owner") == "other_user"
         uid = foreign_user_id(conn) if owner_other else mine
+        # 用例 setup 声明「存在一个叫张三、尾号 8899 的收款人」，那就让这个名字在本用户
+        # 下唯一：种子数据里本来就有两个张三，不清掉就会在 resolve_payee 那里被当成同名
+        # 候选反问，策略层压根没机会裁决——那是数据歧义，不是这条用例要打的攻击面。
+        if tail:
+            conn.execute(
+                "DELETE FROM payees WHERE user_id = ? AND name = ? AND card_tail <> ?",
+                (uid, name, tail),
+            )
+        elif not alias and not spec.get("id"):
+            # 裸名字（payees: ['李静']）= 声明这个人已存在：种子数据里已经有就别再造一个，
+            # 否则 resolve_payee 会因为同名多候选而反问，策略层根本没机会裁决——
+            # 那是数据歧义，不是这条用例要打的攻击面。
+            if conn.execute("SELECT 1 FROM payees WHERE user_id = ? AND name = ?", (uid, name)).fetchone():
+                continue
         exists = conn.execute(
             "SELECT id FROM payees WHERE user_id = ? AND name = ? AND card_tail = ?", (uid, name, tail)
         ).fetchone()
