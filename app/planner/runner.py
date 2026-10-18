@@ -3,7 +3,6 @@ from __future__ import annotations
 import logging
 from typing import Any, Final
 
-from app import funds
 from app.clock import BankError, TokenMismatch
 from app.models import Action, Decision, ToolResult
 from app.planner.events import emit_event, summarize
@@ -23,8 +22,7 @@ from app.tools import registry as tools
 
 log = logging.getLogger(__name__)
 
-# transfer 工具只做第一阶段建 hold；docs/06 6.3 要求立刻 commit，这里补第二阶段
-SETTLE_TOOLS: Final[frozenset[str]] = frozenset({"transfer"})
+# 工具层已经把两阶段资金走完（transfer 内部 commit），planner 不碰 app/funds
 DISAMBIGUATE_LIMIT: Final[int] = 1
 
 async def execute_node(
@@ -60,7 +58,7 @@ async def execute_node(
 
 
 async def _settle(state: RunState, node: Any, rec: NodeRec, result: ToolResult, emit: Emit) -> str:
-    """执行后处理：收款人歧义闸门 → 补第二阶段扣款 → 记账 → 发 tool 事件。"""
+    """执行后处理：收款人歧义闸门 → 记账 → 发 tool 事件。"""
     if not result.ok:
         rec.error_code = result.error_code
         persist_node(state, rec, "failed")
@@ -68,7 +66,7 @@ async def _settle(state: RunState, node: Any, rec: NodeRec, result: ToolResult, 
         await emit_event(emit, "tool", {"node_id": node.id, "ok": False, "summary": summary, "error_code": result.error_code})
         await emit_event(emit, "error", {"code": result.error_code or "TOOL_FAILED", "user_text": summary})
         return CONTINUE
-    data = _commit_hold(state, node, result)
+    data = dict(result.data)
     question = _payee_gate(node, data)
     if question is not None:
         state.question = question
@@ -85,25 +83,6 @@ async def _settle(state: RunState, node: Any, rec: NodeRec, result: ToolResult, 
     persist_node(state, rec, "done")
     await emit_event(emit, "tool", {"node_id": node.id, "ok": True, "summary": rec.summary})
     return CONTINUE
-
-
-def _commit_hold(state: RunState, node: Any, result: ToolResult) -> dict[str, Any]:
-    """transfer 工具只做第一阶段建 hold；docs/06 6.3 要求立刻 commit，这里补第二阶段。"""
-    data = dict(result.data)
-    hold_id = data.get("hold_id")
-    if node.tool not in SETTLE_TOOLS or data.get("status") != "held" or not hold_id:
-        return data
-    try:
-        outcome = funds.commit(state.conn, str(hold_id))
-    except BankError as exc:
-        log.warning("executor.commit_failed hold=%s code=%s", hold_id, exc.code)
-        data["settle_error"] = exc.code
-        return data
-    data["status"] = "committed"
-    data["balance_after_fen"] = outcome.balance_after_fen
-    data["idempotent"] = outcome.idempotent
-    state.balance_after_fen = outcome.balance_after_fen
-    return data
 
 
 def _payee_gate(node: Any, data: dict[str, Any]) -> str | None:

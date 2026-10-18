@@ -15,8 +15,12 @@ import pytest
 
 from app import audit, db
 from app.llm import LLMResponse, ToolCall
+from app.models import Action
 from app.planner import dag as planner_dag
-from app.planner import executor, intent
+from app.planner import executor, intent, runner
+from app.security import token as token_mod
+from app.tools import registry
+from app.tools.base import ToolContext
 from scripts.seed import seed
 
 SECRET = "a" * 64
@@ -125,6 +129,19 @@ def audit_types() -> list[str]:
         return [row["event_type"] for row in conn.execute("SELECT event_type FROM audit_log ORDER BY seq")]
 
 
+def hold_statuses() -> list[str]:
+    with db.connect() as conn:
+        return [row["status"] for row in conn.execute("SELECT status FROM holds ORDER BY created_ms")]
+
+
+def debit_account() -> tuple[str, str]:
+    """(账户 id, 收款人 id)：真实种子库里 id 是随机生成的，这里按名字取。"""
+    with db.connect() as conn:
+        account = conn.execute("SELECT id FROM accounts WHERE type = 'debit' LIMIT 1").fetchone()
+        payee = conn.execute("SELECT id FROM payees WHERE name = '李静' LIMIT 1").fetchone()
+    return str(account["id"]), str(payee["id"])
+
+
 def test_intent_and_dag_follow_the_fixed_transfer_template(bank: Path) -> None:
     parsed = asyncio.run(intent.parse(TEXT, [], adapter=Scripted([transfer_call()])))
     assert parsed.intent == "transfer"
@@ -178,6 +195,8 @@ def test_confirmed_transfer_moves_money_and_extends_the_audit_chain(bank: Path) 
     assert "confirm.approved" in added
     assert "transfer.initiated" in added
     assert "transfer.committed" in added
+    # hold 已经是终态 committed：第二阶段是工具自己走完的，planner 没有再补一次。
+    assert hold_statuses() == ["committed"]
     with db.connect() as conn:
         assert audit.verify_chain(conn) is True
 
@@ -195,6 +214,30 @@ def test_rejected_confirmation_moves_no_money(bank: Path) -> None:
     assert "confirm.rejected" in audit_types()[len(before):]
     with db.connect() as conn:
         assert audit.verify_chain(conn) is True
+
+
+def test_transfer_tool_commits_inside_a_single_call(bank: Path) -> None:
+    """直接调 transfer 工具：一次调用就 committed，planner 不再补第二次扣款。"""
+    account_id, payee_id = debit_account()
+    params = {"payee_id": payee_id, "amount_fen": AMOUNT_FEN, "note": "十月房租"}
+    action = Action(tool="transfer", params=params, account_id=account_id, amount_fen=AMOUNT_FEN)
+    token = token_mod.issue(action, secret=SECRET)
+    with db.connect() as conn:
+        ctx = ToolContext(conn=conn, session_id=SESSION, node_id="n3", account_id=account_id, secret=SECRET)
+        result = registry.execute("transfer", params, token=token, ctx=ctx)
+    assert result.ok is True
+    assert result.data["status"] == "committed"
+    assert result.data["balance_after_fen"] == SEED_BALANCE_FEN - AMOUNT_FEN
+    assert hold_statuses() == ["committed"]
+    assert balance() == SEED_BALANCE_FEN - AMOUNT_FEN
+    assert len(agent_rows()) == 1
+
+
+def test_planner_never_reaches_into_the_funds_module() -> None:
+    """分层回归护栏：不可逆的 commit 只发生在工具层，planner 连 app.funds 都不 import。"""
+    source = Path(runner.__file__).read_text(encoding="utf-8")
+    assert "from app import funds" not in source
+    assert "funds.commit" not in source
 
 
 def test_events_never_leak_internals(bank: Path) -> None:

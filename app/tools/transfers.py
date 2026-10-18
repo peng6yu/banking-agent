@@ -10,10 +10,11 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any, Final
 
 from app import funds
-from app.clock import HoldExpired, InsufficientFunds
+from app.clock import BankError, HoldExpired, InsufficientFunds
 from app.models import ToolResult
 from app.money import fen_to_yuan_str
 from app.security import token as token_mod
@@ -29,16 +30,22 @@ from app.tools.base import (
     require_token,
 )
 
+log = logging.getLogger(__name__)
+
 MERCHANT_WHITELIST: Final[dict[str, str]] = {
     "flower_shop": "鲜花店",
     "cake_shop": "蛋糕店",
 }
 
+HELD_TEXT: Final[str] = "钱已经锁定，还没有扣款。"
+COMMITTED_TEXT: Final[str] = "钱已经转出去了。"
+UNSETTLED_TEXT: Final[str] = "钱已经锁定，但扣款没成功，稍后我会重试。"
+
 
 def transfer(
     ctx: ToolContext, params: dict[str, Any], token: str | None = None
 ) -> ToolResult:
-    """转账：第一阶段只建 hold，钱还扣着没动，等确认后才 commit。"""
+    """转账：一次调用把两阶段资金走完——建 hold 之后立刻 commit（docs/06 6.3）。"""
     require_token("transfer", params, token)
     account = primary_account(ctx.conn, ctx.account_id)
     payee_id = str(params.get("payee_id", ""))
@@ -57,7 +64,8 @@ def transfer(
         )
     except InsufficientFunds as exc:
         return _insufficient(exc)
-    return ok_result(
+    return _settle_transfer(
+        ctx,
         {
             "hold_id": hold.hold_id,
             "status": hold.status,
@@ -67,9 +75,30 @@ def transfer(
             "payee_name": payee_name(ctx.conn, payee_id),
             "expires_ms": hold.expires_ms,
             "idempotent": bool(hold.reused),
-            "message": "钱已经锁定，等你确认之后才会真正转出去。",
-        }
+            "message": HELD_TEXT,
+        },
     )
+
+
+def _settle_transfer(ctx: ToolContext, data: dict[str, Any]) -> ToolResult:
+    """第二阶段：立刻 commit，让 transfer 一次调用就把两阶段资金走完。
+
+    不可逆的 commit 必须留在工具层：planner 只消费返回值，不 import app.funds。
+    commit 失败不往上抛，把 settle_error 塞进 data，钱仍锁在 hold 里等释放。
+    """
+    hold_id = str(data["hold_id"])
+    try:
+        outcome = funds.commit(ctx.conn, hold_id)
+    except BankError as exc:
+        log.warning("transfer.commit_failed hold=%s code=%s", hold_id, exc.code)
+        data["settle_error"] = exc.code
+        data["message"] = UNSETTLED_TEXT
+        return ok_result(data)
+    data["status"] = "committed"
+    data["balance_after_fen"] = int(outcome.balance_after_fen)
+    data["idempotent"] = bool(outcome.idempotent)
+    data["message"] = COMMITTED_TEXT
+    return ok_result(data)
 
 
 def reserve_funds(
