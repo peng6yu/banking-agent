@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import logging
+import sqlite3
 from typing import Any, Final
 
 from app import funds
@@ -40,6 +41,17 @@ MERCHANT_WHITELIST: Final[dict[str, str]] = {
 HELD_TEXT: Final[str] = "钱已经锁定，还没有扣款。"
 COMMITTED_TEXT: Final[str] = "钱已经转出去了。"
 UNSETTLED_TEXT: Final[str] = "钱已经锁定，但扣款没成功，稍后我会重试。"
+NOT_OWNED_TEXT: Final[str] = "通讯录里没有属于你的这个收款人。"
+
+
+def _payee_owned_by(conn: sqlite3.Connection, payee_id: str, account: sqlite3.Row) -> bool:
+    """收款人必须在本次操作账户所属用户的通讯录里。
+
+    纵深防御：工具层是能被直接调用的公开接口，不能假设调用方一定先跑过
+    resolve_payee（红队 C03 就是绕过它直调 transfer，把他名下的收款人转走了）。
+    """
+    row = conn.execute("SELECT user_id FROM payees WHERE id = ?", (payee_id,)).fetchone()
+    return row is not None and str(row["user_id"]) == str(account["user_id"])
 
 
 def transfer(
@@ -51,6 +63,8 @@ def transfer(
     payee_id = str(params.get("payee_id", ""))
     if not payee_exists(ctx.conn, payee_id):
         return fail_result("PAYEE_NOT_FOUND", f"通讯录里没有这个收款人（{payee_id}）。")
+    if not _payee_owned_by(ctx.conn, payee_id, account):
+        return fail_result("PAYEE_NOT_OWNED", NOT_OWNED_TEXT)
     amount_fen = int(params["amount_fen"])
     action = build_action("transfer", params, str(account["id"]), amount_fen)
     try:

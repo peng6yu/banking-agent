@@ -6,6 +6,7 @@ holds/transactions 表，不再依赖 planner 补第二次扣款。
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 import pytest
@@ -80,6 +81,75 @@ def test_transfer_rejects_unknown_payee_and_insufficient_balance(ctx: ToolContex
     assert short.error_code == "INSUFFICIENT_FUNDS"
     assert short.data["short_fen"] == 2_000_000 - DEBIT_BALANCE
     assert _balance(ctx.conn) == DEBIT_BALANCE
+
+
+def _seed_foreign_payee(conn) -> str:
+    """在账本里放一个属于别人的收款人，复现红队 C03 的越权场景。"""
+    conn.execute(
+        "INSERT INTO users (id, name, phone, created_ms) VALUES (?, ?, ?, ?)",
+        ("u_other", "赵四", "13800000002", FROZEN_MS),
+    )
+    conn.execute(
+        "INSERT INTO payees (id, user_id, name, bank, card_tail, alias) VALUES (?, ?, ?, ?, ?, ?)",
+        ("p_other", "u_other", "李静", "工商银行", "9999", None),
+    )
+    return "p_other"
+
+
+def test_transfer_refuses_payee_owned_by_someone_else(ctx: ToolContext) -> None:
+    """纵深防御：绕开 resolve_payee 直调 transfer，也不能把他人的收款人转走。"""
+    payee_id = _seed_foreign_payee(ctx.conn)
+    holds_before = ctx.conn.execute("SELECT COUNT(*) AS n FROM holds").fetchone()["n"]
+    rows_before = ctx.conn.execute(
+        "SELECT COUNT(*) AS n FROM transactions WHERE hold_id IS NOT NULL"
+    ).fetchone()["n"]
+    params = _params("transfer", payee_id=payee_id, amount_fen=50_000)
+    result = registry.execute("transfer", params, token=_token("transfer", params), ctx=ctx)
+    assert result.ok is False
+    assert result.error_code == "PAYEE_NOT_OWNED"
+    assert result.error_text == "通讯录里没有属于你的这个收款人。"
+    assert "hold_id" not in result.data
+    assert _balance(ctx.conn) == DEBIT_BALANCE
+    assert ctx.conn.execute("SELECT COUNT(*) AS n FROM holds").fetchone()["n"] == holds_before
+    assert (
+        ctx.conn.execute(
+            "SELECT COUNT(*) AS n FROM transactions WHERE hold_id IS NOT NULL"
+        ).fetchone()["n"]
+        == rows_before
+    )
+
+
+def test_transfer_still_commits_for_payee_of_the_same_user(ctx: ToolContext) -> None:
+    """同一归属校验不能误伤：自己名下的收款人照常两阶段走完。"""
+    foreign = _seed_foreign_payee(ctx.conn)
+    denied = _params("transfer", payee_id=foreign, amount_fen=50_000)
+    registry.execute("transfer", denied, token=_token("transfer", denied), ctx=ctx)
+    params = _params("transfer", payee_id=PAYEE_LIJING, amount_fen=50_000)
+    result = registry.execute("transfer", params, token=_token("transfer", params), ctx=ctx)
+    assert result.ok is True
+    assert result.data["status"] == "committed"
+    assert result.data["payee_name"] == "李静"
+    assert _balance(ctx.conn) == DEBIT_BALANCE - 50_000
+    assert audit.verify_chain(ctx.conn) is True
+
+
+def test_cross_user_rejection_stays_on_the_audit_chain(ctx: ToolContext) -> None:
+    """越权尝试本身要留痕：tool.executed(ok=false) 带上错误码，链仍然可校验。"""
+    payee_id = _seed_foreign_payee(ctx.conn)
+    params = _params("transfer", payee_id=payee_id, amount_fen=50_000)
+    registry.execute("transfer", params, token=_token("transfer", params), ctx=ctx)
+    rows = ctx.conn.execute(
+        "SELECT event_type, payload_json FROM audit_log ORDER BY seq"
+    ).fetchall()
+    codes = [
+        json.loads(row["payload_json"]).get("error_code")
+        for row in rows
+        if row["event_type"] == "tool.executed"
+    ]
+    assert "PAYEE_NOT_OWNED" in codes
+    assert all(row["event_type"] in audit.EVENT_TYPES for row in rows)
+    assert "transfer.initiated" not in [row["event_type"] for row in rows]
+    assert audit.verify_chain(ctx.conn) is True
 
 
 def test_cancel_subscription_marks_row_and_audits(ctx: ToolContext) -> None:
