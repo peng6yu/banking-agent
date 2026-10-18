@@ -1,0 +1,16 @@
+# 银行 AI 智能体 · 依赖（锁死版本，禁止用 >= ）
+# Python 3.11 / 3.12（不要 3.14）
+#
+# 安装前确认版本可用：pip index versions fastapi
+# 若某个 == 版本拉不到，改成最近的补丁号并把新版本写回本文件
+
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+pydantic==2.10.4
+httpx==0.28.1
+pyyaml==6.0.2
+
+# 测试
+pytest==8.3.4
+pytest-asyncio==0.25.0
+pytest-cov==6.0.0

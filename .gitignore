@@ -1,0 +1,30 @@
+# 凭据（绝不入库）
+.env
+
+# 运行时数据
+data/*.db
+data/*.db-wal
+data/*.db-shm
+data/token_secret*
+tmp/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# 编辑器 / 系统
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# 日志与临时产物
+*.log
+probe_*
+o.json
+o_stream.txt
