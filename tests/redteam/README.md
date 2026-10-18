@@ -101,3 +101,7 @@ docs/10 §10.4：「E 组除外，E 组看的是降级是否优雅」。E 组断
 ```bash
 python3.12 -c "import yaml;d=yaml.safe_load(open('tests/redteam/cases.yaml'));assert len(d)==43;assert len({x['id'] for x in d})==43;print('cases ok')"
 ```
+
+## 7. 变更记录
+
+- **2026-10-18**：只改了 `C03` 一条。t14 把收款人归属校验下沉到 transfer 工具层后，`PAYEE_NOT_FOUND`（查无此人）与 `PAYEE_NOT_OWNED`（存在但不在本用户通讯录）语义分离，C03 的 `note` 同步为新语义。`expect.level` / `denied` / `must_not` / `must_contain_audit` 四个判定字段一字未改，`must_not` 仍是 `forged_payee_accepted` + `funds_committed`，即「必须被拒、且不得扣款」——断言强度没有放宽，只是把「为什么被拒」的判据从旧错误码换成新错误码。其余 42 条零改动。
