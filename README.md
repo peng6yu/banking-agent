@@ -59,21 +59,23 @@
 ## 5 分钟跑起来
 
 ```bash
-# 1. 依赖（必须 Python 3.11/3.12，不能用 3.14）
-python3.11 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
+# 0. 确认解释器（本机固定用系统 python3.12，已装好全部依赖）
+python3.12 --version
 
-# 2. 密钥（从本机已有配置抽取，不手抄）
+# 1. 密钥（从本机已有配置抽取，不手抄）
 bash setup_env.sh
 
-# 3. 建库 + 种子数据
+# 2. 建库 + 种子数据
 make seed
 
-# 4. 起服务
+# 3. 起服务
 make run
 # 打开 http://127.0.0.1:8000
 ```
+
+> 换机器时才需要装依赖：`python3.12 -m pip install fastapi uvicorn pydantic httpx pyyaml pytest`。
+> 本机 pypi 直连 DNS 不稳，**不要**建 venv 再 `pip install -r requirements.txt`，会失败。
+> 异步测试用 `asyncio.run()`，不依赖 pytest-asyncio。
 
 ## 常用命令
 

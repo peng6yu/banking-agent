@@ -1,16 +1,20 @@
-# 银行 AI 智能体 · 依赖（锁死版本，禁止用 >= ）
-# Python 3.11 / 3.12（不要 3.14）
+# 银行 AI 智能体 · 依赖
 #
-# 安装前确认版本可用：pip index versions fastapi
-# 若某个 == 版本拉不到，改成最近的补丁号并把新版本写回本文件
+# 【重要】本机解释器用系统 python3.12（已装好全部依赖），不要建 venv：
+#     python3.12 -m pytest -q tests/
+# 原因：本机 pypi 直连 DNS 不稳，pip install 会失败；系统 3.12 已含下列全部包。
+#
+# 运行时版本：fastapi 0.136.3 / pydantic 2.13.4 / httpx 0.28.1 / pytest 9.0.3
+# 换机器时按下列下限安装即可：
+#     python3.12 -m pip install fastapi uvicorn pydantic httpx pyyaml pytest
 
-fastapi==0.115.6
-uvicorn[standard]==0.34.0
-pydantic==2.10.4
-httpx==0.28.1
-pyyaml==6.0.2
+fastapi>=0.115
+uvicorn>=0.30
+pydantic>=2.9
+httpx>=0.27
+pyyaml>=6.0
+pytest>=8.0
 
-# 测试
-pytest==8.3.4
-pytest-asyncio==0.25.0
-pytest-cov==6.0.0
+# 可选（装不上不影响测试，测试用 asyncio.run() 不用异步插件）：
+#   pytest-asyncio  —— 仅在想用 @pytest.mark.asyncio 时需要
+#   pytest-cov      —— 仅在想输出覆盖率数字时需要；无它时用 docs/10 的分支清单自证

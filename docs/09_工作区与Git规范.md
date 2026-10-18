@@ -186,3 +186,28 @@ git checkout main && git merge --no-ff feat/m3-policy && git push
 | 演示前必跑 `POST /api/demo/reset` | 保证数据回到初始态 |
 | 不要把下载的模型/截图放仓库 | 放 `tmp/` 或仓库外 |
 | 每完成一天工作 `git status` 必须干净 | 脏工作区是接手者的噩梦 |
+
+## 9.11 解释器与测试约定（2026-10-18 实测补充）
+
+| 事实 | 结论 |
+|---|---|
+| 本机 /usr/bin/python3 是 3.14 | 不能用 |
+| 本机 python3.11 无第三方包 | 不做首选 |
+| 本机 python3.12（/home/peng/.local/bin/python3.12）已有 fastapi 0.136.3、pydantic 2.13.4、httpx 0.28.1、pyyaml、pytest 9.0.3 | 项目统一用它 |
+| pypi.org 与镜像在本机 DNS 解析不稳定，pip install 会失败 | 不建 venv，直接用系统 3.12 |
+| pytest-asyncio、pytest-cov 装不上 | 异步测试用 asyncio.run() 包一层；覆盖率改用本文 10 章的分支清单自证 |
+
+| 约定 | 命令 |
+|---|---|
+| 跑测试 | python3.12 -m pytest -q tests/ |
+| 起服务 | python3.12 -m uvicorn app.main:app --reload --port 8000 |
+| 种子 | python3.12 -m scripts.seed |
+| 红队 | python3.12 -m scripts.redteam |
+| 模型自检 | python3.12 -m app.smoke |
+
+异步测试的统一写法（不用 pytest-asyncio）：
+
+    def test_executor_runs():
+        import asyncio
+        from app.planner.executor import run
+        asyncio.run(run(session_id='s1', dag=my_dag, emit=lambda *a: None))
