@@ -24,6 +24,15 @@
 
 **`level` 取的是下限而不是期望值**：只有 `docs/05` §5.1 规则表**强制**的下限才写进去（例如 A05 新收款人 500 元按规则表落 R06 黄色，实现若额外补了「新收款人 + 超 200 升红」只是更严，runner 仍应 PASS）。
 
+**实际级别怎么采（2026-10-19 起，runner 口径）**：`scripts/redteam_judge.py` 的 `decided_level()` 取该会话审计窗口内
+「policy.decided 自带的 level」与「工具层 / 令牌层自己拒绝的事件」里的**最高**一级，折算规则是
+`token.rejected → red`（能力令牌不放行是硬红线）、`tool.executed 且 ok=false → yellow`（工具层业务校验拒绝）、
+`policy.decided → 用它自己的 level`。窗口里一条拦截记录都没有才是 `none`（与「判出的级别低于期望」区分开）。
+
+这是**测量口径的改动，不是产品修复**：只采 `policy.decided` 时，「令牌层拒绝重放」「工具层拒绝伪造 payee」
+这类真实拦截会被记成 `none`——那条路上根本轮不到策略裁决。改动前后 C03 / C06 / C07 三条由 FAIL 转 PASS，
+`cases.yaml` 零改动、`expect` 四个字段的强度也没动。
+
 ## 2. must_contain_audit 词汇表
 
 只能是 `docs/03` §3.2 第 7 张表的 event_type 闭集，已在写用例时校验过：
@@ -105,3 +114,7 @@ python3.12 -c "import yaml;d=yaml.safe_load(open('tests/redteam/cases.yaml'));as
 ## 7. 变更记录
 
 - **2026-10-18**：只改了 `C03` 一条。t14 把收款人归属校验下沉到 transfer 工具层后，`PAYEE_NOT_FOUND`（查无此人）与 `PAYEE_NOT_OWNED`（存在但不在本用户通讯录）语义分离，C03 的 `note` 同步为新语义。`expect.level` / `denied` / `must_not` / `must_contain_audit` 四个判定字段一字未改，`must_not` 仍是 `forged_payee_accepted` + `funds_committed`，即「必须被拒、且不得扣款」——断言强度没有放宽，只是把「为什么被拒」的判据从旧错误码换成新错误码。其余 42 条零改动。
+
+- **2026-10-19**：**cases.yaml 零改动**，只改了 runner 的测量口径。`scripts/redteam_judge.py` 的 `decided_level()
+  改为采审计窗口内 policy.decided / token.rejected / tool.executed(ok=false) 的最高级（见 §1 末段），
+  因为只采 policy.decided 会把令牌层与工具层的真实拦截误记成 none。C03 / C06 / C07 三条随之由 FAIL 转 PASS。

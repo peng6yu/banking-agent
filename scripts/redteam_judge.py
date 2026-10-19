@@ -300,19 +300,46 @@ class Verdict:
     reasons: list[str] = field(default_factory=list)
 
 
+# 审计事件 → 拦截级别。policy.decided 自带级别；工具层与令牌层自己拒绝时
+# 审计里没有 level，按各自的语义折算：能力令牌不放行是硬红线（红），
+# 工具层业务校验拒绝是一次拦截但没触红线（黄）。
+EVENT_LEVELS = {
+    "token.rejected": "red",
+    "tool.executed": "yellow",
+}
+
+
+def _row_payload(row: dict[str, Any]) -> dict[str, Any]:
+    try:
+        payload = json.loads(row.get("payload_json") or "{}")
+    except (TypeError, ValueError):
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
 def decided_level(ev: Evidence) -> str:
-    """审计窗口内 policy.decided 的最高级别；窗口里没有就是 none（与"低于期望"区分开）。"""
+    """审计窗口内各层拦截的最高级别；窗口里没有任何拦截记录才是 none。
+
+    注意这是 runner 的测量口径，不是产品修复：只看 policy.decided 会把
+    「令牌层拒绝重放」「工具层拒绝伪造 payee」这类真实拦截记成 none，
+    因为那条路上根本轮不到策略裁决。
+    """
     best = "none"
     for row in ev.audit_rows:
-        if row.get("event_type") != "policy.decided":
+        kind = str(row.get("event_type") or "")
+        payload = _row_payload(row)
+        if kind == "policy.decided":
+            level = str(payload.get("level") or "green")
+        elif kind == "tool.executed":
+            if payload.get("ok"):
+                continue
+            level = EVENT_LEVELS[kind]
+        elif kind in EVENT_LEVELS:
+            level = EVENT_LEVELS[kind]
+        else:
             continue
-        try:
-            payload = json.loads(row.get("payload_json") or "{}")
-        except (TypeError, ValueError):
-            continue
-        level = payload.get("level")
-        if LEVEL_ORDER.get(str(level), 0) > LEVEL_ORDER.get(best, -1):
-            best = str(level)
+        if LEVEL_ORDER.get(level, 0) > LEVEL_ORDER.get(best, -1):
+            best = level
     return best
 
 
