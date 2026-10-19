@@ -54,7 +54,7 @@ def test_boundary_amounts_are_fen_only() -> None:
     assert yellow.limit_fen == 100_000 and red.limit_fen == 100_000
 
 
-# ---------- 11 条规则逐条 ----------
+# ---------- 12 条规则逐条 ----------
 
 def test_r01_readonly_green() -> None:
     decision = decide(Action(tool="query_balance", params={}, account_id="a_1"))
@@ -120,8 +120,31 @@ def test_r11_default_deny_is_the_backstop() -> None:
     assert decision.reason_text == "这个操作我不确定是否安全，先不做"
 
 
-def test_eleven_rules_in_table_order() -> None:
+def test_r12_other_account_red() -> None:
+    """R12：代查他人账户红灯，主体不对就不弹确认框。"""
+    decision = decide(
+        Action(tool="query_balance", params={"account_owner": "other"}, account_id="a_1")
+    )
+    assert (decision.level, decision.rule_id) == ("red", "R12_other_account")
+    assert decision.reason_code == "OTHER_ACCOUNT"
+    assert decision.required_factors == []
+
+
+def test_r12_is_not_a_dead_rule() -> None:
+    """R12 排在 R01 前面，所以只读查询的目标是别人时它真的能被命中。"""
+    ids = [rule.rule_id for rule in RULES]
+    assert ids.index("R12_other_account") < ids.index("R01_readonly")
+    assert decide(
+        Action(tool="query_transactions", params={"account_owner": "other"}, account_id="a_1")
+    ).rule_id == "R12_other_account"
+    assert decide(
+        Action(tool="query_balance", params={"account_owner": "self"}, account_id="a_1")
+    ).rule_id == "R01_readonly"
+
+
+def test_twelve_rules_in_table_order() -> None:
     assert [rule.rule_id for rule in RULES] == [
+        "R12_other_account",
         "R01_readonly",
         "R02_invalid_amount",
         "R03_unknown_tool",

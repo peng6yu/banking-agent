@@ -1,4 +1,4 @@
-"""三色裁决的规则表：R01—R11 的数据定义与顺序。
+"""三色裁决的规则表：R01—R12 的数据定义与顺序。
 
 对应文档：docs/05_安全层实现规格.md 5.1/5.2、docs/06_工具层实现规格.md 6.1。
 
@@ -34,6 +34,12 @@ INVEST_TOOLS: Final[frozenset[str]] = frozenset({"buy_fund", "redeem_fund"})
 # 已登记但本轮未实现的扩展工具（docs/06 6.1 脚注）：故意不配任何规则，
 # 用来证明 R11 默认拒绝是活的兜底，而不是一行永远走不到的死代码。
 PENDING_TOOLS: Final[frozenset[str]] = frozenset({"apply_virtual_card", "set_daily_limit"})
+
+# 查询类工具的「账户主体」参数名：意图层给 self / other，策略层据此判红。
+# 由 app/planner/intent.py 产出、app/planner/dag.py 填进只读查询节点，是 R12 的唯一入参。
+OWNER_PARAM: Final[str] = "account_owner"
+SELF_OWNER: Final[str] = "self"
+OTHER_OWNER: Final[str] = "other"
 
 KNOWN_TOOLS: Final[frozenset[str]] = (
     READONLY_TOOLS | SPEND_TOOLS | CONFIRM_ONLY_TOOLS | SENSITIVE_TOOLS | INVEST_TOOLS | PENDING_TOOLS
@@ -78,6 +84,14 @@ def _payee_label(action: Action) -> str:
 
 def _is_spend(action: Action) -> bool:
     return action.tool in SPEND_TOOLS
+
+
+def _is_foreign_owner(action: Action) -> bool:
+    """查询目标是不是别人：只认意图层显式给的 account_owner=other。
+
+    不猜、不从卡号尾号推断主体——主体判定只有一个入口，就是意图层那个槽位。
+    """
+    return action.params.get(OWNER_PARAM) == OTHER_OWNER
 
 
 def _amount(action: Action) -> int:
@@ -174,6 +188,15 @@ def _emit_invest(action: Action, ctx: PolicyContext) -> Decision:
     )
 
 
+def _emit_other_account(action: Action, ctx: PolicyContext) -> Decision:
+    """R12：代查他人账户一律红灯，且不弹确认框——理由是主体不对，不是权限不够。"""
+    text = (
+        "查询类操作我只能做本人名下的账户。您说的那个账户不在我这儿能查的范围里，"
+        "如果您要查的是自己的账户，我马上接着办；如果要查对方的，请让对方本人在他自己的渠道上查。"
+    )
+    return _decision("red", "R12_other_account", "OTHER_ACCOUNT", text, ctx)
+
+
 def _emit_default_deny(action: Action, ctx: PolicyContext) -> Decision:
     return _decision("red", "R11_default_deny", "DEFAULT_DENY", "这个操作我不确定是否安全，先不做", ctx)
 
@@ -188,8 +211,17 @@ def _rule(
     return Rule(rule_id=rule_id, level=level, reason_code=reason_code, when=when, emit=emit)
 
 
-# R01—R11：元组顺序即求值顺序（docs/05 5.2 的 for 循环直接吃它）
+# R01—R12：元组顺序即求值顺序（docs/05 5.2 的 for 循环直接吃它）
 RULES: Final[tuple[Rule, ...]] = (
+    # R12 必须排在 R01 前面：只读查询本来是绿灯的活，一旦目标是别人的账户，
+    # 它先被 R12 拦下；放在 R01 后面就永远走不到，变成一行死代码。
+    _rule(
+        "R12_other_account",
+        "red",
+        "OTHER_ACCOUNT",
+        lambda action, ctx: action.tool in READONLY_TOOLS and _is_foreign_owner(action),
+        _emit_other_account,
+    ),
     _rule(
         "R01_readonly",
         "green",
@@ -280,6 +312,7 @@ __all__ = [
     "DAILY_LIMIT_FEN",
     "INVEST_TOOLS",
     "KNOWN_TOOLS",
+    "OTHER_OWNER",
     "PENDING_TOOLS",
     "PolicyContext",
     "READONLY_TOOLS",
