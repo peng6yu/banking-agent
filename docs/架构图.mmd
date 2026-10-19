@@ -12,7 +12,7 @@ flowchart TD
     end
 
     subgraph L2["② 裁决区 · 确定性闸门：不调模型、不读环境、不取时钟"]
-        INJ["注入三层扫描 app/security/injection.py"]
+        INJ["注入检测与升红 app/security/injection.py"]
         PE["策略裁决 app/policy/engine.py · R01-R11 三色"]
         TK["能力令牌 app/security/token.py · 七步校验"]
         BRK["熔断器 app/security/breaker.py · 5 分钟 3 次"]
