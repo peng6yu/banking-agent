@@ -28,3 +28,7 @@ htmlcov/
 probe_*
 o.json
 o_stream.txt
+
+# 一次性调试脚本残留（仓库根目录，勿入库）
+_smoke*.py
+_merge_*.py

@@ -140,10 +140,10 @@ curl -s http://127.0.0.1:8000/api/audit/verify
 
 ## 测试
 
-### 单元与集成测试（实测 276 条全绿）
+### 单元与集成测试（实测全绿，用例数持续增补）
 
 ```bash
-python3.12 -m pytest -q tests/            # 实测 276 passed in 2.97s（提交时值，用例集仍在增补）
+python3.12 -m pytest -q tests/            # 实测全绿；用例数随增补变化，终验数字由终验复跑后回填（此处刻意不写死会过期的数字）
 ```
 
 ### 前端合规自检（实测 62 项全过）
@@ -154,7 +154,7 @@ python3.12 scripts/check_frontend.py      # 实测「前端检查通过：62/62 
 
 ### 红队 43 条用例
 
-用例集在 `tests/redteam/cases.yaml`，共 43 条，分五类：A 越权 10 / B 注入 8 / C 越界 10 / D 绕过 10 / E 时序与一致性 5。
+用例集在 `tests/redteam/cases.yaml`，共 43 条，分五类（以 cases.yaml 的 `category` 字段为准）：诱导转账 10 / 越权操作 10 / 提示注入 10 / 信息套取 8 / 异常与稳定性 5。
 
 一条命令自检用例集本身（实测输出 `cases ok`）：
 
@@ -162,7 +162,9 @@ python3.12 scripts/check_frontend.py      # 实测「前端检查通过：62/62 
 python3.12 -c "import yaml;d=yaml.safe_load(open('tests/redteam/cases.yaml'));assert len(d)==43;assert len({x['id'] for x in d})==43;print('cases ok')"
 ```
 
-⚠️ **如实说明**：把 43 条用例打到运行中服务上的 runner（`scripts/redteam.py`）**仍在交付中**，截至本文件提交时 `python3.12 -m scripts.redteam` 仍会报 `ImportError: cannot import name 'judge' from 'scripts.redteam_judge'`。用例集本身是齐的；上面那行自检命令能证明用例集的数量与 id 唯一性。
+**自动判定 runner 已交付**：`scripts/redteam{,_model,_setup,_judge}.py` 四个模块（commit c94a8cd），`python3.12 -m scripts.redteam` 能跑完 43 条并打印七列判定表。
+
+⚠️ 两点如实说明：① 全量运行**需要超过 150 秒**（判定表打印完后进程仍在收尾），CI 或验收脚本的 timeout 不要按 150s 设，否则会把跑得通的 runner 误判成失败；② 当前仍有判定未通过的用例，**通过数待终验复跑后回填**——本 README 不写死这个会过期的数字。上面那行自检命令仍可用来证明用例集的数量与 id 唯一性。
 
 ### 模型连通性自检
 
@@ -175,12 +177,12 @@ python3.12 -m app.smoke                    # 实测 4/4 PASS，主脑延迟约 1
 | 路径 | 内容 |
 |---|---|
 | `app/planner/` | 意图识别、DAG 规划、事件定义、执行器（只认令牌） |
-| `app/policy/` | 裁决引擎与 11 条规则（纯函数，无网络无模型） |
+| `app/policy/` | 裁决引擎与 12 条规则 R01–R12（纯函数，无网络无模型） |
 | `app/security/` | 能力令牌、签名信封、注入扫描、熔断器 |
 | `app/tools/` | 十个工具：查人、查余额、账单、卡片、订阅、转账、资金冻结等 |
 | `app/api/` | 10 个 HTTP 端点 + 根页面 |
 | `web/index.html` | 单文件前端（原生 JS，无框架、无 CDN、零外链） |
-| `tests/` | 276 条 pytest + 43 条红队 YAML |
+| `tests/` | pytest 用例集（条数随增补变化）+ 43 条红队 YAML |
 | `scripts/` | 种子脚本、前端合规检查器 |
 | `docs/` | 交接规格书 00—10（写代码前必读）+ 答辩与演示交付件 |
 | `规划/` | 前期选型与模型实测记录 |
@@ -191,17 +193,17 @@ python3.12 -m app.smoke                    # 实测 4/4 PASS，主脑延迟约 1
 |---|---|---|
 | `make run` | 启动服务（--reload） | ✅ |
 | `make seed` | 建库 + 种子（幂等） | ✅ |
-| `make test` | pytest 全跑 | ✅ 276 passed |
+| `make test` | pytest 全跑 | ✅ 全绿（条数随增补变化） |
 | `make smoke` | 模型连通性自检 | ✅ 4/4 |
 | `make cov` | 覆盖率（未装 pytest-cov 时自动退回纯跑） | ✅ |
 | `make reset` | `POST /api/demo/reset` 演示前清场 | ✅ |
-| `make redteam` | 跑 43 条红队用例 | ⚠️ runner 交付中，提交时仍报 ImportError，见上 |
+| `make redteam` | 跑 43 条红队用例并打印七列判定表 | ✅ runner 已交付（commit c94a8cd）；全量需 >150s |
 | `make fresh` | 清理 → 种子 → 测试 | ✅ |
 
 ## 已知限制（照实写，不藏）
 
 1. **能力令牌密钥必须存在。** `CAPABILITY_SECRET`（64 位十六进制）缺失或格式不对时，系统按设计 fail closed：黄灯/红灯在用户点确认后会直接返回 `MISSING_CAPABILITY`，绿灯查询不受影响。`setup_env.sh` 现在会生成这一行（`.env.example` 里也有占位）；如果你的 `.env` 是早先生成的，请手动补上或重新 export。
-2. `make redteam` 目前仍报 `ImportError`（runner 交付中），可用的是 43 条用例集与上面那行自检命令。
+2. **红队判定尚未全部通过。** 自动判定 runner 已交付并可跑通（`make redteam` / `python3.12 -m scripts.redteam`，四模块 commit c94a8cd），但当前仍有判定未通过的用例，最终通过数待终验复跑后回填（见「红队 43 条用例」一节）；跑全量要给足 150 秒以上时限。
 3. **同名收款人追问不收敛。** 种子数据里有两个「张三」；第一轮会正确反问「你要付给哪一位？」，但第二轮用户说「尾号4417的那个」时模型把它塞进备注而不是消歧字段，仍会重复反问。演示请用唯一收款人（王强 / 房东李静）。
 4. 跨场景联动（生日订花）只有单测覆盖，没有端到端演示脚本。
 5. SSE 流在等待用户确认期间保持打开（最长 120 秒）。这是有意的——确认结果顺着同一条流回传，代价是纯命令行客户端需要自己另开一个请求去 POST 确认。前端不受影响。
@@ -210,12 +212,24 @@ python3.12 -m app.smoke                    # 实测 4/4 PASS，主脑延迟约 1
 
 ## 演示与答辩材料
 
+**赛题必交件**（评审直接看这几份）：
+
 | 文件 | 用途 |
 |---|---|
-| [docs/答辩PPT大纲.md](docs/答辩PPT大纲.md) | 10 页答辩大纲，含每页耗时，总计 10 分钟 |
-| [docs/演示脚本.md](docs/演示脚本.md) | 3 分钟现场演示逐步操作与预期输出，含断网应急预案 |
+| [docs/交付/答辩PPT.pptx](docs/交付/答辩PPT.pptx) | **正式答辩 PPT 实件**：13 页（16:9），页脚标累计口播 9:20 / 10:00；零外链可离线放映。生成脚本 `docs/交付/build_ppt.py`、说明见 `docs/交付/交付说明.md` |
+| [docs/安全自评报告.md](docs/安全自评报告.md) | **安全自评报告**：权限分级实现说明、已知风险清单、对抗演示记录；跑不过的用例一条不藏（§2.2） |
+| [docs/技术文档.md](docs/技术文档.md) | **技术文档**：面向评审、可独立阅读的整合版技术说明（模块职责、关键数据结构与接口） |
+| [docs/提交物对照表.md](docs/提交物对照表.md) | **提交前自检**：赛题要求 ↔ 仓库产物逐条对照，✅/🟡/⛔ 状态与缺口说明 |
 | [docs/作品简介.md](docs/作品简介.md) | 200 字以内作品简介 |
-| [docs/05_安全层实现规格.md](docs/05_安全层实现规格.md) | 11 条安全规则 + 令牌七步（写代码前必读） |
+
+**过程材料**（写代码与排练用）：
+
+| 文件 | 用途 |
+|---|---|
+| [docs/答辩PPT大纲.md](docs/答辩PPT大纲.md) | 10 页答辩大纲，含每页耗时，总计 10 分钟（PPT 实件以其为准） |
+| [docs/演示脚本.md](docs/演示脚本.md) | 3 分钟现场演示逐步操作与预期输出，含断网应急预案 |
+| [docs/技术方案总览.md](docs/技术方案总览.md) | 赛题深度分析与顶层规划（一页纸速读） |
+| [docs/05_安全层实现规格.md](docs/05_安全层实现规格.md) | 12 条安全规则 R01–R12 + 令牌七步（写代码前必读） |
 
 ## 给接手开发的人（或模型）
 
@@ -227,7 +241,7 @@ docs/01_架构与数据流.md           ← 三段论与不变量
 docs/02_目录结构与文件职责.md     ← 每个文件干什么
 docs/03_数据库与种子数据.md       ← 15 张表 DDL
 docs/04_核心模块实现规格.md       ← 逐函数分支表
-docs/05_安全层实现规格.md         ← 11 条规则 + 令牌七步 ★最重要
+docs/05_安全层实现规格.md         ← 12 条规则 R01–R12 + 令牌七步 ★最重要
 docs/06_工具层与场景实现规格.md   ← 10 工具 + 3 场景分支
 docs/07_规划器_API与前端规格.md   ← system prompt + 10 端点 + SSE
 docs/08_编码规范.md               ← 硬性编码要求
