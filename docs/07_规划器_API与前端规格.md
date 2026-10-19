@@ -61,6 +61,7 @@ def parse(text: str, history: list) -> IntentResult
 | `intent=unknown` | 直接反问，**不要瞎猜** |
 | `confidence < 0.5` | 反问确认，不要直接执行 |
 | LLM 抛异常 | API 层返回 503 + 人话，审计记 `intent.parsed` 失败 |
+| 查询类意图（`query_balance` / `bill_analysis` / `subscription`）里出现第三方主体（他/她/朋友/同事/我妈/我爸/爱人/别人…）且带查询词（余额/流水/账单/额度/卡号…） | `slots['account_owner']` = `other`，句里的卡号尾号丢弃，`missing` 记 `['account_owner']`；**不反问**——`question` 非空会让 API 层在建 DAG 之前收尾，R12 的红裁决与 `confirm.rejected` 就永远落不了审计，话术改由 R12 的 `reason_text` 出 |
 | 文本超 500 字 | 由 `ChatRequest` 拦在前面，到不了这里 |
 
 **实测教训**：MiniMax 在 temp=0 下也会偶发不调工具直接拒答（11 次里有 1 次）。所以重试 1 次是必需逻辑，不是保险丝。
@@ -82,9 +83,13 @@ def topo_sort(dag: Dag) -> list[DAGNode]
 | `subscription` | `n1 list_subs` |
 | `transfer` | `n1 resolve_payee → n2 query_balance → n3 transfer` |
 | `birthday_plan` | `n1 resolve_payee → n2 query_balance → n3 reserve_funds → n4 pay_merchant` |
+| 模板不在册（模型编的意图） | `n1 unsupported_request` → 策略层 `R03_unknown_tool` 红灯 + `confirm.rejected`，**不回退成默认意图** |
 | `unknown` | 不建 DAG，直接反问 |
 
 为什么固定模板而不用模型自由生成 DAG：**可审计、可复现、可单测**。评审问「你的规划怎么保证不乱」时，答案是「模板 + 参数填充，模型只填槽位不定拓扑」。这是设计选择，写进答辩。
+
+
+**`build_or_single` 的两种回退**：在册意图建图失败（缺必填槽位等）回退成模板第一步（E8）；意图本身不在册时**不**回退成 `query_balance`——那等于把「这个请求我不会」悄悄答成「这是你的余额」，用户以为请求被受理了，审计里也只留下一条绿灯。改为落一个不在注册表里的哨兵工具名 `unsupported_request`，由 R03 显式拒绝并留痕。已登记的十个工具行为不变（tests/test_planner.py 逐条回归）。
 
 ### `validate` 分支表
 
@@ -142,7 +147,9 @@ for node in topo_sort(dag):
 | E5 | red 但因子未给 | 停在 `waiting_factor`，不发 token |
 | E6 | token 签发后工具抛 `TokenMismatch` | 这是 bug（不该发生），记 `ERROR` 日志并终止 |
 | E7 | 工具返回 `ok=False` | 标 `failed`，把 `error_text` 用人话转述，走 E1 |
-| E8 | 模型在规划阶段抛异常 | 回退为单步执行（只做 intent 对应的第一个工具） |
+| E8 | 模型在规划阶段抛异常 | **在册**意图回退为单步执行（只做 intent 对应的第一个工具）；**未登记**意图不回退，落 `unsupported_request` 由 R03 拒（见 7.3） |
+| E9 | `resolve_payee` 问不出收款人，但本图里已有写死越线金额的花钱节点（R02/R07/R08 红） | **先裁决再反问**：落 `policy.decided`(red) + `confirm.rejected`(`stage`=`PRE_PAYEE_GATE`)，发 `error` 终止，**不发 `done` 反问**；黄区间仍先澄清收款人 |
+
 
 ## 7.5 API 端点（`app/api/routes.py`）
 
