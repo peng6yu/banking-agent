@@ -605,3 +605,74 @@ def test_third_party_balance_query_is_blocked_red_end_to_end(bank: Path) -> None
     assert "tool.executed" not in kinds
     assert balance(conn) == 1_286_050
     conn.close()
+
+
+# ------------------------------------------------- 7.4 金额先于收款人裁决
+
+
+def _traces(events: list[tuple[str, dict[str, Any]]]) -> dict[str, dict[str, Any]]:
+    return {data["node_id"]: data for name, data in events if name == "trace"}
+
+
+def test_red_amount_is_blocked_before_the_payee_question(bank: Path) -> None:
+    """收款人问不出来时金额红线先裁决：先拒，不给「换个收款人就能转」的暗示。"""
+    events = drive("s_pre", transfer_dag(payee_name="一个陌生账户", amount_fen=5_000_000))
+    traces = _traces(events)
+    assert set(traces) == {"n1", "n3"}, "n2 查余额不该跑，n3 是被判红的钱节点"
+    assert (traces["n3"]["level"], traces["n3"]["rule_id"]) == ("red", "R08_transfer_red_single")
+    assert traces["n3"]["amount_fen"] == 5_000_000
+    assert "done" not in names(events), "终局拒绝不能又发一轮 done"
+    blocked = payload(events, "error")
+    assert blocked["code"] == "POLICY_BLOCKED"
+    assert not blocked["user_text"].endswith("？"), "终局拒绝不能以反问收尾"
+    conn = db.connect()
+    kinds = [
+        row[0]
+        for row in conn.execute("SELECT event_type FROM audit_log WHERE session_id='s_pre' ORDER BY seq")
+    ]
+    assert "policy.decided" in kinds
+    assert "confirm.rejected" in kinds
+    assert balance(conn) == 1_286_050
+    assert count(conn, "transactions") == 320
+    conn.close()
+
+
+def test_daily_cap_is_also_decided_before_the_payee_question(bank: Path) -> None:
+    """超日累计同样先落裁决：R07 跟收款人是谁没关系。"""
+    conn = db.connect()
+    day = datetime.fromtimestamp(clock.now_ms() // 1000).strftime("%Y-%m-%d")
+    conn.execute(
+        "INSERT INTO daily_limits (account_id, day, spent_fen, tx_count) VALUES (?, ?, ?, ?)",
+        ("a_3d7e60c2", day, 90_000, 3),
+    )
+    conn.commit()
+    conn.close()
+    events = drive("s_pre_daily", transfer_dag(payee_name="一个陌生账户", amount_fen=20_000))
+    traces = _traces(events)
+    assert (traces["n3"]["level"], traces["n3"]["rule_id"]) == ("red", "R07_transfer_red_daily")
+    assert balance(db.connect()) == 1_286_050
+
+
+def test_yellow_amount_still_asks_which_payee_first(bank: Path) -> None:
+    """黄区间的金额不抢戏：先澄清收款人，交互顺序不动。"""
+    events = drive("s_pre_yellow", transfer_dag(payee_name="一个陌生账户", amount_fen=50_000))
+    traces = _traces(events)
+    assert set(traces) == {"n1"}
+    assert traces["n1"]["rule_id"] == "R01_readonly"
+    done = payload(events, "done")
+    assert done["question"]
+
+
+def test_resolved_payee_is_not_pre_blocked(bank: Path) -> None:
+    """收款人唯一时不在 n1 拦：红灯仍旧由真正的 transfer 节点裁决，节点号不变。
+
+    R08 要双因子，所以这里等的是确认超时（跟 test_confirmation_timeout_voids_the_step
+    一样给 confirm_timeout_ms=1），本例只关心「红灯出在 n3、不出在 n1」。
+    """
+    events = drive("s_pre_ok", transfer_dag(amount_fen=5_000_000), confirm_timeout_ms=1)
+    traces = _traces(events)
+    assert set(traces) == {"n1", "n2", "n3"}
+    assert traces["n3"]["rule_id"] == "R08_transfer_red_single"
+    assert payload(events, "factor")["required"] == ["face", "sms"]
+    assert balance(db.connect()) == 1_286_050
+    assert count(db.connect(), "transactions") == 320
