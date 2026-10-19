@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Any
+from typing import Any, Final
 
 from app import audit, clock, funds
 from app.clock import BankError, ValidationError
@@ -37,10 +37,45 @@ from app.planner.state import (
 )
 from app.policy.engine import decide
 from app.policy.rules import SPEND_TOOLS, PolicyContext
-from app.security import injection
+from app.security import breaker, injection
 from app.tools import base as tool_base
 
 log = logging.getLogger(__name__)
+
+# 熔断只对「安全边界主动拦下」计数。denials 表的唯一 INSERT 点在
+# app/security/breaker.py，这里是生产链路里真正调用它的入口：没有这一行，
+# 拒绝计数永远是 0，熔断就只是一段单测里的空转代码。
+SECURITY_DENIAL_CODES: Final[frozenset[str]] = frozenset(
+    {
+        "POLICY_BLOCKED",   # 红色裁决且没给「就这么办」的出口，用户无法在本轮推进
+        "POLICY_DENIED",    # 策略层在执行前抛拒
+        "TOKEN_MISMATCH",   # app/clock.py 的异常码：能力令牌七步校验没过
+        "TOKEN_REJECTED",   # 执行器对外事件码：runner 捕获 TokenMismatch 后转成它
+    }
+)
+
+
+def is_security_denial(error_code: str | None) -> bool:
+    """这个错误码算不算「一次拒绝」。
+
+    算：安全边界主动拦下、用户在本轮无法靠正常操作翻过去的——见
+    SECURITY_DENIAL_CODES。
+
+    不算：用户自己说不要（USER_REJECTED）、没人点头超时（CONFIRM_TIMEOUT）、
+    规划期参数写错（VALIDATION_*）、余额不足这类业务失败。
+    理由：正常用户输错密码、输错金额后改主意，都不该被当成攻击者；连这种也
+    计数的话，熔断第一个被熔掉的是诚实用户，而真正的攻击者照样畅通。
+    """
+    if not error_code:
+        return False
+    return error_code in SECURITY_DENIAL_CODES
+
+
+def record_denial(state: RunState, *, reason: str, action: Action | None = None) -> int:
+    """记一次拒绝（生产入口）；返回窗口内累计次数，供日志与测试观察。"""
+    count = breaker.record_denial(state.conn, state.session_id, reason=reason, action=action)
+    log.info("executor.denial reason=%s session=%s count=%d", reason, state.session_id, count)
+    return count
 
 def active_sessions() -> list[str]:
     """当前还在跑（或卡在确认）的会话 ID。"""
@@ -174,7 +209,12 @@ async def _step(
         if not approved:
             return CONTINUE
     token = issue_token(state, action, decision)
-    return await execute_node(state, node, rec, params, action, token, emit)
+    status = await execute_node(state, node, rec, params, action, token, emit)
+    if is_security_denial(rec.error_code):
+        # 执行阶段被安全边界拒掉（令牌七步没过 / 策略层抛拒）同样计一次；
+        # 余额不足、参数写错、用户改主意都不计。
+        record_denial(state, reason=str(rec.error_code), action=action)
+    return status
 
 
 def log_injection_hit(field: str, result: Any) -> None:
@@ -311,7 +351,7 @@ async def _guard(
     """黄/红都要用户点头；返回 (是否放行, 是否整轮到此为止)。"""
     conf = new_confirmation(state, node, action, decision)
     if decision.level == "red" and not decision.required_factors:
-        await _blocked(state, node, conf, decision, emit)
+        await _blocked(state, node, conf, decision, emit, action)
         return False, True
     await emit_event(emit, prompt_event(decision), prompt_payload(node, conf, decision))
     audit.append(
@@ -340,6 +380,7 @@ async def _blocked(
     conf: Confirmation,
     decision: Decision,
     emit: Emit,
+    action: Action | None = None,
 ) -> None:
     """E5：红色但没要因子——先告知被拦，再让用户改主意，不给「就这么办」的出口。"""
     conf.status = "expired"
@@ -361,6 +402,7 @@ async def _blocked(
         {"confirmation_id": conf.id, "node_id": node.id, "reason": "POLICY_BLOCKED"},
         session_id=state.session_id,
     )
+    record_denial(state, reason="POLICY_BLOCKED", action=action)
     persist_node(state, state.nodes[node.id], "failed", error_code="POLICY_BLOCKED")
     await emit_event(emit, "error", {"code": "POLICY_BLOCKED", "user_text": decision.reason_text or "这笔操作被安全策略拦下了。"})
 
