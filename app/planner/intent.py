@@ -47,6 +47,20 @@ INTENT_NAMES: Final[tuple[str, ...]] = (
 UNKNOWN_QUESTION: Final[str] = "你是想查询、转账还是看账单？"
 RETRY_HINT: Final[str] = "刚才你没有调用工具。请调用 emit_intent 输出结构化结果，不要直接回答。"
 SLOT_KEYS: Final[tuple[str, ...]] = ("payee_name", "amount_fen", "note", "period", "month", "card_tail")
+# 查询目标的主体：本人 self / 他人 other。策略层 R12 只认这个槽位，
+# 键名与 app/policy/rules.py 的 OWNER_PARAM 一致（tests 里有一条测试钉住两者不许漂移）。
+ACCOUNT_OWNER_SLOT: Final[str] = "account_owner"
+SELF_OWNER: Final[str] = "self"
+OTHER_OWNER: Final[str] = "other"
+# 会暴露账户信息的查询类意图，只有它们才需要判主体。
+OWNER_QUERY_INTENTS: Final[frozenset[str]] = frozenset({"query_balance", "bill_analysis", "subscription"})
+THIRD_PARTY_SUBJECTS: Final[tuple[str, ...]] = (
+    "朋友", "同事", "我妈", "我爸", "老婆", "老公", "爱人", "家人", "亲戚",
+    "客户", "老板", "他的", "她的", "他卡", "她卡", "他账户", "她账户", "别人的", "他人的",
+)
+QUERY_SUBJECT_WORDS: Final[tuple[str, ...]] = (
+    "余额", "流水", "账单", "交易", "额度", "卡号", "消费", "明细", "存款", "订阅",
+)
 MISSING_LABELS: Final[dict[str, str]] = {
     "payee_name": "请问转给谁？",
     "amount_fen": "转多少？",
@@ -180,7 +194,7 @@ def _first_call_args(client: ChatAdapter, messages: list[dict[str, Any]]) -> dic
 def _from_args(args: dict[str, Any], text: str, *, retried: bool) -> IntentResult:
     """模型给了工具调用：取槽位、补金额口语化、算 missing，按分支表决定要不要反问。"""
     intent = str(args.get("intent") or "unknown").strip() or "unknown"
-    slots = _slots(args, text)
+    slots = _slots(args, text, intent)
     missing = _missing(intent, slots, args.get("missing"))
     confidence = _number(args.get("confidence"), default=0.0)
     result = IntentResult(
@@ -210,9 +224,15 @@ def _apply_branches(result: IntentResult) -> IntentResult:
     return result
 
 
-def _slots(args: dict[str, Any], text: str) -> dict[str, Any]:
+def _slots(args: dict[str, Any], text: str, intent: str) -> dict[str, Any]:
     """只保留白名单槽位；模型没给金额就用 money.parse_amount 从原话兜底。"""
     slots = {key: args[key] for key in SLOT_KEYS if args.get(key) not in (None, "")}
+    if _account_owner(intent, text) == OTHER_OWNER:
+        # 查的是别人的账户：主体记 other，并且把句里的尾号丢掉——
+        # 拿别人的卡号尾号去反查账户，是这条链路上唯一可能跨用户的一步。
+        slots[ACCOUNT_OWNER_SLOT] = OTHER_OWNER
+        slots.pop("card_tail", None)
+        slots.pop("account_tail", None)
     if "amount_fen" not in slots:
         guess = _guess_amount(text)
         if guess > 0:
@@ -225,6 +245,42 @@ def _slots(args: dict[str, Any], text: str) -> dict[str, Any]:
             if slots[key] is None:
                 slots.pop(key)
     return slots
+
+
+def _account_owner(intent: str, text: str) -> str:
+    """查询类意图里出现第三方主体就记 other；判不出来一律当本人，绝不猜。
+
+    注意这里不反问：主体判出来以后由策略层 R12 亮红灯并落 policy.decided 审计，
+    问「您是要查自己的吗」只会让这次查询停在一句反问上，红裁决永远不会被记录。
+    """
+    if intent not in OWNER_QUERY_INTENTS:
+        return SELF_OWNER
+    if not any(word in text for word in QUERY_SUBJECT_WORDS):
+        return SELF_OWNER
+    return OTHER_OWNER if _has_third_party(text) else SELF_OWNER
+
+
+def _has_third_party(text: str) -> bool:
+    for subject in THIRD_PARTY_SUBJECTS:
+        start = text.find(subject)
+        while start != -1:
+            if not _prefixed_by_non_person(text, start):
+                return True
+            start = text.find(subject, start + 1)
+    return any(_mentions_person(text, char) for char in ("他", "她"))
+
+
+def _mentions_person(text: str, char: str) -> bool:
+    """「他/她」当人看，但「其他」「其它」「空他」不是人。"""
+    for index, current in enumerate(text):
+        if current == char and not _prefixed_by_non_person(text, index):
+            return True
+    return False
+
+
+def _prefixed_by_non_person(text: str, index: int) -> bool:
+    """词首落在「其/除/另/空」后面时，这个「他」是量词不是人——「其他账户」不是第三方。"""
+    return index > 0 and text[index - 1] in ("其", "除", "另", "空")
 
 
 def _missing(intent: str, slots: dict[str, Any], reported: Any) -> list[str]:
@@ -286,9 +342,12 @@ def _number(value: Any, *, default: float) -> float:
 
 
 __all__ = [
+    "ACCOUNT_OWNER_SLOT",
     "CONFIDENCE_FLOOR",
     "EMIT_INTENT_NAME",
     "INTENT_NAMES",
+    "OTHER_OWNER",
+    "SELF_OWNER",
     "SYSTEM_PROMPT",
     "UNKNOWN_QUESTION",
     "IntentResult",

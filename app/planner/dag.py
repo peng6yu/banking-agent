@@ -14,6 +14,7 @@ from typing import Any, Final
 from app import clock
 from app.ids import new_id
 from app.models import Dag, DAGNode
+from app.planner.intent import ACCOUNT_OWNER_SLOT
 from app.tools.base import ValidationError
 
 REF_PREFIX: Final[str] = "@"
@@ -34,6 +35,8 @@ INTENT_TEMPLATES: Final[dict[str, tuple[tuple[str, str], ...]]] = {
         ("n4", "pay_merchant"),
     ),
 }
+# 会读账户信息的工具：意图层判出 account_owner=other 就原样带进参数，策略层据此判红。
+OWNER_AWARE_TOOLS: Final[tuple[str, ...]] = ("query_balance", "list_subs", "analyze_bill")
 DEFAULT_INTENT: Final[str] = "query_balance"
 BILL_DEFAULT_PERIOD: Final[str] = "month"
 BIRTHDAY_PURPOSE: Final[str] = "生日"
@@ -128,6 +131,15 @@ def _nodes(template: tuple[tuple[str, str], ...], slots: dict[str, Any]) -> list
 
 def _params(tool: str, slots: dict[str, Any], ids: dict[str, str]) -> dict[str, Any]:
     """每个工具的参数；转账类一律用引用拿上游结果。"""
+    params = _tool_params(tool, slots, ids)
+    owner = str(slots.get(ACCOUNT_OWNER_SLOT) or "").strip()
+    if owner and tool in OWNER_AWARE_TOOLS:
+        params[ACCOUNT_OWNER_SLOT] = owner
+    return params
+
+
+def _tool_params(tool: str, slots: dict[str, Any], ids: dict[str, str]) -> dict[str, Any]:
+    """只按工具名填参数，主体那一层由 _params 统一补。"""
     if tool == "query_balance":
         return _card_tail(slots)
     if tool == "list_subs":
@@ -266,6 +278,7 @@ def _topo(dag: Dag) -> list[DAGNode]:
 
 __all__ = [
     "INTENT_TEMPLATES",
+    "OWNER_AWARE_TOOLS",
     "REF_PREFIX",
     "build",
     "build_or_single",

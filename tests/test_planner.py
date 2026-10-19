@@ -525,3 +525,83 @@ def test_every_run_writes_an_audit_trail_that_verifies(bank: Path) -> None:
         assert expected in kinds
     assert audit.verify_chain(conn) is True
     conn.close()
+
+
+# ------------------------------------------------- 7.2/7.3 查询主体槽位 + R12
+
+def test_third_party_query_marks_account_owner_other() -> None:
+    """代查他人余额：主体记 other，句里的卡号尾号丢掉，而且这一轮不反问。"""
+    result = parse(
+        "帮我看看朋友李四的余额，他卡号尾号 8899",
+        Scripted([{"intent": "query_balance", "missing": [], "confidence": 0.9}]),
+    )
+    assert result.slots[intent.ACCOUNT_OWNER_SLOT] == intent.OTHER_OWNER
+    assert "card_tail" not in result.slots
+    assert result.missing == []
+    assert result.question is None
+
+
+def test_own_query_carries_no_owner_slot() -> None:
+    result = parse("我的余额还有多少", Scripted([{"intent": "query_balance", "missing": [], "confidence": 0.9}]))
+    assert intent.ACCOUNT_OWNER_SLOT not in result.slots
+
+
+def test_other_account_is_not_a_third_party() -> None:
+    """「其他账户」里的「他」是量词不是人，不能误判成查别人。"""
+    result = parse("其他账户的余额也给我看看", Scripted([{"intent": "query_balance", "missing": [], "confidence": 0.9}]))
+    assert intent.ACCOUNT_OWNER_SLOT not in result.slots
+
+
+def test_third_party_subscription_query_also_marks_owner() -> None:
+    result = parse("帮我查一下她的订阅", Scripted([{"intent": "subscription", "missing": [], "confidence": 0.9}]))
+    assert result.slots[intent.ACCOUNT_OWNER_SLOT] == intent.OTHER_OWNER
+
+
+def test_transfer_intent_never_gets_an_owner_slot() -> None:
+    result = parse(
+        "转 500 给张三",
+        Scripted([{"intent": "transfer", "payee_name": "张三", "amount_fen": 50_000, "missing": [], "confidence": 0.9}]),
+    )
+    assert intent.ACCOUNT_OWNER_SLOT not in result.slots
+
+
+def test_owner_slot_reaches_the_query_node_params() -> None:
+    graph = planner_dag.build(
+        {"intent": "query_balance", "slots": {intent.ACCOUNT_OWNER_SLOT: intent.OTHER_OWNER}}
+    )
+    assert graph.nodes[0].params == {intent.ACCOUNT_OWNER_SLOT: intent.OTHER_OWNER}
+    bill = planner_dag.build(
+        {"intent": "bill_analysis", "slots": {intent.ACCOUNT_OWNER_SLOT: intent.OTHER_OWNER}}
+    )
+    assert bill.nodes[0].params[intent.ACCOUNT_OWNER_SLOT] == intent.OTHER_OWNER
+
+
+def test_owner_slot_name_matches_the_policy_rule() -> None:
+    """槽位名是规划层与策略层的契约，不许两边各写各的。"""
+    from app.policy import rules
+
+    assert intent.ACCOUNT_OWNER_SLOT == rules.OWNER_PARAM
+    assert intent.OTHER_OWNER == rules.OTHER_OWNER
+    assert intent.SELF_OWNER == rules.SELF_OWNER
+
+
+def test_third_party_balance_query_is_blocked_red_end_to_end(bank: Path) -> None:
+    """R12 不是死代码：真实执行器链路里它会亮红灯、落审计、一次工具都不执行。"""
+    graph = planner_dag.build(
+        {"intent": "query_balance", "slots": {intent.ACCOUNT_OWNER_SLOT: intent.OTHER_OWNER}}
+    )
+    events = drive("s_owner", graph)
+    trace = payload(events, "trace")
+    assert (trace["level"], trace["rule_id"]) == ("red", "R12_other_account")
+    assert "confirm" not in names(events)
+    assert "tool.executed" not in names(events)
+    conn = db.connect()
+    kinds = [
+        row[0]
+        for row in conn.execute("SELECT event_type FROM audit_log WHERE session_id='s_owner' ORDER BY seq")
+    ]
+    assert "policy.decided" in kinds
+    assert "confirm.rejected" in kinds
+    assert "tool.executed" not in kinds
+    assert balance(conn) == 1_286_050
+    conn.close()
