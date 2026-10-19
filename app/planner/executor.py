@@ -36,7 +36,7 @@ from app.planner.state import (
     wait_for_answer,
 )
 from app.policy.engine import decide
-from app.policy.rules import PolicyContext
+from app.policy.rules import SPEND_TOOLS, PolicyContext
 from app.security import injection
 from app.tools import base as tool_base
 
@@ -63,16 +63,29 @@ async def run(
 ) -> None:
     """跑一张执行图；只发事件，不返回业务数据。"""
     state: RunState | None = None
+    # 用户原话里的注入（IM 转发、夹带指令）不在工具参数里，只在这一轮认领：
+    # 认领后并进每个 Action 的 untrusted_fields，R04 再把它升成双因子。
+    taint = injection.claim_turn(session_id)
     try:
         state = open_run(session_id, dag, account_id, secret)
         RUNS[session_id] = state
-        await _drive(state, emit, confirm_timeout_ms)
+        if taint is not None:
+            audit_injection(
+                state,
+                source="user_text",
+                fields=list(taint.fields),
+                categories=taint.patterns,
+                escalated=taint.level_floor != "green",
+                level_floor=taint.level_floor,
+            )
+        await _drive(state, emit, confirm_timeout_ms, taint)
     except BankError as exc:
         log.warning("executor.run.failed code=%s session=%s", exc.code, session_id)
         if state is not None:
             _mark_failed(state, exc)
         await emit_event(emit, "error", exc.to_dict())
     finally:
+        injection.release_turn(taint)
         if state is not None:
             finish_run(state)
 
@@ -117,7 +130,12 @@ def close(session_id: str) -> None:
     finish_run(state)
 
 
-async def _drive(state: RunState, emit: Emit, confirm_timeout_ms: int) -> None:
+async def _drive(
+    state: RunState,
+    emit: Emit,
+    confirm_timeout_ms: int,
+    taint: injection.TurnTaint | None = None,
+) -> None:
     """主循环：拓扑序逐个节点跑，跑不动的下游标 skipped。"""
     for node in planner_dag.topo(state.dag):
         if state.cancelled:
@@ -126,7 +144,7 @@ async def _drive(state: RunState, emit: Emit, confirm_timeout_ms: int) -> None:
         if not _ready(state, node):
             persist_node(state, rec, "skipped", error_code="UPSTREAM_NOT_DONE")
             continue
-        if await _step(state, node, rec, emit, confirm_timeout_ms) == STOP:
+        if await _step(state, node, rec, emit, confirm_timeout_ms, taint) == STOP:
             return
     await _done(state, emit)
 
@@ -137,13 +155,15 @@ async def _step(
     rec: NodeRec,
     emit: Emit,
     confirm_timeout_ms: int,
+    taint: injection.TurnTaint | None = None,
 ) -> str:
     """一个节点：解析参数 → 问策略 → 该确认就确认 → 执行。"""
     try:
         params = planner_dag.resolve_refs(node.params, state.results)
     except ValidationError as exc:
         return _fail_node(state, rec, emit, exc)
-    action = build_node_action(state, node, params)
+    audit_param_hits(state, node, params, taint)
+    action = build_node_action(state, node, params, taint)
     decision = ask_policy(state, action, node)
     persist_decision(state, rec, params, decision)
     await emit_event(emit, "trace", trace_event(node, action, decision))
@@ -168,13 +188,91 @@ def log_injection_hit(field: str, result: Any) -> None:
     log.info("injection.detected field=%s patterns=%s", field, ",".join(patterns))
 
 
-def build_node_action(state: RunState, node: Any, params: dict[str, Any]) -> Action:
+def build_node_action(
+    state: RunState,
+    node: Any,
+    params: dict[str, Any],
+    taint: injection.TurnTaint | None = None,
+) -> Action:
     """构造 Action；命中的注入字段交给 R04 自己升级验证等级。"""
     action = tool_base.build_action(node.tool, params, state.account_id, params.get("amount_fen"))
     hits = injection.scan_params(params)
     if hits:
         action = injection.mark_from_params(action, hits, log_hits=log_injection_hit)
+    if taint is not None:
+        # 原话里的注入照样登记成不可信字段：参数干净的那一步也得升红，
+        # 否则「备注留白、注入写在用户消息里」就能绕过 R04
+        for name in taint.fields:
+            action = injection.mark_untrusted(action, name)
+            log_injection_hit(
+                name,
+                injection.ScanResult(hit=True, patterns=taint.patterns, score=taint.score),
+            )
     return action
+
+
+def _escalates(tool: str, level_floor: str) -> bool:
+    """这次注入命中会不会抬高验证等级：花费类动作走 R04，或本轮原话的注入下限不是绿。"""
+    return tool in SPEND_TOOLS or level_floor != "green"
+
+
+def audit_injection(
+    state: RunState,
+    *,
+    source: str,
+    fields: list[str],
+    categories: tuple[str, ...],
+    node: Any | None = None,
+    escalated: bool = False,
+    level_floor: str = "green",
+) -> None:
+    """把一次注入命中写进审计链。
+
+    载荷里只有字段名、类别、来源和是否抬高了验证等级，绝不写命中的原文：
+    审计链是只追加的，原文里可能有卡号、密码、别人的聊天内容，写进去就再也删不掉了。
+    """
+    payload: dict[str, Any] = {
+        "source": source,
+        "fields": list(fields),
+        "categories": list(categories),
+        "escalated": escalated,
+        "level_floor": level_floor,
+    }
+    if node is not None:
+        payload["node_id"] = node.id
+        payload["tool"] = node.tool
+    audit.append(state.conn, "injection.detected", payload, session_id=state.session_id)
+    log.info(
+        "injection.audited source=%s fields=%s categories=%s",
+        source,
+        ",".join(fields),
+        ",".join(categories),
+    )
+
+
+def audit_param_hits(
+    state: RunState,
+    node: Any,
+    params: dict[str, Any],
+    taint: injection.TurnTaint | None = None,
+) -> None:
+    """工具参数里的命中（note / name / merchant / alias…）逐字段登记一条审计。
+
+    只登记不拒绝：拦不拦、升不升级由 policy.decide 判，这里只负责留证据。
+    """
+    hits = injection.scan_params(params)
+    if not hits:
+        return
+    categories = tuple(sorted({name for result in hits.values() for name in result.patterns}))
+    audit_injection(
+        state,
+        source="tool_params",
+        fields=sorted(hits),
+        categories=categories,
+        node=node,
+        escalated=_escalates(node.tool, "red" if taint is not None else "green"),
+        level_floor=taint.level_floor if taint is not None else "green",
+    )
 
 
 def ask_policy(state: RunState, action: Action, node: Any) -> Decision:

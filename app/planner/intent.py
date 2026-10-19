@@ -16,7 +16,7 @@ from dataclasses import dataclass, field
 from typing import Any, Final, Protocol
 
 from app.money import UNKNOWN_AMOUNT_FEN, parse_amount
-from app.security import envelope
+from app.security import envelope, injection
 
 # docs/07 7.1 逐字照抄，测试会逐字比对原文，不要改写、不要润色、不要重排
 SYSTEM_PROMPT: Final[str] = (
@@ -46,7 +46,17 @@ INTENT_NAMES: Final[tuple[str, ...]] = (
 )
 UNKNOWN_QUESTION: Final[str] = "你是想查询、转账还是看账单？"
 RETRY_HINT: Final[str] = "刚才你没有调用工具。请调用 emit_intent 输出结构化结果，不要直接回答。"
-SLOT_KEYS: Final[tuple[str, ...]] = ("payee_name", "amount_fen", "note", "period", "month", "card_tail")
+# merchant 是生日花束模板要用的槽位（app/planner/dag.py 读 slots["merchant"]）；
+# 白名单漏了它，模型给的商户名会被 _slots 直接丢掉，注入扫描就永远扫不到商户名。
+SLOT_KEYS: Final[tuple[str, ...]] = (
+    "payee_name",
+    "amount_fen",
+    "note",
+    "period",
+    "month",
+    "card_tail",
+    "merchant",
+)
 # 查询目标的主体：本人 self / 他人 other。策略层 R12 只认这个槽位，
 # 键名与 app/policy/rules.py 的 OWNER_PARAM 一致（tests 里有一条测试钉住两者不许漂移）。
 ACCOUNT_OWNER_SLOT: Final[str] = "account_owner"
@@ -90,6 +100,9 @@ class IntentResult:
     ok: bool = True
     retried: bool = False
     source: str = "model"
+    # 用户原话里扫出的注入命中：只留字段名与类别，不留原文
+    untrusted_fields: list[str] = field(default_factory=list)
+    injection_patterns: list[str] = field(default_factory=list)
 
     def to_event(self) -> dict[str, Any]:
         """SSE intent 事件的数据体（docs/07 7.6）。"""
@@ -100,6 +113,7 @@ class IntentResult:
             "confidence": round(float(self.confidence), 3),
             "question": self.question,
             "ok": self.ok,
+            "untrusted_fields": list(self.untrusted_fields),
         }
 
 
@@ -204,7 +218,27 @@ def _from_args(args: dict[str, Any], text: str, *, retried: bool) -> IntentResul
         confidence=confidence,
         retried=retried,
     )
-    return _apply_branches(result)
+    result = _apply_branches(result)
+    return _mark_injection(result, text)
+
+
+def _mark_injection(result: IntentResult, text: str) -> IntentResult:
+    """对用户原话本身做一次注入扫描，并把命中压一根棒给执行层。
+
+    工具参数里扫不到的那部分载荷全在这里：IM 转发整段、开头那句
+    「忽略以上所有指令」。命中不改 question、不改槽位、不改任何用户可见的
+    回复内容——扫描结果只用于裁决（执行层取棒后并进 untrusted_fields，R04 再升红）。
+
+    反问轮（ok=False）不压棒：那条路上没有执行器来取，留着只会污染下一轮。
+    """
+    if not result.ok:
+        return result
+    taint = injection.mark_turn(text)
+    if taint is None:
+        return result
+    result.untrusted_fields = list(taint.fields)
+    result.injection_patterns = list(taint.patterns)
+    return result
 
 
 def _apply_branches(result: IntentResult) -> IntentResult:
