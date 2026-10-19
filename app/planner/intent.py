@@ -243,7 +243,14 @@ def _mark_injection(result: IntentResult, text: str) -> IntentResult:
 
 def _apply_branches(result: IntentResult) -> IntentResult:
     """docs/07 7.2 分支表：missing → 反问；unknown → 反问；低置信 → 反问确认。"""
-    if result.missing:
+    if result.slots.get(ACCOUNT_OWNER_SLOT) == OTHER_OWNER and ACCOUNT_OWNER_SLOT not in result.missing:
+        # 「查的是谁的」要澄清，但它不是「信息不全」：这里只把主体记进 missing，
+        # 让 intent.parsed 审计与 SSE 的 intent 事件都看得见这次请求的主体是他人。
+        # 刻意不填 question——question 会让 API 层在建 DAG 之前就收尾（docs/07 7.4），
+        # 那样 R12 的红裁决与 confirm.rejected 永远不会落进审计，攻击面统计就失真了。
+        # 真正给用户的话术由 R12 的 reason_text 出，走执行器现成的 _blocked。
+        result.missing = [*result.missing, ACCOUNT_OWNER_SLOT]
+    if result.missing and ACCOUNT_OWNER_SLOT not in result.missing:
         result.question = MISSING_LABELS.get(result.missing[0], f"请补充一下「{result.missing[0]}」。")
         result.ok = False
         return result

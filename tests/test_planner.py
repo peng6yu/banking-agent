@@ -530,15 +530,49 @@ def test_every_run_writes_an_audit_trail_that_verifies(bank: Path) -> None:
 # ------------------------------------------------- 7.2/7.3 查询主体槽位 + R12
 
 def test_third_party_query_marks_account_owner_other() -> None:
-    """代查他人余额：主体记 other，句里的卡号尾号丢掉，而且这一轮不反问。"""
+    """代查他人余额：主体记 other，句里的卡号尾号丢掉，主体进 missing，但不反问。
+
+    不反问是有意的：反问会让 API 层在建 DAG 之前收尾（docs/07 7.4），
+    R12 的红裁决与 confirm.rejected 就永远落不了审计。话术由 R12 出。
+    """
     result = parse(
         "帮我看看朋友李四的余额，他卡号尾号 8899",
         Scripted([{"intent": "query_balance", "missing": [], "confidence": 0.9}]),
     )
     assert result.slots[intent.ACCOUNT_OWNER_SLOT] == intent.OTHER_OWNER
     assert "card_tail" not in result.slots
-    assert result.missing == []
+    assert result.missing == [intent.ACCOUNT_OWNER_SLOT]
     assert result.question is None
+    assert result.ok is True
+
+
+def test_missing_account_owner_still_reaches_the_policy_layer(bank: Path) -> None:
+    """missing 里带着主体标记的一轮照样建 DAG，并被 R12 红灯挡下。"""
+    result = parse(
+        "帮我看看朋友李四的余额，他卡号尾号 8899",
+        Scripted([{"intent": "query_balance", "missing": [], "confidence": 0.9}]),
+    )
+    graph = planner_dag.build({"intent": result.intent, "slots": result.slots})
+    events = drive("s_owner_missing", graph)
+    trace = payload(events, "trace")
+    assert (trace["level"], trace["rule_id"]) == ("red", "R12_other_account")
+    assert "confirm" not in names(events)
+    event = result.to_event()
+    assert event["slots"]["account_owner"] == intent.OTHER_OWNER
+    assert event["missing"] == [intent.ACCOUNT_OWNER_SLOT]
+    assert event["question"] is None
+    conn = db.connect()
+    kinds = [
+        row[0]
+        for row in conn.execute(
+            "SELECT event_type FROM audit_log WHERE session_id='s_owner_missing' ORDER BY seq"
+        )
+    ]
+    assert "policy.decided" in kinds
+    assert "confirm.rejected" in kinds
+    assert "tool.executed" not in kinds, "红灯之前不许真的去查"
+    assert balance(conn) == 1_286_050
+    conn.close()
 
 
 def test_own_query_carries_no_owner_slot() -> None:
