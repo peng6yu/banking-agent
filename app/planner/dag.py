@@ -38,6 +38,11 @@ INTENT_TEMPLATES: Final[dict[str, tuple[tuple[str, str], ...]]] = {
 # 会读账户信息的工具：意图层判出 account_owner=other 就原样带进参数，策略层据此判红。
 OWNER_AWARE_TOOLS: Final[tuple[str, ...]] = ("query_balance", "list_subs", "analyze_bill")
 DEFAULT_INTENT: Final[str] = "query_balance"
+# 模型编了一个没登记的意图时落到的哨兵工具名。
+# 它不在 KNOWN_TOOLS 里，策略层 R03 会亮红灯并落 policy.decided / confirm.rejected；
+# 之所以不叫 query_balance：悄悄回退成一次绿灯查余额，等于把「这个请求我不会」
+# 答成「这是你的余额」，用户以为请求被受理了，审计里也只留下一条绿灯（t16 验收第 7 条）。
+UNSUPPORTED_TOOL: Final[str] = "unsupported_request"
 BILL_DEFAULT_PERIOD: Final[str] = "month"
 BIRTHDAY_PURPOSE: Final[str] = "生日"
 BIRTHDAY_MERCHANT: Final[str] = "flower_shop"
@@ -56,12 +61,21 @@ def build(intent: dict[str, Any]) -> Dag:
 
 
 def build_or_single(intent: dict[str, Any]) -> Dag:
-    """E8：规划阶段任何异常都回退成模板第一个工具的单步图，不中断整轮会话。"""
+    """E8：模板在册但建图失败时，回退成模板第一个工具的单步图，不中断整轮会话。
+
+    模板不在册（模型编了一个没登记的意图）不再回退到默认意图：那不是「降级」，
+    是把一个说不出口的请求换成一个用户没提的请求去做。见 UNSUPPORTED_TOOL。
+    """
+    name, _ = split(intent)
+    template = INTENT_TEMPLATES.get(name)
+    if template is None:
+        return Dag(
+            id=new_id("r"),
+            nodes=[DAGNode(id="n1", tool=UNSUPPORTED_TOOL, params={"intent": str(name)})],
+        )
     try:
         return build(intent)
     except ValidationError:
-        name, _ = split(intent)
-        template = INTENT_TEMPLATES.get(name) or INTENT_TEMPLATES[DEFAULT_INTENT]
         node_id, tool = template[0]
         return Dag(id=new_id("r"), nodes=[DAGNode(id=node_id, tool=tool, params={})])
 
@@ -279,6 +293,7 @@ def _topo(dag: Dag) -> list[DAGNode]:
 __all__ = [
     "INTENT_TEMPLATES",
     "OWNER_AWARE_TOOLS",
+    "UNSUPPORTED_TOOL",
     "REF_PREFIX",
     "build",
     "build_or_single",

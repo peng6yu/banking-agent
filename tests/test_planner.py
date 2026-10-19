@@ -19,6 +19,7 @@ from app.llm import LLMError, LLMResponse, ToolCall
 from app.models import Dag, DAGNode
 from app.planner import dag as planner_dag
 from app.planner import executor, intent
+from app.policy import rules as planner_rules
 from scripts.seed import PAYEE_LIJING, seed
 
 SECRET = "a" * 64
@@ -333,10 +334,53 @@ def test_validate_rejects_broken_dags(bad_dag: Dag, code: str) -> None:
 
 
 def test_build_or_single_falls_back_to_the_first_step() -> None:
+    """E8 保留：在册意图建图失败只退成模板第一步。"""
     fallback = planner_dag.build_or_single({"intent": "transfer", "slots": {"payee_name": "李静"}})
     assert [node.tool for node in fallback.nodes] == ["resolve_payee"]
+
+
+def test_unregistered_intent_is_not_silently_answered() -> None:
+    """没登记的意图不许悄悄回退成一次绿灯查余额。"""
     unknown = planner_dag.build_or_single({"intent": "unknown", "slots": {}})
-    assert [node.tool for node in unknown.nodes] == ["query_balance"]
+    assert [node.tool for node in unknown.nodes] == [planner_dag.UNSUPPORTED_TOOL]
+    assert planner_dag.UNSUPPORTED_TOOL not in planner_rules.KNOWN_TOOLS
+    made_up = planner_dag.build_or_single({"intent": "reset_password", "slots": {}})
+    assert [node.tool for node in made_up.nodes] == [planner_dag.UNSUPPORTED_TOOL]
+
+
+def test_unregistered_intent_ends_as_a_red_refusal(bank: Path) -> None:
+    """编造的意图走到执行器：R03 亮红灯、confirm.rejected 留痕，一个工具都不执行。"""
+    events = drive("s_madeup", planner_dag.build_or_single({"intent": "reset_password", "slots": {}}))
+    trace = payload(events, "trace")
+    assert (trace["level"], trace["rule_id"]) == ("red", "R03_unknown_tool")
+    assert payload(events, "error")["code"] == "POLICY_BLOCKED"
+    assert "tool" not in names(events), "红灯之前不许真去调工具"
+    conn = db.connect()
+    kinds = [
+        row[0]
+        for row in conn.execute("SELECT event_type FROM audit_log WHERE session_id='s_madeup' ORDER BY seq")
+    ]
+    assert "policy.decided" in kinds
+    assert "confirm.rejected" in kinds
+    assert balance(conn) == 1_286_050
+    assert count(conn, "transactions") == 320
+    conn.close()
+
+
+def test_registered_templates_keep_building_normally() -> None:
+    """已登记的五个意图逐条回归：模板、节点数与顺序都不能被这次改动带走。"""
+    expected = {
+        "query_balance": ["query_balance"],
+        "bill_analysis": ["analyze_bill"],
+        "subscription": ["list_subs"],
+        "transfer": ["resolve_payee", "query_balance", "transfer"],
+        "birthday_plan": ["resolve_payee", "query_balance", "reserve_funds", "pay_merchant"],
+    }
+    for name, tools in expected.items():
+        slots = {"payee_name": "李静", "amount_fen": 50_000, "purpose": "生日"}
+        graph = planner_dag.build({"intent": name, "slots": dict(slots)})
+        assert [node.tool for node in graph.nodes] == tools, name
+        assert [node.tool for node in planner_dag.build_or_single({"intent": name, "slots": dict(slots)}).nodes] == tools
 
 
 # ---------------------------------------------------------------- 7.4 执行器
