@@ -12,15 +12,17 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, Final
 
+# 模块级导入（不用 from 包 import 模块）：tests/test_imports.py 用 ast 按模块名登记依赖，
+# 包级导入会被它漏掉，允许依赖表就会与代码现状对不上。
+import app.tools.bill as bill  # noqa: PLR0402
+import app.tools.cards as cards  # noqa: PLR0402
+import app.tools.invest as invest  # noqa: PLR0402
+import app.tools.products as products  # noqa: PLR0402
+import app.tools.queries as queries  # noqa: PLR0402
+import app.tools.subs as subs  # noqa: PLR0402
+import app.tools.transfers as transfers  # noqa: PLR0402
 from app.models import ToolResult
 from app.money import MAX_SINGLE_FEN
-import app.tools.bill as bill
-import app.tools.cards as cards
-import app.tools.invest as invest
-import app.tools.products as products
-import app.tools.queries as queries
-import app.tools.subs as subs
-import app.tools.transfers as transfers
 from app.tools.base import ToolContext
 
 _AMOUNT_FEN: Final[dict[str, Any]] = {

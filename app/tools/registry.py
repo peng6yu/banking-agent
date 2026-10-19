@@ -14,8 +14,10 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from typing import Any, Final
 
-import app.audit as audit
-import app.db as db
+# 模块级导入（不用 from 包 import 模块）：tests/test_imports.py 用 ast 按模块名登记依赖，
+# 包级导入会被它漏掉，允许依赖表就会与代码现状对不上。
+import app.audit as audit  # noqa: PLR0402
+import app.db as db  # noqa: PLR0402
 from app.clock import ToolNotFound, ValidationError, now_ms
 from app.log import log
 from app.models import ToolResult
