@@ -26,7 +26,7 @@ PRAGMAS: Final[tuple[str, ...]] = (
     "PRAGMA busy_timeout=5000;",
 )
 
-# 15 张表，顺序即依赖顺序（被引用的先建）
+# 17 张表，顺序即依赖顺序（被引用的先建）
 TABLE_NAMES: Final[tuple[str, ...]] = (
     "users",
     "accounts",
@@ -43,6 +43,8 @@ TABLE_NAMES: Final[tuple[str, ...]] = (
     "subs",
     "daily_limits",
     "denials",
+    "fund_products",
+    "fund_holdings",
 )
 
 SCHEMA_SQL: Final[str] = """
@@ -210,6 +212,30 @@ CREATE TABLE IF NOT EXISTS denials (
 );
 CREATE INDEX IF NOT EXISTS idx_denials_session ON denials(session_id, ts_ms);
 
+-- 理财场景三：产品库与用户持仓。金额/净值/份额一律整数，份额必须为正，
+-- 赎回全部时删行而不是留 0，从库层面就不可能出现负持仓或 0 份僵尸持仓。
+CREATE TABLE IF NOT EXISTS fund_products (
+  code           TEXT PRIMARY KEY,
+  name           TEXT NOT NULL,
+  category       TEXT NOT NULL CHECK (category IN ('money','bond','mixed','equity')),
+  risk_level     INTEGER NOT NULL CHECK (risk_level BETWEEN 1 AND 5),
+  min_buy_fen    INTEGER NOT NULL CHECK (min_buy_fen > 0),
+  nav_micro      INTEGER NOT NULL CHECK (nav_micro > 0),
+  nav_updated_ms INTEGER NOT NULL,
+  description    TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_fund_products_risk ON fund_products(risk_level);
+CREATE INDEX IF NOT EXISTS idx_fund_products_category ON fund_products(category);
+
+CREATE TABLE IF NOT EXISTS fund_holdings (
+  user_id      TEXT NOT NULL REFERENCES users(id),
+  product_code TEXT NOT NULL REFERENCES fund_products(code),
+  shares_milli INTEGER NOT NULL CHECK (shares_milli > 0),
+  cost_fen     INTEGER NOT NULL DEFAULT 0 CHECK (cost_fen >= 0),
+  PRIMARY KEY (user_id, product_code)
+);
+CREATE INDEX IF NOT EXISTS idx_fund_holdings_user ON fund_holdings(user_id);
+
 -- 审计只增不改：UPDATE/DELETE 一律由 SQLite 层拦掉（docs/03 3.2 第 7 张表）
 CREATE TRIGGER IF NOT EXISTS audit_no_update BEFORE UPDATE ON audit_log
 BEGIN SELECT RAISE(ABORT, 'audit_log is append-only'); END;
@@ -294,11 +320,11 @@ def table_names(conn: sqlite3.Connection) -> tuple[str, ...]:
 __all__ = [
     "DEFAULT_DB_PATH",
     "PRAGMAS",
-    "TABLE_NAMES",
     "SCHEMA_SQL",
+    "TABLE_NAMES",
     "connect",
-    "tx",
     "init_db",
     "sweep_expired_holds",
     "table_names",
+    "tx",
 ]

@@ -27,22 +27,28 @@ __all__ = ["bank", "ctx"]
 
 # ---------------------------------------------------------------- 注册表本身
 
+#: docs/06 6.1 权威表里的十个基础工具，名字与顺序都不能改
+DOCS_06_TOOL_NAMES = (
+    "query_balance",
+    "query_transactions",
+    "analyze_bill",
+    "list_subs",
+    "list_cards",
+    "resolve_payee",
+    "transfer",
+    "cancel_subscription",
+    "reserve_funds",
+    "pay_merchant",
+)
+#: 场景三理财新增的四个工具，追加在基础表之后
+FUND_TOOL_NAMES = ("list_products", "estimate_risk", "buy_fund", "redeem_fund")
+
+
 def test_tool_names_match_authoritative_table() -> None:
-    """docs/06 6.1 的权威表：名字与顺序都不能改。"""
-    assert TOOL_NAMES == (
-        "query_balance",
-        "query_transactions",
-        "analyze_bill",
-        "list_subs",
-        "list_cards",
-        "resolve_payee",
-        "transfer",
-        "cancel_subscription",
-        "reserve_funds",
-        "pay_merchant",
-    )
+    """docs/06 6.1 的权威表：名字与顺序都不能改；理财四件套跟在后面。"""
+    assert TOOL_NAMES == DOCS_06_TOOL_NAMES + FUND_TOOL_NAMES
     assert set(TOOL_NAMES) == set(registry.TOOLS)
-    assert len(registry.tool_schemas()) == 10
+    assert len(registry.tool_schemas()) == len(TOOL_NAMES)
 
 
 def test_registry_flags_and_schemas_are_consistent() -> None:
@@ -54,23 +60,33 @@ def test_registry_flags_and_schemas_are_consistent() -> None:
             if key.endswith("_fen"):
                 assert prop["type"] == "integer", f"{spec.name}.{key}"
                 assert "minimum" in prop, f"{spec.name}.{key}"
-    assert registry.WRITE_TOOL_NAMES == (
-        "transfer",
-        "cancel_subscription",
-        "reserve_funds",
-        "pay_merchant",
+    # 写标记只认权威表里的 writes 字段，不另维护一份名单
+    assert registry.WRITE_TOOL_NAMES == tuple(
+        spec.name for spec in registry.TOOL_SPECS if spec.writes
+    )
+    assert registry.READONLY_TOOL_NAMES == tuple(
+        spec.name for spec in registry.TOOL_SPECS if not spec.writes
     )
     assert set(registry.READONLY_TOOL_NAMES) | set(registry.WRITE_TOOL_NAMES) == set(TOOL_NAMES)
 
 
 def test_readonly_and_write_split_matches_policy_rules() -> None:
-    """工具层的只读/写划分要和 policy 认的那份完全一致，否则安全网会漏。"""
+    """工具层的只读/写划分要和 policy 认的那份完全一致，否则安全网会漏。
+
+    理财的只读两件套（list_products / estimate_risk）policy 还没登记，
+    那是 t21 迁 PENDING_TOOLS 时的事，这里只对 policy 认识的那部分做比对。
+    """
     from app.policy import rules as policy_rules
 
-    assert set(registry.READONLY_TOOL_NAMES) == set(policy_rules.READONLY_TOOLS)
-    assert set(registry.WRITE_TOOL_NAMES) == set(
-        policy_rules.SPEND_TOOLS | policy_rules.CONFIRM_ONLY_TOOLS
+    policy_write = (
+        policy_rules.SPEND_TOOLS | policy_rules.CONFIRM_ONLY_TOOLS | policy_rules.INVEST_TOOLS
     )
+    assert set(registry.WRITE_TOOL_NAMES) == set(policy_write)
+    assert set(policy_rules.READONLY_TOOLS) <= set(registry.READONLY_TOOL_NAMES)
+    assert set(registry.READONLY_TOOL_NAMES) - set(policy_rules.READONLY_TOOLS) == {
+        "list_products",
+        "estimate_risk",
+    }
 
 
 def test_tool_schemas_never_leak_handler() -> None:

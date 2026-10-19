@@ -205,19 +205,19 @@ def test_sse_frame_is_exactly_two_lines(bank: Path) -> None:
     assert routes.frame("tool", {"ok": True}) == 'event: tool\ndata: {"ok": true}\n\n'
 
 
-def test_health_reports_ten_tools_and_a_live_db(bank: Path) -> None:
+def test_health_reports_the_authoritative_tool_count_and_a_live_db(bank: Path) -> None:
     resp = call("GET", "/api/health")
     assert resp.status_code == 200
     body = resp.json()
     assert body["ok"] is True
-    assert body["tools"] == 10
+    assert body["tools"] == len(TOOL_NAMES)
     assert body["db"] is True
     assert isinstance(body["now_ms"], int)
 
 
-def test_tools_endpoint_returns_the_authoritative_ten(bank: Path) -> None:
+def test_tools_endpoint_returns_the_authoritative_table(bank: Path) -> None:
     body = call("GET", "/api/tools").json()
-    assert body["count"] == 10
+    assert body["count"] == len(TOOL_NAMES)
     assert tuple(tool["name"] for tool in body["tools"]) == TOOL_NAMES
     for tool in body["tools"]:
         assert tool["params"]["additionalProperties"] is False

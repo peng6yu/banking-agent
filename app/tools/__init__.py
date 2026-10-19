@@ -8,7 +8,13 @@
 
 from __future__ import annotations
 
-from app.tools.base import ToolContext, fail_result, ok_result, require_token, tool_result
+from app.tools.base import (
+    ToolContext,
+    fail_result,
+    ok_result,
+    require_token,
+    tool_result,
+)
 from app.tools.registry import (
     READONLY_TOOL_NAMES,
     TOOL_NAMES,

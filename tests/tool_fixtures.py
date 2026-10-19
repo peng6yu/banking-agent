@@ -15,6 +15,7 @@ from app import clock, db
 from app.models import Action
 from app.security import token as token_mod
 from app.tools.base import ToolContext
+from scripts.fund_seeds import seed_funds
 
 SECRET = "d" * 64
 USER_ID = "u_test"
@@ -31,6 +32,8 @@ MINIMAL_PARAMS: dict[str, dict[str, Any]] = {
     "cancel_subscription": {"sub_id": SUB_ACTIVE},
     "reserve_funds": {"amount_fen": 50_000},
     "pay_merchant": {"merchant": "cake_shop", "item": "生日蛋糕", "amount_fen": 88_800},
+    "buy_fund": {"product_code": "F00003", "amount_fen": 20_000},
+    "redeem_fund": {"product_code": "F00002", "amount_fen": 10_000},
 }
 
 
@@ -101,6 +104,7 @@ def _seed(conn) -> None:
     )
     _seed_anomalies(conn)
     _seed_ties(conn)
+    seed_funds(conn, USER_ID)
 
 
 def _overseas(

@@ -14,7 +14,7 @@ import logging
 import sqlite3
 from typing import Any, Final
 
-from app import funds
+import app.funds as funds
 from app.clock import BankError, HoldExpired, InsufficientFunds
 from app.models import ToolResult
 from app.money import fen_to_yuan_str

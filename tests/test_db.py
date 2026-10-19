@@ -1,4 +1,4 @@
-"""app/db.py 单测：15 张表、PRAGMA、审计触发器、事务与过期 hold 清扫。"""
+"""app/db.py 单测：表清单跟 schema 走、PRAGMA、审计触发器、事务与过期 hold 清扫。"""
 
 from __future__ import annotations
 
@@ -9,25 +9,39 @@ import pytest
 from app import audit, db
 from app.clock import now_ms
 
-EXPECTED_TABLES = frozenset(
-    {
-        "users", "accounts", "cards", "payees", "transactions", "holds", "audit_log",
-        "sessions", "dag_runs", "dag_nodes", "confirmations", "token_nonces",
-        "subs", "daily_limits", "denials",
-    }
-)
+def _schema_table_names() -> frozenset[str]:
+    """从 SCHEMA_SQL 里抠出所有建表语句的表名（跳过 -- 注释行）。
+
+    表清单以 schema 为准：往后加表不用再回来改这个测试文件。
+    """
+    names: set[str] = set()
+    for chunk in db.SCHEMA_SQL.split(";"):
+        lines = [
+            line.strip()
+            for line in chunk.splitlines()
+            if line.strip() and not line.strip().startswith("--")
+        ]
+        text = " ".join(lines)
+        if not text.startswith("CREATE TABLE"):
+            continue
+        names.add(text.split("(", 1)[0].removeprefix("CREATE TABLE IF NOT EXISTS ").strip())
+    return frozenset(names)
 
 
-def test_table_names_15(conn: sqlite3.Connection) -> None:
-    assert len(db.table_names(conn)) == 15
-    assert set(db.table_names(conn)) == EXPECTED_TABLES
+EXPECTED_TABLES = _schema_table_names()
+
+
+def test_table_names_follow_the_schema(conn: sqlite3.Connection) -> None:
+    """表名与数量都从 SCHEMA_SQL 推导，加表不会让这条用例变红。"""
     assert set(db.TABLE_NAMES) == EXPECTED_TABLES
+    assert set(db.table_names(conn)) == EXPECTED_TABLES
+    assert len(db.table_names(conn)) == len(EXPECTED_TABLES)
 
 
 def test_init_db_is_idempotent(conn: sqlite3.Connection) -> None:
     db.init_db(conn)
     db.init_db(conn)
-    assert len(db.table_names(conn)) == 15
+    assert len(db.table_names(conn)) == len(db.TABLE_NAMES)
 
 
 def test_pragmas(conn: sqlite3.Connection) -> None:

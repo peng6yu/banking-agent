@@ -18,6 +18,7 @@ from typing import Any, Final
 from app import audit, db
 from app.clock import ValidationError, now_ms
 from app.log import log
+from scripts.fund_seeds import seed_funds
 
 RANDOM_SEED: Final[int] = 20261018
 WINDOW_DAYS: Final[int] = 180
@@ -288,7 +289,7 @@ def _seed_subs(conn: sqlite3.Connection, now_ms_value: int) -> None:
         conn.execute(
             "INSERT INTO subs (id, account_id, merchant, amount_fen, period, next_charge_ms, status)"
             " VALUES (?, ?, ?, ?, ?, ?, 'active')",
-            ("sb_%08x" % seq, DEBIT_ACCOUNT_ID, merchant, amount_fen, period, next_charge_ms),
+            (f"sb_{seq:08x}", DEBIT_ACCOUNT_ID, merchant, amount_fen, period, next_charge_ms),
         )
 
 
@@ -300,14 +301,14 @@ def _seed_demo_session(conn: sqlite3.Connection, now_ms_value: int) -> None:
         (DEMO_SESSION_ID, opened_ms, opened_ms, "查一下上个月餐饮花了多少"),
     )
     session_id = DEMO_SESSION_ID
+    base: dict[str, Any] = {"session_id": session_id}
     events: tuple[tuple[str, dict[str, Any]], ...] = (
-        ("session.start", {"session_id": session_id, "channel": "demo"}),
-        ("intent.parsed", {"session_id": session_id, "intent": "query_spend", "category": "餐饮"}),
-        ("dag.built", {"session_id": session_id, "nodes": 1, "tools": ["query_spend"]}),
-        ("policy.decided", {"session_id": session_id, "level": "green", "rule_id": "R000"}),
-        ("tool.executed", {"session_id": session_id, "tool": "query_spend", "ok": True,
-                           "latency_ms": 12}),
-        ("session.end", {"session_id": session_id, "turns": 1}),
+        ("session.start", {**base, "channel": "demo"}),
+        ("intent.parsed", {**base, "intent": "query_spend", "category": "餐饮"}),
+        ("dag.built", {**base, "nodes": 1, "tools": ["query_spend"]}),
+        ("policy.decided", {**base, "level": "green", "rule_id": "R000"}),
+        ("tool.executed", {**base, "tool": "query_spend", "ok": True, "latency_ms": 12}),
+        ("session.end", {**base, "turns": 1}),
     )
     for event_type, payload in events:
         audit.append(conn, event_type, payload, session_id=DEMO_SESSION_ID)
@@ -347,8 +348,9 @@ def seed(conn: sqlite3.Connection) -> bool:
         )
         _seed_subs(conn, now)
         _seed_demo_session(conn, now)
+        funds = seed_funds(conn, USER_ID)
     log.info("seed.done", transactions=debit_count + credit_count, debit=debit_count,
-             credit=credit_count, opening_balance_fen=opening_balance_fen)
+             credit=credit_count, opening_balance_fen=opening_balance_fen, funds=funds)
     return True
 
 
@@ -368,7 +370,8 @@ def verify(conn: sqlite3.Connection) -> bool:
                           "  SELECT balance_after_fen FROM transactions t WHERE t.account_id = a.id"
                           "  ORDER BY t.ts_ms DESC, t.id DESC LIMIT 1)")
     checks: tuple[tuple[str, bool], ...] = (
-        ("tables_15", len(db.table_names(conn)) == 15),
+        # 表数跟着 schema 走，新增表不用再回来改这里
+        ("tables_all_present", len(db.table_names(conn)) == len(db.TABLE_NAMES)),
         ("transactions_320", _count(conn, "SELECT COUNT(*) AS n FROM transactions") == 320),
         ("balance_matches_tail", tail_mismatch == 0),
         ("debit_balance_12860_50", debit_balance == DEBIT_FINAL_BALANCE_FEN),
@@ -376,6 +379,8 @@ def verify(conn: sqlite3.Connection) -> bool:
         ("payees_4", _count(conn, "SELECT COUNT(*) AS n FROM payees") == 4),
         ("duplicate_name_2", _count(conn, "SELECT COUNT(*) AS n FROM payees WHERE name = '张三'") == 2),
         ("subs_5", _count(conn, "SELECT COUNT(*) AS n FROM subs") == 5),
+        ("fund_products_5", _count(conn, "SELECT COUNT(*) AS n FROM fund_products") == 5),
+        ("fund_holdings_2", _count(conn, "SELECT COUNT(*) AS n FROM fund_holdings") == 2),
         ("audit_chain_ok", audit.verify_chain(conn)),
     )
     for name, passed in checks:
@@ -392,7 +397,8 @@ def main() -> int:
             raise ValidationError("种子数据自检未通过")
     finally:
         conn.close()
-    log.info("seed.ok", tables=15, random_seed=RANDOM_SEED, window_days=WINDOW_DAYS)
+    log.info("seed.ok", tables=len(db.TABLE_NAMES), random_seed=RANDOM_SEED,
+             window_days=WINDOW_DAYS)
     return 0
 
 
