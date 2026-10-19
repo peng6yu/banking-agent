@@ -1,0 +1,42 @@
+%% 银行 AI 智能体 · 分层架构图（mermaid flowchart）
+%% 生成命令：npx @mermaid-js/mermaid-cli -i docs/架构图.mmd -o docs/架构图.svg -p /usr/bin/google-chrome
+flowchart TD
+    U["用户 · 浏览器"] --> FE["决策剧场前端 web/index.html"]
+    FE -->|"POST /api/chat（SSE 流式回帧）"| API["API 层 app/api/routes.py · 10 端点"]
+    FE -->|"POST /api/confirm 确认 + 身份因子"| API
+
+    subgraph L1["① 不可信区 · 认知层：LLM 只负责提申请，不碰钱"]
+        ENV["数据信封 app/security/envelope.py"]
+        INT["意图解析 app/planner/intent.py · 结构化槽位"]
+        DAG["DAG 规划 app/planner/dag.py · 5 个意图模板"]
+    end
+
+    subgraph L2["② 裁决区 · 确定性闸门：不调模型、不读环境、不取时钟"]
+        INJ["注入三层扫描 app/security/injection.py"]
+        PE["策略裁决 app/policy/engine.py · R01-R11 三色"]
+        TK["能力令牌 app/security/token.py · 七步校验"]
+        BRK["熔断器 app/security/breaker.py · 5 分钟 3 次"]
+    end
+
+    subgraph L3["③ 执行区 · 只认令牌，不认自然语言"]
+        REG["工具网关 app/tools/registry.py · 10 个工具"]
+        FND["两阶段资金 app/funds.py · hold 然后 commit"]
+        DB[("SQLite 15 张表 + WAL app/db.py")]
+    end
+
+    AUD["审计哈希链 app/audit.py · 16 类事件 append-only"]
+
+    API --> ENV --> INT --> DAG
+    DAG -->|"Action 参数已过白名单"| PE
+    INJ -->|"命中字段标 untrusted，强制升红"| PE
+    PE -->|"绿 · 只读直接放行"| REG
+    PE -->|"黄 / 红 · 先确认再发令牌"| TK
+    TK -->|"capability_token 有效期 120 秒"| REG
+    BRK -.->|"同一会话连续被拒 3 次则熔断 60 秒"| API
+    REG --> FND --> DB
+    REG --> AUD
+    FND --> AUD
+    PE --> AUD
+    TK --> AUD
+    DB --> AUD
+    AUD -->|"GET /api/audit 与 /api/audit/verify"| FE
