@@ -302,6 +302,24 @@ def test_build_transfer_dag_wires_upstream_references() -> None:
     assert built.nodes[1].depends_on == ["n1"]
 
 
+def test_transfer_template_passes_card_tail_to_resolve_payee() -> None:
+    """同名收款人靠卡尾号收敛：尾号要跟着走到 resolve_payee 节点，没说就不带这个键。
+
+    模板里带 resolve_payee 时，句子里那个尾号说的是收款人的卡，不能再当成自己账户的
+    account_tail 去查余额——那样只会得到 ACCOUNT_NOT_FOUND，是这一条顺带修掉的真 bug。
+    """
+    built = transfer_dag(payee_name="张三", amount_fen=50_000, card_tail="4417")
+    n1 = built.nodes[0]
+    assert n1.tool == "resolve_payee"
+    assert n1.params["name"] == "张三"
+    assert n1.params["card_tail"] == "4417"
+    assert "account_tail" not in built.nodes[1].params
+
+    without = transfer_dag(amount_fen=LIJING_AMOUNT_FEN)
+    assert without.nodes[0].params["name"] == "李静"
+    assert "card_tail" not in without.nodes[0].params
+
+
 def test_build_amount_all_transfer_points_at_balance_result() -> None:
     built = planner_dag.build({"intent": "transfer", "slots": {"payee_name": "李静", "amount_all": True}})
     assert built.nodes[2].params["amount_fen"] == "@n2.accounts.0.balance_fen"

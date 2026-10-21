@@ -163,7 +163,7 @@ TOOL_SPECS: Final[tuple[ToolSpec, ...]] = (
     ),
     ToolSpec(
         name="resolve_payee",
-        description="按姓名或备注找收款人；同名多个时必须带卡尾号区分。",
+        description="按姓名或备注找收款人；同名多个时带上卡尾号可以区分。",
         params={
             "type": "object",
             "properties": {
@@ -172,7 +172,12 @@ TOOL_SPECS: Final[tuple[ToolSpec, ...]] = (
                     "minLength": 1,
                     "maxLength": 50,
                     "description": "姓名或备注名，例如 李静 / 老妈",
-                }
+                },
+                "card_tail": {
+                    "type": "string",
+                    "pattern": "^[0-9]{4}$",
+                    "description": "用户说了卡尾号就带上，用来区分同名收款人",
+                },
             },
             "required": ["name"],
             "additionalProperties": False,

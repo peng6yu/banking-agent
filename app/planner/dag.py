@@ -179,13 +179,13 @@ def _params(tool: str, slots: dict[str, Any], ids: dict[str, str]) -> dict[str, 
 def _tool_params(tool: str, slots: dict[str, Any], ids: dict[str, str]) -> dict[str, Any]:
     """只按工具名填参数，主体那一层由 _params 统一补。"""
     if tool == "query_balance":
-        return _card_tail(slots)
+        return _card_tail(slots, ids)
     if tool == "list_subs":
         return {}
     if tool == "analyze_bill":
         return _bill_params(slots)
     if tool == "resolve_payee":
-        return {"name": _payee_name(slots)}
+        return _payee_params(slots)
     if tool == "transfer":
         return _transfer_params(slots, ids)
     if tool == "reserve_funds":
@@ -262,9 +262,25 @@ def _bill_params(slots: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _card_tail(slots: dict[str, Any]) -> dict[str, Any]:
+def _card_tail(slots: dict[str, Any], ids: dict[str, str]) -> dict[str, Any]:
+    """卡尾号槽位查的是自己名下的账户。
+
+    模板里带 resolve_payee 时（转账、订花），句子里说的尾号指的是收款人的卡，
+    拿去查账户只会得到 ACCOUNT_NOT_FOUND，这个槽位归收款人那边用。
+    """
+    if "resolve_payee" in ids:
+        return {}
     tail = str(slots.get("card_tail") or slots.get("account_tail") or "").strip()
     return {"account_tail": tail} if tail else {}
+
+
+def _payee_params(slots: dict[str, Any]) -> dict[str, Any]:
+    """收款人查询：姓名必填；说了卡尾号就带上，用来在同名里收窄到一个。"""
+    params: dict[str, Any] = {"name": _payee_name(slots)}
+    tail = str(slots.get("card_tail") or "").strip()
+    if tail:
+        params["card_tail"] = tail
+    return params
 
 
 def _payee_name(slots: dict[str, Any]) -> str:

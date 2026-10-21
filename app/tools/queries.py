@@ -90,9 +90,17 @@ def query_transactions(
 
 
 def resolve_payee(ctx: ToolContext, params: dict[str, Any], token: str | None = None) -> ToolResult:
-    """按姓名或备注找收款人；同名多个必须带出卡尾号让人能区分。"""
+    """按姓名或备注找收款人；同名多个必须带出卡尾号让人能区分。
+
+    用户说了卡尾号就按尾号收窄：同名两人只留尾号相同的那一个，
+    「张三尾号4417」一次问清，不在同名人之间反复反问。尾号对不上就一个都不留——
+    用户点名的尾号必须真的对上，不能悄悄换成另一个同名的人。
+    """
     query_text = str(params.get("name", "")).strip()
     rows = _payee_candidates(ctx.conn, query_text, ctx.account_id)
+    tail = str(params.get("card_tail") or "").strip()
+    if tail:
+        rows = [row for row in rows if str(row["card_tail"]) == tail]
     candidates = [
         {
             "payee_id": str(row["id"]),

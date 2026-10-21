@@ -285,6 +285,41 @@ def test_resolve_payee_disambiguates_duplicates_by_card_tail(ctx: ToolContext) -
     assert none.data["candidates"] == []
 
 
+def test_resolve_payee_lists_both_same_name_candidates(ctx: ToolContext) -> None:
+    """没说卡尾号时，两个同名「张三」（尾号 4417 / 6620）都要摆出来让用户选。"""
+    dup = registry.execute("resolve_payee", {"name": "张三"}, ctx=ctx)
+    assert dup.ok is True
+    assert dup.data["count"] == 2
+    assert [item["card_tail"] for item in dup.data["candidates"]] == ["4417", "6620"]
+
+
+def test_resolve_payee_narrows_same_name_by_card_tail(ctx: ToolContext) -> None:
+    """同名收款人靠卡尾号收敛：说了尾号就只留那一位，对不上就一个都不留。
+
+    给了尾号就必须直接收敛成一个，不能在同名人之间反复反问；尾号对不上时
+    一个都不留——用户点名的尾号必须真的对上，不能悄悄换成另一个同名的人。
+    """
+    dup = registry.execute("resolve_payee", {"name": "张三"}, ctx=ctx)
+    assert dup.data["count"] == 2
+
+    picked = registry.execute("resolve_payee", {"name": "张三", "card_tail": "4417"}, ctx=ctx)
+    assert picked.ok is True
+    assert picked.data["count"] == 1
+    only = picked.data["candidates"][0]
+    assert only["card_tail"] == "4417"
+    assert only["payee_id"] == dup.data["candidates"][0]["payee_id"]
+    assert only["payee_id"] != dup.data["candidates"][1]["payee_id"]
+
+    other = registry.execute("resolve_payee", {"name": "张三", "card_tail": "6620"}, ctx=ctx)
+    assert other.data["count"] == 1
+    assert other.data["candidates"][0]["payee_id"] == dup.data["candidates"][1]["payee_id"]
+
+    mismatch = registry.execute("resolve_payee", {"name": "张三", "card_tail": "9999"}, ctx=ctx)
+    assert mismatch.ok is True
+    assert mismatch.data["count"] == 0
+    assert mismatch.data["candidates"] == []
+
+
 def test_list_subs_only_active_by_default(ctx: ToolContext) -> None:
     """默认只列生效中的；include_cancelled=True 才带上已取消的。"""
     active = registry.execute("list_subs", {}, ctx=ctx)
