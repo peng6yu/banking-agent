@@ -29,8 +29,15 @@ from app.tools import base as tool_base
 log = logging.getLogger(__name__)
 
 Emit = Callable[[str, dict[str, Any]], Any]
+#: 确认卡有效期：**毫秒**。对外承诺的「120 秒」就是这个常量（换算用 ms_to_seconds）。
 CONFIRM_TIMEOUT_MS: Final[int] = 120_000
+#: 能力令牌有效期：也是毫秒（app/security/token.py 里 exp_ms 与 now_ms() 同单位）。
 TOKEN_TTL_MS: Final[int] = 120_000
+
+
+def ms_to_seconds(ms: int) -> float:
+    """毫秒 -> 秒。asyncio.wait_for / asyncio.sleep 收的是秒，别把它们当毫秒用。"""
+    return ms / 1000
 BUSY_STATES: Final[tuple[str, ...]] = ("pending", "running", "waiting_confirm", "waiting_factor")
 CONTINUE: Final[str] = "continue"
 STOP: Final[str] = "stop"

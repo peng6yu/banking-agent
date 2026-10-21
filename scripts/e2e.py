@@ -371,8 +371,9 @@ async def _cancel_run(session_id: str, sub_id: str, events: list[tuple[str, dict
         if name in ("confirm", "factor") and not done.is_set():
             done.set()
 
+    # 确认超时单位是毫秒：0.5 秒 = 500 毫秒
     run = asyncio.create_task(executor.run(session_id, dag, emit, secret=SECRET,
-                                           confirm_timeout_ms=0.5))
+                                           confirm_timeout_ms=500))
     for _ in range(200):
         if done.is_set():
             break

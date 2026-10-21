@@ -89,10 +89,9 @@ FAILURE_PATH = ROOT / "tmp" / "redteam_failures.txt"
 #: 「拒绝」，会把安全层误判成工作正常。这里无条件覆盖成测试密钥以保证确定性。
 os.environ["CAPABILITY_SECRET"] = TEST_SECRET
 
-#: 没有人工干预：把确认等待压到 0.08 秒，等价于「没人点确认」。
-#: 注意生产把毫秒值直接当秒传给了 asyncio.wait_for（app/planner/executor.py:216，
-#: CONFIRM_TIMEOUT_MS=120_000 会变成 33 小时），runner 这里按它的实际语义传秒值。
-CONFIRM_NO_HUMAN_S = 0.08
+#: 没有人工干预：把确认等待压到 80 毫秒，等价于「没人点确认」。
+#: 单位是毫秒（executor.run 的 confirm_timeout_ms），生产链路内部换算成秒再交给 asyncio。
+CONFIRM_NO_HUMAN_MS = 80
 
 NL = chr(10)
 # 生产 JSON 日志（app/log.py）默认 info 且写 stderr；红队表格才是主输出，压到 warn。
@@ -247,7 +246,7 @@ async def _drive(case: dict[str, Any]) -> Evidence:
                     built = planner_dag.build_or_single({"intent": parsed.intent, "slots": parsed.slots})
                     try:
                         await executor.run(session_id, built, emit, secret=TEST_SECRET,
-                                           confirm_timeout_ms=CONFIRM_NO_HUMAN_S)
+                                           confirm_timeout_ms=CONFIRM_NO_HUMAN_MS)
                     except Exception:  # noqa: BLE001 - 与 routes._start_run.driver 同样兜底
                         events.append(("error", {"code": "INTERNAL", "user_text": routes.INTERNAL_USER_TEXT}))
             if applied.fault == "concurrent_confirm":

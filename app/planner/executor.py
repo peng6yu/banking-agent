@@ -23,6 +23,7 @@ from app.planner.state import (
     balance_of,
     factors_ok,
     finish_run,
+    ms_to_seconds,
     new_confirmation,
     open_run,
     persist_decision,
@@ -96,7 +97,10 @@ async def run(
     secret: str | None = None,
     confirm_timeout_ms: int = CONFIRM_TIMEOUT_MS,
 ) -> None:
-    """跑一张执行图；只发事件，不返回业务数据。"""
+    """跑一张执行图；只发事件，不返回业务数据。
+
+    confirm_timeout_ms 的单位是**毫秒**（默认 120_000 = 120 秒）；内部换算成秒再交给 asyncio。
+    """
     state: RunState | None = None
     # 用户原话里的注入（IM 转发、夹带指令）不在工具参数里，只在这一轮认领：
     # 认领后并进每个 Action 的 untrusted_fields，R04 再把它升成双因子。
@@ -348,7 +352,10 @@ async def _guard(
     emit: Emit,
     confirm_timeout_ms: int,
 ) -> tuple[bool, bool]:
-    """黄/红都要用户点头；返回 (是否放行, 是否整轮到此为止)。"""
+    """黄/红都要用户点头；返回 (是否放行, 是否整轮到此为止)。
+
+    confirm_timeout_ms 的单位是**毫秒**。
+    """
     conf = new_confirmation(state, node, action, decision)
     if decision.level == "red" and not decision.required_factors:
         await _blocked(state, node, conf, decision, emit, action)
@@ -362,7 +369,8 @@ async def _guard(
     )
     persist_node(state, rec, "waiting_factor" if decision.level == "red" else "waiting_confirm")
     try:
-        answer = await asyncio.wait_for(wait_for_answer(conf), confirm_timeout_ms)
+        # wait_for 收的是**秒**，这里存的是**毫秒**（confirm_timeout_ms），换算别省。
+        answer = await asyncio.wait_for(wait_for_answer(conf), ms_to_seconds(confirm_timeout_ms))
     except TimeoutError:
         await _timeout(state, rec, conf, emit)
         return False, True
