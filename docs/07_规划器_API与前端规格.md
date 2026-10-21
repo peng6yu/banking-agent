@@ -37,12 +37,14 @@ def parse(text: str, history: list) -> IntentResult
     'properties': {
       'intent': {'type': 'string', 'enum': [
           'query_balance', 'transfer', 'bill_analysis',
-          'subscription', 'birthday_plan', 'unknown']},
+          'subscription', 'birthday_plan', 'invest', 'unknown']},
       'payee_name': {'type': 'string'},
       'amount_fen': {'type': 'integer'},
       'note': {'type': 'string'},
       'period': {'type': 'string', 'enum': ['month', 'year']},
       'month': {'type': 'integer'},
+      'action': {'type': 'string', 'enum': ['buy', 'redeem', 'query']},
+      'product_code': {'type': 'string'},
       'missing': {'type': 'array', 'items': {'type': 'string'}},
       'confidence': {'type': 'number'}
     },
@@ -66,6 +68,19 @@ def parse(text: str, history: list) -> IntentResult
 
 **实测教训**：MiniMax 在 temp=0 下也会偶发不调工具直接拒答（11 次里有 1 次）。所以重试 1 次是必需逻辑，不是保险丝。
 
+### 理财意图（`invest`）的动作与槽位
+
+| action | 含义 | 必备槽位 | 落到哪个工具 |
+|---|---|---|---|
+| `buy` | 申购 | `product_code` + `amount_fen` | `buy_fund`（写操作，R10 红灯 + 人脸与动态口令） |
+| `redeem` | 赎回 | `product_code` + `amount_fen` | `redeem_fund`（写操作，R10 红灯 + 人脸与动态口令） |
+| `query` | 看在售产品 | 无 | `list_products`（只读，绿灯） |
+
+- 槽位名 `product_code` 就是工具参数名，`list_products` 返回的 `code` 原样传回来（`app/tools/tool_specs.py` 的参数说明）。
+- 意图层目前只产出 `action` 与 `product_code` 两个理财槽位，所以 `list_products` 这一路不带筛选条件（全量返回）。DAG 层已经支持 `risk_level` / `category` 两个可选筛选，意图层补上就自动生效。
+- 缺 `product_code` 或 `amount_fen` 时**不在意图层反问**（`NEED_SLOTS` 只管转账与生日花束），而是走 §7.3 的 E8 回退：退到只读的 `list_products`，把产品代码与起购金额摆给用户；申购与赎回节点绝不带着半截参数执行。
+- 三档动作都是**固定模板**，模型只填槽位、不定拓扑（见 §7.3）。
+
 ## 7.3 DAG 构建（`app/planner/dag.py`）
 
 ```python
@@ -83,13 +98,16 @@ def topo_sort(dag: Dag) -> list[DAGNode]
 | `subscription` | `n1 list_subs` |
 | `transfer` | `n1 resolve_payee → n2 query_balance → n3 transfer` |
 | `birthday_plan` | `n1 resolve_payee → n2 query_balance → n3 reserve_funds → n4 pay_merchant` |
+| `invest`（`action=buy`） | `n1 buy_fund` |
+| `invest`（`action=redeem`） | `n1 redeem_fund` |
+| `invest`（`action=query`；认不出 `action` 时也走这一路） | `n1 list_products` |
 | 模板不在册（模型编的意图） | `n1 unsupported_request` → 策略层 `R03_unknown_tool` 红灯 + `confirm.rejected`，**不回退成默认意图** |
 | `unknown` | 不建 DAG，直接反问 |
 
 为什么固定模板而不用模型自由生成 DAG：**可审计、可复现、可单测**。评审问「你的规划怎么保证不乱」时，答案是「模板 + 参数填充，模型只填槽位不定拓扑」。这是设计选择，写进答辩。
 
 
-**`build_or_single` 的两种回退**：在册意图建图失败（缺必填槽位等）回退成模板第一步（E8）；意图本身不在册时**不**回退成 `query_balance`——那等于把「这个请求我不会」悄悄答成「这是你的余额」，用户以为请求被受理了，审计里也只留下一条绿灯。改为落一个不在注册表里的哨兵工具名 `unsupported_request`，由 R03 显式拒绝并留痕。已登记的十个工具行为不变（tests/test_planner.py 逐条回归）。
+**`build_or_single` 的两种回退**：在册意图建图失败（缺必填槽位等）回退成模板第一步（E8）；理财是唯一的例外——缺 `product_code` 或 `amount_fen` 时退回**只读**的 `n1 list_products`，把产品代码与起购金额摆给用户让他补一句再买，绝不带着半截参数去申购或者赎回；意图本身不在册时**不**回退成 `query_balance`——那等于把「这个请求我不会」悄悄答成「这是你的余额」，用户以为请求被受理了，审计里也只留下一条绿灯。改为落一个不在注册表里的哨兵工具名 `unsupported_request`，由 R03 显式拒绝并留痕。已登记的十个工具行为不变（tests/test_planner.py 逐条回归）。
 
 ### `validate` 分支表
 
