@@ -39,6 +39,7 @@ PAYEE_LIJING: Final[str] = "p_1d6f92b0"
 PAYEE_WANGQIANG: Final[str] = "p_4a2e7c58"
 PAYEE_ZHANGSAN_A: Final[str] = "p_77c05e3a"
 PAYEE_ZHANGSAN_B: Final[str] = "p_9b3f16d2"
+PAYEE_MAMA: Final[str] = "p_5d8b3f27"
 DEMO_SESSION_ID: Final[str] = "s_0a4c8e71"
 
 # 分类商户池：counterparty 从这里挑，异常场景的商户固定写死
@@ -279,7 +280,8 @@ def _seed_payees(conn: sqlite3.Connection) -> None:
         [(PAYEE_LIJING, USER_ID, "李静", "工商银行", "8821", "房东"),
          (PAYEE_WANGQIANG, USER_ID, "王强", "建设银行", "3095", None),
          (PAYEE_ZHANGSAN_A, USER_ID, "张三", "招商银行", "4417", "同事A"),
-         (PAYEE_ZHANGSAN_B, USER_ID, "张三", "民生银行", "6620", "同事B")],
+         (PAYEE_ZHANGSAN_B, USER_ID, "张三", "民生银行", "6620", "同事B"),
+         (PAYEE_MAMA, USER_ID, "妈妈", "农业银行", "7788", "我妈")],
     )
 
 
@@ -376,7 +378,8 @@ def verify(conn: sqlite3.Connection) -> bool:
         ("balance_matches_tail", tail_mismatch == 0),
         ("debit_balance_12860_50", debit_balance == DEBIT_FINAL_BALANCE_FEN),
         ("credit_limit_20000", credit_limit == CREDIT_LIMIT_FEN),
-        ("payees_4", _count(conn, "SELECT COUNT(*) AS n FROM payees") == 4),
+        ("payees_5", _count(conn, "SELECT COUNT(*) AS n FROM payees") == 5),
+        ("payee_mama_1", _count(conn, "SELECT COUNT(*) AS n FROM payees WHERE name = '妈妈' AND alias = '我妈'") == 1),
         ("duplicate_name_2", _count(conn, "SELECT COUNT(*) AS n FROM payees WHERE name = '张三'") == 2),
         ("subs_5", _count(conn, "SELECT COUNT(*) AS n FROM subs") == 5),
         ("fund_products_5", _count(conn, "SELECT COUNT(*) AS n FROM fund_products") == 5),
