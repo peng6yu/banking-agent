@@ -103,7 +103,7 @@ docs(05): 补充 hold 超时后的补偿路径
 | `m4` | 规划执行 | intent/DAG/executor 跑通转账全链路 |
 | `m5` | API | 10 端点 + SSE 全事件 |
 | `m6` | 前端 | 双栏 + 决策剧场实时流 |
-| `m7` | 红队 | 43 条红队用例：PASS 28 / FAIL 15（离线 ScriptedAdapter 实跑；以 `python3.12 -m scripts.redteam` 最终实跑为准） |
+| `m7` | 红队 | 43 条红队用例：PASS 29 / FAIL 14（离线 ScriptedAdapter 实跑；以 `python3.12 -m scripts.redteam` 最终实跑为准） |
 | `m8` | 交付 | README/PPT/安全自评/演示脚本齐 |
 
 打 tag 命令：`git tag -a m3 -m '安全层完成' && git push origin m3`
