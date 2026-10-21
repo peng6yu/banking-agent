@@ -73,8 +73,8 @@ def test_registry_flags_and_schemas_are_consistent() -> None:
 def test_readonly_and_write_split_matches_policy_rules() -> None:
     """工具层的只读/写划分要和 policy 认的那份完全一致，否则安全网会漏。
 
-    理财的只读两件套（list_products / estimate_risk）policy 还没登记，
-    那是 t21 迁 PENDING_TOOLS 时的事，这里只对 policy 认识的那部分做比对。
+    理财的只读两件套（list_products / estimate_risk）已登记进 policy 的
+    READONLY_TOOLS：查理财列表走 R01 绿灯，不再被 R03 当成幻觉工具拦停。
     """
     from app.policy import rules as policy_rules
 
@@ -82,11 +82,8 @@ def test_readonly_and_write_split_matches_policy_rules() -> None:
         policy_rules.SPEND_TOOLS | policy_rules.CONFIRM_ONLY_TOOLS | policy_rules.INVEST_TOOLS
     )
     assert set(registry.WRITE_TOOL_NAMES) == set(policy_write)
-    assert set(policy_rules.READONLY_TOOLS) <= set(registry.READONLY_TOOL_NAMES)
-    assert set(registry.READONLY_TOOL_NAMES) - set(policy_rules.READONLY_TOOLS) == {
-        "list_products",
-        "estimate_risk",
-    }
+    assert set(policy_rules.READONLY_TOOLS) == set(registry.READONLY_TOOL_NAMES)
+    assert set(registry.READONLY_TOOL_NAMES) - set(policy_rules.READONLY_TOOLS) == set()
 
 
 def test_tool_schemas_never_leak_handler() -> None:

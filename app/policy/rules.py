@@ -19,10 +19,10 @@ from app.money import fen_to_yuan_str
 SINGLE_LIMIT_FEN: Final[int] = 100_000
 DAILY_LIMIT_FEN: Final[int] = 100_000
 
-# docs/06 6.1 的权威工具表：只读 6 个 + 写 4 个
+# 权威工具表（docs/06 6.1）：只读 6 个 + 写 4 个；理财的只读两件套也走只读通道，故只读 8 个 + 写 4 个
 READONLY_TOOLS: Final[frozenset[str]] = frozenset(
-    {"query_balance", "query_transactions", "analyze_bill", "list_subs", "list_cards", "resolve_payee"}
-)
+    {"query_balance", "query_transactions", "analyze_bill", "list_subs", "list_cards", "resolve_payee",
+     "list_products", "estimate_risk"})
 SPEND_TOOLS: Final[frozenset[str]] = frozenset({"transfer", "reserve_funds", "pay_merchant"})
 CONFIRM_ONLY_TOOLS: Final[frozenset[str]] = frozenset({"cancel_subscription"})
 # 账户安全类：改限额 / 解绑卡 / 改联系方式 / 改密码，三重验证

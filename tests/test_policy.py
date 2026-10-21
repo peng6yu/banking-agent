@@ -62,6 +62,30 @@ def test_r01_readonly_green() -> None:
     assert decision.required_factors == []
 
 
+def test_r01_readonly_green_for_list_products() -> None:
+    """查理财列表是只读绿灯：R01 直通，不能被 R03 当成幻觉工具拦停。"""
+    decision = decide(Action(tool="list_products", params={}, account_id="a_1"))
+    assert (decision.level, decision.rule_id) == ("green", "R01_readonly")
+    assert decision.reason_code == "READONLY"
+    assert decision.rule_id != "R03_unknown_tool"
+    assert decision.required_factors == []
+
+
+def test_r01_readonly_green_for_estimate_risk() -> None:
+    """风险测算同样只读：绿灯直通 R01，不落到 R03_unknown_tool。"""
+    decision = decide(
+        Action(
+            tool="estimate_risk",
+            params={"product_code": "F00001", "amount_fen": 100_000},
+            account_id="a_1",
+        )
+    )
+    assert (decision.level, decision.rule_id) == ("green", "R01_readonly")
+    assert decision.reason_code == "READONLY"
+    assert decision.rule_id != "R03_unknown_tool"
+    assert decision.required_factors == []
+
+
 def test_r02_invalid_amount_red() -> None:
     decision = decide(transfer_action(0))
     assert (decision.level, decision.rule_id) == ("red", "R02_invalid_amount")
