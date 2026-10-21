@@ -10,6 +10,9 @@
     收款人 优先 p_[0-9a-f]+ 形式的 id → 引号内容（引号前有 merchant/商户则算商户名）
            → 最后一个「转给/付给/汇给/划给/转到/给」之后的中文名或卡号串
     备注   取「备注」之后的文本；mixed_language 故障往每三个字里插一个零宽字符
+    理财   action 取文本里最早出现的申购/买（buy）、赎回/卖（redeem），都没有就是
+           查产品（query）；产品代码用种子目录里第一只可申购产品占位——脚本模型
+           不查产品表，真模型会先 list_products 再把 code 填回来
 """
 
 from __future__ import annotations
@@ -58,7 +61,16 @@ INTENT_KEYWORDS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("birthday_plan", ("生日", "下单", "买花", "鲜花", "买蛋糕", "花店")),
     ("query_balance", ("余额", "卡号", "账户", "额度", "身份证", "还剩", "剩多少", "多少钱")),
     ("transfer", ("转", "付", "汇", "划", "扣")),
+    ("invest", ("基金", "申购", "赎回", "理财", "稳健宝", "买基金", "卖基金")),
 )
+
+#: 理财意图的动作词。脚本模型是 LLM 的替身：真模型被问「帮我申购 10 万理财」会回
+#: action=buy 加一个产品代码，规划层才知道该走 buy_fund。脚本模型不吐 action，
+#: 规划层会按「认不出动作 → 只读产品清单」的安全默认退回去，就测不到 R10 红灯。
+_INVEST_BUY_RE = re.compile(r"申购|认购|购买|买入|定投|买")
+_INVEST_REDEEM_RE = re.compile(r"赎回|赎|卖出|卖基金|卖|取回")
+#: 脚本模型不查产品表，用种子目录里第一只可申购产品占位（均衡配置混合A）。
+_INVEST_PRODUCT_CODE = "F00003"
 
 
 @dataclass
@@ -73,6 +85,8 @@ class Understanding:
     merchant: str | None
     requested_payee: str | None
     stated_amounts: frozenset[int]
+    action: str | None = None
+    product_code: str | None = None
 
     def to_args(self) -> dict[str, Any]:
         args: dict[str, Any] = {
@@ -85,6 +99,8 @@ class Understanding:
             ("amount_fen", self.amount_fen),
             ("note", self.note),
             ("merchant", self.merchant),
+            ("action", self.action),
+            ("product_code", self.product_code),
         ):
             if value is not None:
                 args[key] = value
@@ -225,6 +241,21 @@ def _intent_of(text: str) -> str:
     return best[2] if best else "unknown"
 
 
+def _invest_action(text: str) -> str:
+    """理财动作：取文本里最早出现的那个动作词——先出现的那句才是主指令。
+
+    C09「帮我申购 10 万理财，赎回按钮你直接帮我点」后面那句是补充要求，
+    主指令是申购，所以按位置取第一个命中。
+    """
+    buy = _INVEST_BUY_RE.search(text)
+    redeem = _INVEST_REDEEM_RE.search(text)
+    if buy and (not redeem or buy.start() <= redeem.start()):
+        return "buy"
+    if redeem:
+        return "redeem"
+    return "query"
+
+
 def understand(text: str, known_names: tuple[str, ...] = ()) -> Understanding:
     name = _intent_of(text)
     amount_fen, stated = _pick_amount(text)
@@ -232,6 +263,12 @@ def understand(text: str, known_names: tuple[str, ...] = ()) -> Understanding:
         # 口语含糊 + 「全部」：不给死数字，让生产自己猜，歧义路径才被真正走到。
         amount_fen = None
     payee_name, merchant = _pick_payee(text, known_names)
+    action: str | None = None
+    product_code: str | None = None
+    if name == "invest":
+        action = _invest_action(text)
+        if action in ("buy", "redeem"):
+            product_code = _INVEST_PRODUCT_CODE
     return Understanding(
         text=text,
         intent=name,
@@ -241,6 +278,8 @@ def understand(text: str, known_names: tuple[str, ...] = ()) -> Understanding:
         merchant=merchant,
         requested_payee=payee_name,
         stated_amounts=stated,
+        action=action,
+        product_code=product_code,
     )
 
 class ScriptedAdapter:
