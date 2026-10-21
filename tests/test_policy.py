@@ -287,3 +287,60 @@ def test_every_decision_carries_rule_id_and_text() -> None:
         decision: Decision = decide(action)
         assert decision.rule_id
         assert decision.reason_text
+
+
+# ---------- 用户可见文案：不念内部 id，红灯不说「我不做」 ----------
+
+
+def test_yellow_reason_text_names_the_payee_not_the_internal_id() -> None:
+    """R06 的确认卡片要念收款人的名字，不是数据库主键。
+
+    没有 payee_name 时 _payee_label 会回落到 payee_id（p_xxx），
+    等于把 p_77c05e3a 这种内部 id 念给用户听。
+    """
+    decision = decide(
+        Action(
+            tool="transfer",
+            params={"payee_id": "p_77c05e3a", "payee_name": "张三"},
+            account_id="a_1",
+            amount_fen=50_000,
+        ),
+        PolicyContext(),
+    )
+    assert decision.rule_id == "R06_transfer_yellow"
+    assert "张三" in decision.reason_text
+    assert "p_" not in decision.reason_text
+
+
+def test_yellow_reason_text_falls_back_to_the_other_party() -> None:
+    """没有展示名时说「对方」：不抛异常，也不把内部 id 念出来。"""
+    decision = decide(
+        Action(
+            tool="transfer",
+            params={"merchant": "flower_shop"},
+            account_id="a_1",
+            amount_fen=50_000,
+        ),
+        PolicyContext(),
+    )
+    assert decision.rule_id == "R06_transfer_yellow"
+    assert "对方" in decision.reason_text
+    assert "p_" not in decision.reason_text
+
+
+def test_red_single_text_asks_for_verification_not_refusal() -> None:
+    """R08 是可验证的红：face + sms 验过就放行，文案不能停在「我不能直接做」。"""
+    decision = decide(transfer_action(100_001), PolicyContext())
+    assert decision.rule_id == "R08_transfer_red_single"
+    assert "人脸" in decision.reason_text
+    assert "短信" in decision.reason_text
+    assert "不能直接做" not in decision.reason_text
+
+
+def test_red_daily_text_asks_for_verification_not_refusal() -> None:
+    """R07 与 R08 同理：日累计越线也是双因子验过就放行，不能说「我先不做」。"""
+    decision = decide(transfer_action(20_000), PolicyContext(spent_today_fen=90_000))
+    assert decision.rule_id == "R07_transfer_red_daily"
+    assert "人脸" in decision.reason_text
+    assert "短信" in decision.reason_text
+    assert "我先不做" not in decision.reason_text

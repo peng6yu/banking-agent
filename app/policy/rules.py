@@ -160,14 +160,21 @@ def _emit_yellow_transfer(action: Action, ctx: PolicyContext) -> Decision:
 
 
 def _emit_red_daily(action: Action, ctx: PolicyContext) -> Decision:
+    # R07 与 R08 同属「可验证的红」：因子齐了就能继续，文案不能说「我不做」。
     text = (
-        f"今日已用 {_yuan(ctx.spent_today_fen)}，这笔 {_yuan(_amount(action))} 会超过日累计线，我先不做"
+        f"今日已用 {_yuan(ctx.spent_today_fen)}，这笔 {_yuan(_amount(action))} "
+        "会超过日累计线，需要人脸和短信验证后才能继续"
     )
     return _decision("red", "R07_transfer_red_daily", "TRANSFER_DAILY_RED", text, ctx, ("face", "sms"))
 
 
 def _emit_red_single(action: Action, ctx: PolicyContext) -> Decision:
-    text = f"单笔 {_yuan(_amount(action))} 超过 {_yuan(ctx.single_limit_fen)}上限，这笔我不能直接做"
+    # 单笔越线同样是可验证的红：face + sms 验过就放行（2026-10-21 起），
+    # 文案要说清「验证后继续」，不能还停在「我不能直接做」。
+    text = (
+        f"单笔 {_yuan(_amount(action))} 超过 {_yuan(ctx.single_limit_fen)}上限，"
+        "这笔需要人脸和短信验证后才能继续"
+    )
     return _decision("red", "R08_transfer_red_single", "TRANSFER_SINGLE_RED", text, ctx, ("face", "sms"))
 
 

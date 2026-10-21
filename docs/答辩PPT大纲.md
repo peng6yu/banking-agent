@@ -98,7 +98,7 @@
 ```
 n1 resolve_payee  🟢 R01_readonly        → 找到收款人 王强
 n2 query_balance   🟢 R01_readonly        → 余额 12,860.50 元
-n3 transfer        🟡 R06_transfer_yellow → 即将向 p_4a2e7c58 转出 500.00 元，需要你确认
+n3 transfer        🟡 R06_transfer_yellow → 即将向 王强 转出 500.00 元，需要你确认
 confirm cf_600b3ed5：金额 500.00 元 / 收款人 王强 / 有效期 120 秒
 ```
 
@@ -110,7 +110,7 @@ confirm cf_600b3ed5：金额 500.00 元 / 收款人 王强 / 有效期 120 秒
 
 ```
 n3 transfer 🔴 R07_transfer_red_daily
-   今日已用 500.00 元，这笔 800.00 元 会超过日累计线，我先不做
+   今日已用 500.00 元，这笔 800.00 元 会超过日累计线，需要人脸和短信验证后才能继续
 factor cf_aadea3ed：需要 face + sms 双因子
 ```
 

@@ -59,7 +59,11 @@ def _payee_owned_by(conn: sqlite3.Connection, payee_id: str, account: sqlite3.Ro
 def transfer(
     ctx: ToolContext, params: dict[str, Any], token: str | None = None
 ) -> ToolResult:
-    """转账：一次调用把两阶段资金走完——建 hold 之后立刻 commit（docs/06 6.3）。"""
+    """转账：一次调用把两阶段资金走完——建 hold 之后立刻 commit（docs/06 6.3）。
+
+    params 里可以带 payee_name（展示名，给 R06 的确认文案念），但它不进业务逻辑：
+    收款人身份只认 payee_id，存在性与归属校验都看 id。
+    """
     require_token("transfer", params, token)
     account = primary_account(ctx.conn, ctx.account_id)
     payee_id = str(params.get("payee_id", ""))

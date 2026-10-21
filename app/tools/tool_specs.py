@@ -192,6 +192,11 @@ TOOL_SPECS: Final[tuple[ToolSpec, ...]] = (
             "type": "object",
             "properties": {
                 "payee_id": {"type": "string", "minLength": 1, "maxLength": 64},
+                "payee_name": {
+                    "type": "string",
+                    "maxLength": 64,
+                    "description": "收款人展示名，仅用于给用户看的文案",
+                },
                 "amount_fen": _AMOUNT_FEN,
                 "note": {"type": "string", "maxLength": 100, "description": "转账备注"},
             },

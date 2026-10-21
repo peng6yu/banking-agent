@@ -200,12 +200,20 @@ def _tool_params(tool: str, slots: dict[str, Any], ids: dict[str, str]) -> dict[
 
 
 def _transfer_params(slots: dict[str, Any], ids: dict[str, str]) -> dict[str, Any]:
-    """payee_id 取自 resolve_payee；说「全部」时金额取自 query_balance 的余额。"""
-    return {
+    """payee_id 取自 resolve_payee；说「全部」时金额取自 query_balance 的余额。
+
+    payee_name 是给用户看的展示名：R06 的确认文案要念收款人的名字，
+    没有它就只能回落到内部 id（p_xxx），等于把数据库主键念给用户听。
+    """
+    params = {
         "payee_id": ref(_need(ids, "resolve_payee"), "candidates", "0", "payee_id"),
         "amount_fen": _amount_ref(slots, ids),
         "note": str(slots.get("note") or ""),
     }
+    name = str(slots.get("payee_name") or "").strip()
+    if name:
+        params["payee_name"] = name
+    return params
 
 
 def _merchant_params(slots: dict[str, Any], ids: dict[str, str]) -> dict[str, Any]:

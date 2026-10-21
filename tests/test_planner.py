@@ -858,3 +858,25 @@ def test_resolved_payee_is_not_pre_blocked(bank: Path) -> None:
     assert payload(events, "factor")["required"] == ["face", "sms"]
     assert balance(db.connect()) == 1_286_050
     assert count(db.connect(), "transactions") == 320
+
+
+def test_transfer_node_carries_the_payee_display_name() -> None:
+    """转账节点要带收款人展示名。
+
+    R06 的确认文案念的是 payee_name；没有它就会回落到 payee_id（p_xxx），
+    等于把数据库主键念给用户听。
+    """
+    built = transfer_dag(amount_fen=LIJING_AMOUNT_FEN)
+    assert built.nodes[2].params["payee_name"] == "李静"
+
+
+def test_yellow_confirmation_text_names_the_payee_not_the_internal_id(bank: Path) -> None:
+    """端到端：确认卡片里是「李静」，不是 p_ 开头的内部 id。"""
+    events = drive(
+        "s_payee_label",
+        transfer_dag(amount_fen=LIJING_AMOUNT_FEN),
+        answers=[{"approve": True}],
+    )
+    reason = _traces(events)["n3"]["reason_text"]
+    assert "李静" in reason
+    assert "p_" not in reason
