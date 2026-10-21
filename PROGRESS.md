@@ -79,7 +79,7 @@
 已无待办。上面三条终验全部跑过，结果见下一节。
 ## m-final 终验  2026-10-21
 
-- [x] 终验三条命令全部跑过：`pytest -q` = **497 passed**（11.6s）；`scripts/e2e` 与 `--offline` 13/13；`scripts.redteam` = **PASS 29 / FAIL 14**（约 12 秒，全离线 ScriptedAdapter）
+- [x] 终验三条命令全部跑过：`pytest -q` = **508 passed**（12.3s，2026-10-22 复跑）；`scripts/e2e` 与 `--offline` 13/13；`scripts.redteam` = **PASS 29 / FAIL 14**（约 12 秒，全离线 ScriptedAdapter）
 - [x] 理财场景落地：`fund_products` / `fund_holdings` 两张表、`buy_fund` / `redeem_fund` / `list_products` / `estimate_risk` 四个工具、invest 意图 + DAG 三分支（R10 红灯 + 双因子）；工具 10→14、表 15→17、意图模板 5→6、槽位 7→9
 - [x] 文档一致性终审：105 个文件的 `path:NN` 引用脚本核对 0 条越界；工具/表/规则/用例/测试五类数字全仓统一；`docs/架构图.svg` 与 `.mmd` 同步
 - [x] 修掉两个真缺陷：① `emit_intent_schema` 漏声明 merchant / card_tail（`additionalProperties:false` → 真实模型永远填不出来，t15 的商户名扫描是死代码，`tests/test_planner.py` 新增断言钉住 schema 与 SLOT_KEYS 一致）；② `list_products` / `estimate_risk` 已实现却不在 `KNOWN_TOOLS`，R03 会把只读查询误判成红灯
