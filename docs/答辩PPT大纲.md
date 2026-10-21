@@ -213,7 +213,7 @@ MOCK_MODE=true python3.12 -m uvicorn app.main:app --port 8000
 
 口播：金额再大也不会盲选收款人——**同名人必须由人指定**，这是银行场景的底线之一。
 
-**诚实声明（务必念出来，加分项）**：43 条用例集已就绪且自检通过（一条命令验证条数与 id 唯一性），但**自动 runner 还没交付**，所以现场只能实拍 2 条典型攻击；页面上标注的其余 41 条是用例集覆盖，不是本次现场跑分。
+**诚实声明（务必念出来，加分项）**：43 条用例集已就绪且自检通过（一条命令验证条数与 id 唯一性），**自动判定 runner 已交付**（`python3.12 -m scripts.redteam`，全离线 ScriptedAdapter，一次实跑约 18 秒），现场可实拍 2 条典型攻击并展示 runner 的七列判定表；43 条红队用例：PASS 28 / FAIL 15（离线 ScriptedAdapter 实跑；以 `python3.12 -m scripts.redteam` 最终实跑为准）。15 条 FAIL 中 13 条是判定口径不符（请求在意图层被反问、未进策略层，审计无裁决记录），2 条是真实缺口（D04 反问阶段注入不留痕、E05 写锁竞争落 INTERNAL 兜底）；全部 must_not 探针通过，无攻击得手。
 
 **口播要点**：安全不是「我们挡住了多少攻击」，而是「攻击面在哪一层、失败时系统往哪边倒」。我们的答案是倒向拒绝，并且留下证据。
 
@@ -258,7 +258,7 @@ MOCK_MODE=true python3.12 -m uvicorn app.main:app --port 8000
 | 覆盖端点 | 10 个（chat / confirm / cancel / session / audit / audit verify / tools / health / reset / 根页面） |
 | 覆盖工具 | 14 个 |
 | 安全规则 | 12 条 + 令牌七步校验 |
-| 红队用例 | 43 条（runner 待交付） |
+| 红队用例 | 43 条（runner 已交付；PASS 28 / FAIL 15，以 `python3.12 -m scripts.redteam` 最终实跑为准） |
 
 **三个亮点**
 
@@ -276,7 +276,7 @@ MOCK_MODE=true python3.12 -m uvicorn app.main:app --port 8000
 
 | 不足 | 影响 | 打算 |
 |---|---|---|
-| 红队自动 runner 未交付 | 43 条只能实拍 2 条 | 下一步：把 YAML 直接打到运行中的服务，产出通过/拦截报告 |
+| 红队判定最终通过数待终验复跑回填 | 现场可实拍 2 条 + 展示 runner 七列判定表 | 答辩前实跑一次 `python3.12 -m scripts.redteam` 并把判定表贴进 PPT |
 | 能力令牌密钥需手工配置 | 忘了配就整条黄红灯 fail closed | 让 seed 自动生成并写入 .env.example |
 | 同名收款人追问不收敛 | 追问一轮后模型把消歧塞进备注，会重复问 | 消歧字段单独建模，不走备注 |
 | 跨场景端到端未打磨 | 只能录屏演示 | 补端到端脚本 |
