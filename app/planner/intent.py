@@ -132,7 +132,7 @@ def emit_intent_schema() -> dict[str, Any]:
                 "note": {"type": "string"},
                 "period": {"type": "string", "enum": ["month", "year"]},
                 "month": {"type": "integer"},
-                "action": {"type": "string", "enum": ["buy", "redeem"]},
+                "action": {"type": "string", "enum": ["buy", "redeem", "query"]},
                 "product_code": {"type": "string"},
                 "missing": {"type": "array", "items": {"type": "string"}},
                 "confidence": {"type": "number"},

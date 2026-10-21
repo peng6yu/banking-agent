@@ -18,7 +18,17 @@ from app.planner.intent import ACCOUNT_OWNER_SLOT
 from app.tools.base import ValidationError
 
 REF_PREFIX: Final[str] = "@"
+# 理财意图按 action 分三路：买=申购、赎回=卖出、查=看产品清单。
+# 槽位名 product_code 与 app/tools/tool_specs.py 的 buy_fund/redeem_fund 参数同名，零映射。
+# 认不出 action 时走「查」这一路：宁可给产品清单，也不带着猜出来的参数去动钱。
+INVEST_TEMPLATES: Final[dict[str, tuple[tuple[str, str], ...]]] = {
+    "buy": (("n1", "buy_fund"),),
+    "redeem": (("n1", "redeem_fund"),),
+    "query": (("n1", "list_products"),),
+}
+INVEST_DEFAULT_ACTION: Final[str] = "query"
 # docs/07 7.3 意图 → 模板，逐条照抄，不许增删改顺序
+# 理财那一条登记的是它的默认（只读）一路，另外两路见 INVEST_TEMPLATES。
 INTENT_TEMPLATES: Final[dict[str, tuple[tuple[str, str], ...]]] = {
     "query_balance": (("n1", "query_balance"),),
     "bill_analysis": (("n1", "analyze_bill"),),
@@ -34,6 +44,7 @@ INTENT_TEMPLATES: Final[dict[str, tuple[tuple[str, str], ...]]] = {
         ("n3", "reserve_funds"),
         ("n4", "pay_merchant"),
     ),
+    "invest": INVEST_TEMPLATES["query"],
 }
 # 会读账户信息的工具：意图层判出 account_owner=other 就原样带进参数，策略层据此判红。
 OWNER_AWARE_TOOLS: Final[tuple[str, ...]] = ("query_balance", "list_subs", "analyze_bill")
@@ -52,7 +63,7 @@ BIRTHDAY_ITEM: Final[str] = "生日鲜花"
 def build(intent: dict[str, Any]) -> Dag:
     """按模板生成执行图；缺必填槽位抛 ValidationError，由调用方回退单步。"""
     name, slots = split(intent)
-    template = INTENT_TEMPLATES.get(name)
+    template = _template(name, slots)
     if template is None:
         raise ValidationError("没有这个意图的模板", intent=name)
     dag = Dag(id=new_id("r"), nodes=_nodes(template, slots))
@@ -66,8 +77,8 @@ def build_or_single(intent: dict[str, Any]) -> Dag:
     模板不在册（模型编了一个没登记的意图）不再回退到默认意图：那不是「降级」，
     是把一个说不出口的请求换成一个用户没提的请求去做。见 UNSUPPORTED_TOOL。
     """
-    name, _ = split(intent)
-    template = INTENT_TEMPLATES.get(name)
+    name, slots = split(intent)
+    template = _template(name, slots)
     if template is None:
         return Dag(
             id=new_id("r"),
@@ -77,6 +88,11 @@ def build_or_single(intent: dict[str, Any]) -> Dag:
         return build(intent)
     except ValidationError:
         node_id, tool = template[0]
+        if name == "invest":
+            # 理财建图失败基本都是缺产品代码或金额。退到只读的产品清单，
+            # 把代码和起购金额摆给用户，让他补一句再买；
+            # 绝不带着半截参数去申购或者赎回。
+            node_id, tool = INVEST_TEMPLATES[INVEST_DEFAULT_ACTION][0]
         return Dag(id=new_id("r"), nodes=[DAGNode(id=node_id, tool=tool, params={})])
 
 
@@ -126,6 +142,14 @@ def split(intent: dict[str, Any]) -> tuple[str, dict[str, Any]]:
     return str(intent.get("intent") or DEFAULT_INTENT), slots
 
 
+def _template(name: str, slots: dict[str, Any]) -> tuple[tuple[str, str], ...] | None:
+    """取这个意图要走哪张模板：理财按 action 分三路，其余一张表走到底。"""
+    if name == "invest":
+        action = str(slots.get("action") or "").strip().lower()
+        return INVEST_TEMPLATES.get(action, INVEST_TEMPLATES[INVEST_DEFAULT_ACTION])
+    return INTENT_TEMPLATES.get(name)
+
+
 def _nodes(template: tuple[tuple[str, str], ...], slots: dict[str, Any]) -> list[DAGNode]:
     ids = {tool: node_id for node_id, tool in template}
     nodes: list[DAGNode] = []
@@ -168,6 +192,10 @@ def _tool_params(tool: str, slots: dict[str, Any], ids: dict[str, str]) -> dict[
         return {"amount_fen": _amount(slots), "purpose": str(slots.get("purpose") or BIRTHDAY_PURPOSE)}
     if tool == "pay_merchant":
         return _merchant_params(slots, ids)
+    if tool in ("buy_fund", "redeem_fund"):
+        return _invest_params(slots)
+    if tool == "list_products":
+        return _product_params(slots)
     raise ValidationError("模板里出现未登记的工具", reason="DAG_UNKNOWN_TOOL", tool=tool)
 
 
@@ -191,6 +219,37 @@ def _merchant_params(slots: dict[str, Any], ids: dict[str, str]) -> dict[str, An
     amount = _positive_int(slots.get("amount_fen"))
     params["amount_fen"] = amount if amount is not None else ref(hold_node, "amount_fen")
     return params
+
+
+def _invest_params(slots: dict[str, Any]) -> dict[str, Any]:
+    """申购/赎回：产品代码与金额都必填，缺了就抛给 E8 回退，不猜。"""
+    params = {
+        "product_code": _product_code(slots),
+        "amount_fen": _amount(slots),
+    }
+    note = str(slots.get("note") or "").strip()
+    if note:
+        params["note"] = note
+    return params
+
+
+def _product_params(slots: dict[str, Any]) -> dict[str, Any]:
+    """查产品：风险等级与分类都是可选筛选条件，缺了就不传。"""
+    params: dict[str, Any] = {}
+    risk = _positive_int(slots.get("risk_level"))
+    if risk is not None:
+        params["risk_level"] = risk
+    category = str(slots.get("category") or "").strip()
+    if category:
+        params["category"] = category
+    return params
+
+
+def _product_code(slots: dict[str, Any]) -> str:
+    code = str(slots.get("product_code") or "").strip()
+    if not code:
+        raise ValidationError("缺产品代码", reason="DAG_MISSING_SLOT", field="product_code")
+    return code
 
 
 def _bill_params(slots: dict[str, Any]) -> dict[str, Any]:
@@ -292,6 +351,7 @@ def _topo(dag: Dag) -> list[DAGNode]:
 
 __all__ = [
     "INTENT_TEMPLATES",
+    "INVEST_TEMPLATES",
     "OWNER_AWARE_TOOLS",
     "UNSUPPORTED_TOOL",
     "REF_PREFIX",
