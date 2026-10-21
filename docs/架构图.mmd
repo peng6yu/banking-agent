@@ -32,7 +32,7 @@ flowchart TD
     PE -->|"绿 · 只读直接放行"| REG
     PE -->|"黄 / 红 · 先确认再发令牌"| TK
     TK -->|"capability_token 有效期 120 秒"| REG
-    BRK -.->|"同一会话连续被拒 3 次则熔断 60 秒"| API
+    BRK -.->|"5 分钟内 3 次安全边界拒绝 → 熔断 60 秒"| API
     REG --> FND --> DB
     REG --> AUD
     FND --> AUD
