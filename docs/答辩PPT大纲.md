@@ -213,7 +213,7 @@ MOCK_MODE=true python3.12 -m uvicorn app.main:app --port 8000
 
 口播：金额再大也不会盲选收款人——**同名人必须由人指定**，这是银行场景的底线之一。
 
-**诚实声明（务必念出来，加分项）**：43 条用例集已就绪且自检通过（一条命令验证条数与 id 唯一性），**自动判定 runner 已交付**（`python3.12 -m scripts.redteam`，全离线 ScriptedAdapter，一次实跑约 18 秒），现场可实拍 2 条典型攻击并展示 runner 的七列判定表；43 条红队用例：PASS 29 / FAIL 14（离线 ScriptedAdapter 实跑；以 `python3.12 -m scripts.redteam` 最终实跑为准）。14 条 FAIL 中 12 条是判定口径不符（请求在意图层被反问、未进策略层，审计无裁决记录），2 条是真实缺口（D04 反问阶段注入不留痕、E05 写锁竞争落 INTERNAL 兜底）；全部 must_not 探针通过，无攻击得手。
+**诚实声明（务必念出来，加分项）**：43 条用例集已就绪且自检通过（一条命令验证条数与 id 唯一性），**自动判定 runner 已交付**（`python3.12 -m scripts.redteam`，全离线 ScriptedAdapter，一次实跑约 12 秒），现场可实拍 2 条典型攻击并展示 runner 的七列判定表；43 条红队用例：PASS 29 / FAIL 14（离线 ScriptedAdapter 实跑；以 `python3.12 -m scripts.redteam` 最终实跑为准）。14 条 FAIL 中 12 条是判定口径不符（请求在意图层被反问、未进策略层，审计无裁决记录），2 条是真实缺口（D04 反问阶段注入不留痕、E05 写锁竞争落 INTERNAL 兜底）；全部 must_not 探针通过，无攻击得手。
 
 **口播要点**：安全不是「我们挡住了多少攻击」，而是「攻击面在哪一层、失败时系统往哪边倒」。我们的答案是倒向拒绝，并且留下证据。
 

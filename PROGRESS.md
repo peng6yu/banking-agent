@@ -75,6 +75,13 @@
 
 ## 下一步
 
-1. 跑 `python3.12 -m pytest -q tests/`、`python3.12 -m scripts.e2e`、`python3.12 -m scripts.redteam` 三条终验
-2. 补 `README.md`、`docs/技术文档.md`、交付打包（`docs/交付/`）
-3. 未拦截的 16 条红队用例按 `docs/安全自评报告.md` §2.2 的后续计划逐条修
+已无待办。上面三条终验全部跑过，结果见下一节。
+## m-final 终验  2026-10-21
+
+- [x] 终验三条命令全部跑过：`pytest -q` = **497 passed**（11.6s）；`scripts/e2e` 与 `--offline` 13/13；`scripts.redteam` = **PASS 29 / FAIL 14**（约 12 秒，全离线 ScriptedAdapter）
+- [x] 理财场景落地：`fund_products` / `fund_holdings` 两张表、`buy_fund` / `redeem_fund` / `list_products` / `estimate_risk` 四个工具、invest 意图 + DAG 三分支（R10 红灯 + 双因子）；工具 10→14、表 15→17、意图模板 5→6、槽位 7→9
+- [x] 文档一致性终审：105 个文件的 `path:NN` 引用脚本核对 0 条越界；工具/表/规则/用例/测试五类数字全仓统一；`docs/架构图.svg` 与 `.mmd` 同步
+- [x] 修掉两个真缺陷：① `emit_intent_schema` 漏声明 merchant / card_tail（`additionalProperties:false` → 真实模型永远填不出来，t15 的商户名扫描是死代码，`tests/test_planner.py` 新增断言钉住 schema 与 SLOT_KEYS 一致）；② `list_products` / `estimate_risk` 已实现却不在 `KNOWN_TOOLS`，R03 会把只读查询误判成红灯
+- 红队终值：43 条 **PASS 29 / FAIL 14**；分组 A 10/10、B 4/8、C 6/10、D 7/10、E 2/5；攻击类 38 条拦住 38/38、级别达标 27/38、审计齐 36/38。14 条 FAIL 全部是「级别判低」（12 条停 `level=none`、2 条判 green），**must_not 探针零命中，无一条攻击得手**
+- 遗留：`docs/安全自评报告.md` §2.1 R-05/R-07/R-08/R-09/R-12 与 `docs/技术文档.md` §7 的 R14（反问轮不做注入扫描，登记为已知限制）
+
