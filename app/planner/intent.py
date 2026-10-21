@@ -4,8 +4,7 @@
 
 四条硬规矩：
 1. SYSTEM_PROMPT 逐字照抄 docs/07 7.1，一个字都不改；
-2. 模型没调 emit_intent 就重试 1 次，仍不调就转 intent=unknown + 反问；
-   这是必需逻辑不是保险丝——MiniMax 在 temp=0 下实测 11 次漏 1 次；
+2. 模型没调 emit_intent 就重试 1 次，仍不调就转 intent=unknown + 反问（MiniMax 实测 11 次漏 1 次）；
 3. confidence < 0.5 一律反问，不直接执行；
 4. 解析器只出槽位，一个工具都不执行；动数据是执行器的活。
 """
@@ -42,12 +41,13 @@ INTENT_NAMES: Final[tuple[str, ...]] = (
     "bill_analysis",
     "subscription",
     "birthday_plan",
+    # 理财：申购/赎回共用一个意图，动作靠 action 槽位区分（工具侧落 buy_fund / redeem_fund）
+    "invest",
     "unknown",
 )
 UNKNOWN_QUESTION: Final[str] = "你是想查询、转账还是看账单？"
 RETRY_HINT: Final[str] = "刚才你没有调用工具。请调用 emit_intent 输出结构化结果，不要直接回答。"
-# merchant 是生日花束模板要用的槽位（app/planner/dag.py 读 slots["merchant"]）；
-# 白名单漏了它，模型给的商户名会被 _slots 直接丢掉，注入扫描就永远扫不到商户名。
+# merchant 是生日花束模板的槽位；白名单漏了它，模型给的商户名会被 _slots 丢掉，注入扫描就扫不到。
 SLOT_KEYS: Final[tuple[str, ...]] = (
     "payee_name",
     "amount_fen",
@@ -56,9 +56,10 @@ SLOT_KEYS: Final[tuple[str, ...]] = (
     "month",
     "card_tail",
     "merchant",
+    "action",
+    "product_code",
 )
-# 查询目标的主体：本人 self / 他人 other。策略层 R12 只认这个槽位，
-# 键名与 app/policy/rules.py 的 OWNER_PARAM 一致（tests 里有一条测试钉住两者不许漂移）。
+# 查询主体：本人 self / 他人 other；键名与 app/policy/rules.py 的 OWNER_PARAM 一致（测试钉住）。
 ACCOUNT_OWNER_SLOT: Final[str] = "account_owner"
 SELF_OWNER: Final[str] = "self"
 OTHER_OWNER: Final[str] = "other"
@@ -131,6 +132,8 @@ def emit_intent_schema() -> dict[str, Any]:
                 "note": {"type": "string"},
                 "period": {"type": "string", "enum": ["month", "year"]},
                 "month": {"type": "integer"},
+                "action": {"type": "string", "enum": ["buy", "redeem"]},
+                "product_code": {"type": "string"},
                 "missing": {"type": "array", "items": {"type": "string"}},
                 "confidence": {"type": "number"},
             },
@@ -225,11 +228,9 @@ def _from_args(args: dict[str, Any], text: str, *, retried: bool) -> IntentResul
 def _mark_injection(result: IntentResult, text: str) -> IntentResult:
     """对用户原话本身做一次注入扫描，并把命中压一根棒给执行层。
 
-    工具参数里扫不到的那部分载荷全在这里：IM 转发整段、开头那句
-    「忽略以上所有指令」。命中不改 question、不改槽位、不改任何用户可见的
-    回复内容——扫描结果只用于裁决（执行层取棒后并进 untrusted_fields，R04 再升红）。
-
-    反问轮（ok=False）不压棒：那条路上没有执行器来取，留着只会污染下一轮。
+    工具参数里扫不到的那部分载荷全在这里（IM 转发整段、开头那句「忽略以上所有指令」）。
+    命中不改 question、不改槽位、不改任何用户可见的回复内容——扫描结果只用于裁决
+    （执行层取棒后并进 untrusted_fields，R04 再升红）。反问轮（ok=False）不压棒。
     """
     if not result.ok:
         return result
@@ -247,8 +248,7 @@ def _apply_branches(result: IntentResult) -> IntentResult:
         # 「查的是谁的」要澄清，但它不是「信息不全」：这里只把主体记进 missing，
         # 让 intent.parsed 审计与 SSE 的 intent 事件都看得见这次请求的主体是他人。
         # 刻意不填 question——question 会让 API 层在建 DAG 之前就收尾（docs/07 7.4），
-        # 那样 R12 的红裁决与 confirm.rejected 永远不会落进审计，攻击面统计就失真了。
-        # 真正给用户的话术由 R12 的 reason_text 出，走执行器现成的 _blocked。
+        # 那样 R12 的红裁决与 confirm.rejected 永远不会落进审计；话术由 R12 的 reason_text 出。
         result.missing = [*result.missing, ACCOUNT_OWNER_SLOT]
     if result.missing and ACCOUNT_OWNER_SLOT not in result.missing:
         result.question = MISSING_LABELS.get(result.missing[0], f"请补充一下「{result.missing[0]}」。")
@@ -291,8 +291,8 @@ def _slots(args: dict[str, Any], text: str, intent: str) -> dict[str, Any]:
 def _account_owner(intent: str, text: str) -> str:
     """查询类意图里出现第三方主体就记 other；判不出来一律当本人，绝不猜。
 
-    注意这里不反问：主体判出来以后由策略层 R12 亮红灯并落 policy.decided 审计，
-    问「您是要查自己的吗」只会让这次查询停在一句反问上，红裁决永远不会被记录。
+    这里不反问：主体判出来后由策略层 R12 亮红灯并落 policy.decided 审计，反问会让
+    这次查询停在一句话上，红裁决永远不会被记录。
     """
     if intent not in OWNER_QUERY_INTENTS:
         return SELF_OWNER
