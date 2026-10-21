@@ -13,15 +13,15 @@ flowchart TD
 
     subgraph L2["② 裁决区 · 确定性闸门：不调模型、不读环境、不取时钟"]
         INJ["注入检测与升红 app/security/injection.py"]
-        PE["策略裁决 app/policy/engine.py · R01-R11 三色"]
+        PE["策略裁决 app/policy/engine.py · R01-R12 三色"]
         TK["能力令牌 app/security/token.py · 七步校验"]
         BRK["熔断器 app/security/breaker.py · 5 分钟 3 次"]
     end
 
     subgraph L3["③ 执行区 · 只认令牌，不认自然语言"]
-        REG["工具网关 app/tools/registry.py · 10 个工具"]
+        REG["工具网关 app/tools/registry.py · 14 个工具"]
         FND["两阶段资金 app/funds.py · hold 然后 commit"]
-        DB[("SQLite 15 张表 + WAL app/db.py")]
+        DB[("SQLite 17 张表 + WAL app/db.py")]
     end
 
     AUD["审计哈希链 app/audit.py · 16 类事件 append-only"]

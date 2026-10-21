@@ -97,9 +97,9 @@ docs(05): 补充 hold 超时后的补偿路径
 | tag | 里程碑 | 完成标志 |
 |---|---|---|
 | `m0` | 骨架 | 目录、依赖、health 端点、CI 可跑 |
-| `m1` | 数据层 | 15 张表 + 种子 + audit 哈希链单测通过 |
-| `m2` | 工具层 | 10 工具全实现，纯函数单测通过 |
-| `m3` | 安全层 | 11 条规则 + token 七步 + 两阶段资金，单测覆盖 100% |
+| `m1` | 数据层 | 17 张表 + 种子 + audit 哈希链单测通过 |
+| `m2` | 工具层 | 14 工具全实现，纯函数单测通过 |
+| `m3` | 安全层 | 12 条规则 + token 七步 + 两阶段资金，单测覆盖 100% |
 | `m4` | 规划执行 | intent/DAG/executor 跑通转账全链路 |
 | `m5` | API | 10 端点 + SSE 全事件 |
 | `m6` | 前端 | 双栏 + 决策剧场实时流 |
@@ -153,7 +153,7 @@ git checkout main && git merge --no-ff feat/m3-policy && git push
 
 ```
 ## m3 安全层  2026-10-25
-- [x] 11 条规则 engine.decide
+- [x] 12 条规则 engine.decide
 - [x] token 签发与七步校验
 - [x] 两阶段资金 hold/commit/release
 - 测试：pytest 62 passed，policy 覆盖率 100%
