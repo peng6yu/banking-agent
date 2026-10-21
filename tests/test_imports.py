@@ -53,6 +53,7 @@ LAYERS: dict[str, int] = {
     "app.planner.events": 4,
     "app.planner.executor": 4,
     "app.planner.intent": 4,
+    "app.planner.intent_schema": 4,
     "app.planner.runner": 4,
     "app.planner.state": 4,
     "app.api.routes": 5,
@@ -147,8 +148,10 @@ ALLOWED: dict[str, frozenset[str]] = {
     "app.planner.intent": frozenset({
         "app.llm",
         "app.money",
+        "app.planner.intent_schema",
         "app.security",
     }),
+    "app.planner.intent_schema": frozenset(),
     "app.planner.runner": frozenset({
         "app.clock",
         "app.models",

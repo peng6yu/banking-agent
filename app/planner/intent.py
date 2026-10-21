@@ -15,6 +15,13 @@ from dataclasses import dataclass, field
 from typing import Any, Final, Protocol
 
 from app.money import UNKNOWN_AMOUNT_FEN, parse_amount
+from app.planner.intent_schema import (
+    EMIT_INTENT_NAME,
+    INTENT_NAMES,
+    MISSING_ALIASES,
+    SLOT_KEYS,
+    emit_intent_schema,
+)
 from app.security import envelope, injection
 
 # docs/07 7.1 逐字照抄，测试会逐字比对原文，不要改写、不要润色、不要重排
@@ -33,32 +40,11 @@ SYSTEM_PROMPT: Final[str] = (
     "7. 工具报错时用一句人话解释，不要输出英文错误码或堆栈。\n"
 )
 
-EMIT_INTENT_NAME: Final[str] = "emit_intent"
+# 意图枚举、槽位白名单与 emit_intent 的 schema 都在 app/planner/intent_schema.py：
+# 词表与 schema 必须同源，模型能填的键和解析器放行的键要一模一样。
 CONFIDENCE_FLOOR: Final[float] = 0.5
-INTENT_NAMES: Final[tuple[str, ...]] = (
-    "query_balance",
-    "transfer",
-    "bill_analysis",
-    "subscription",
-    "birthday_plan",
-    # 理财：申购/赎回共用一个意图，动作靠 action 槽位区分（工具侧落 buy_fund / redeem_fund）
-    "invest",
-    "unknown",
-)
 UNKNOWN_QUESTION: Final[str] = "你是想查询、转账还是看账单？"
 RETRY_HINT: Final[str] = "刚才你没有调用工具。请调用 emit_intent 输出结构化结果，不要直接回答。"
-# merchant 是生日花束模板的槽位；白名单漏了它，模型给的商户名会被 _slots 丢掉，注入扫描就扫不到。
-SLOT_KEYS: Final[tuple[str, ...]] = (
-    "payee_name",
-    "amount_fen",
-    "note",
-    "period",
-    "month",
-    "card_tail",
-    "merchant",
-    "action",
-    "product_code",
-)
 # 查询主体：本人 self / 他人 other；键名与 app/policy/rules.py 的 OWNER_PARAM 一致（测试钉住）。
 ACCOUNT_OWNER_SLOT: Final[str] = "account_owner"
 SELF_OWNER: Final[str] = "self"
@@ -75,6 +61,11 @@ QUERY_SUBJECT_WORDS: Final[tuple[str, ...]] = (
 MISSING_LABELS: Final[dict[str, str]] = {
     "payee_name": "请问转给谁？",
     "amount_fen": "转多少？",
+    # 生日送礼场景（birthday_plan）缺槽位时问的话，一次只问一个
+    "purpose": "这笔钱是做什么用的？",
+    "gift": "打算送什么？",
+    "date_hint": "大概什么时候要花这笔钱？",
+    "product_code": "要操作哪只基金？",
 }
 NEED_SLOTS: Final[frozenset[str]] = frozenset({"transfer", "birthday_plan"})
 ALL_KEYWORDS: Final[tuple[str, ...]] = ("全部", "全额", "所有钱", "剩下的钱")
@@ -116,32 +107,6 @@ class IntentResult:
             "ok": self.ok,
             "untrusted_fields": list(self.untrusted_fields),
         }
-
-
-def emit_intent_schema() -> dict[str, Any]:
-    """emit_intent 的工具定义，键与类型对齐 docs/07 7.2（tests 断言键集合覆盖 SLOT_KEYS）。"""
-    return {
-        "name": EMIT_INTENT_NAME,
-        "description": "把用户这句话解析成结构化意图。必须调用我，不要直接回答。missing 只填真正缺失、必须问用户才能补的槽位；card_tail / note / merchant 都是可选槽位，不要填进 missing。",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "intent": {"type": "string", "enum": list(INTENT_NAMES)},
-                "payee_name": {"type": "string"},
-                "amount_fen": {"type": "integer"},
-                "note": {"type": "string"},
-                # merchant/card_tail 必须进 schema：additionalProperties=false，模型填不出 schema 外的键。
-                "merchant": {"type": "string"},
-                "card_tail": {"type": "string", "description": "仅当用户明确说到某张卡尾号时才填；转账、申购、账单都不需要"},
-                "period": {"type": "string", "enum": ["month", "year"]}, "month": {"type": "integer"},
-                "action": {"type": "string", "enum": ["buy", "redeem", "query"]},
-                "product_code": {"type": "string", "description": "基金产品代码：F00001 现金添利货币A／F00002 稳盈债券A／F00003 均衡配置混合A／F00004 沪深精选指数A／F00005 全球科技QDII；用户报产品名时必须换成代码"},
-                "missing": {"type": "array", "items": {"type": "string"}}, "confidence": {"type": "number"},
-            },
-            "required": ["intent", "missing", "confidence"],
-            "additionalProperties": False,
-        },
-    }
 
 
 def emit_intent_tool() -> dict[str, Any]:
@@ -326,8 +291,17 @@ def _prefixed_by_non_person(text: str, index: int) -> bool:
 
 
 def _missing(intent: str, slots: dict[str, Any], reported: Any) -> list[str]:
-    """模型自己报的 missing 加上必填槽位校验，去重且保序。"""
-    missing: list[str] = [str(item) for item in (reported or [])]
+    """模型自己报的 missing 加上必填槽位校验，去重且保序。
+
+    模型报的键先按 MISSING_ALIASES 归一（真模型实测生日场景报的是 birthday_date，
+    我们只有 date_hint），归一不出来的一律丢掉：反问一个我们自己都填不了的槽位没有意义，
+    用户答了也进不了任何工具参数。模型报了某个槽位但自己又填了值的，以值为准，不反问。
+    """
+    missing: list[str] = []
+    for item in reported or []:
+        key = MISSING_ALIASES.get(str(item).strip(), str(item).strip())
+        if key and key in SLOT_KEYS and key not in slots:
+            missing.append(key)
     if intent in NEED_SLOTS:
         if not slots.get("payee_name"):
             missing.append("payee_name")
@@ -390,6 +364,7 @@ __all__ = [
     "INTENT_NAMES",
     "OTHER_OWNER",
     "SELF_OWNER",
+    "SLOT_KEYS",
     "SYSTEM_PROMPT",
     "UNKNOWN_QUESTION",
     "IntentResult",

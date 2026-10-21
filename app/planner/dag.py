@@ -221,7 +221,8 @@ def _merchant_params(slots: dict[str, Any], ids: dict[str, str]) -> dict[str, An
     hold_node = _need(ids, "reserve_funds")
     params = {
         "merchant": str(slots.get("merchant") or BIRTHDAY_MERCHANT),
-        "item": str(slots.get("item") or BIRTHDAY_ITEM),
+        # gift 是意图层的生日槽位（「花束」）；模型没给就退回默认的生日鲜花
+        "item": str(slots.get("gift") or BIRTHDAY_ITEM),
         "hold_id": ref(hold_node, "hold_id"),
     }
     amount = _positive_int(slots.get("amount_fen"))

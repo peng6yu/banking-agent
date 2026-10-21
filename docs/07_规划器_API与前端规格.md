@@ -26,32 +26,53 @@ def emit_intent_schema() -> dict      # 工具定义
 def parse(text: str, history: list) -> IntentResult
 ```
 
+> `emit_intent_schema` / `INTENT_NAMES` / `SLOT_KEYS` / `INTENT_GUIDE` / `SLOT_GUIDE` 现在住在
+> `app/planner/intent_schema.py`：`app/planner/intent.py` 有 400 行硬上限（docs/08），
+> 词表一多就顶破。拆成两个文件还有一个好处——意图名、槽位名、schema 三者必须同源，
+> 任何一处漏了，那个槽位就是死代码（`merchant` 与 `card_tail` 就这样丢过一次）。
+
 ### `emit_intent` 工具 schema
 
 ```python
 {
   'name': 'emit_intent',
-  'description': '把用户这句话解析成结构化意图。必须调用我，不要直接回答。missing 只填真正缺失、必须问用户才能补的槽位；
-                 card_tail / note / merchant 都是可选槽位，不要填进 missing。',
+  'description': '把用户这句话解析成结构化意图。必须调用我，不要直接回答。'
+                 'missing 只填真正缺失、必须问用户才能补的槽位；'
+                 'card_tail / note / merchant 都是可选槽位，不要填进 missing。'
+                 '用户说的是「先留出一笔钱、之后再买或订」这类跨场景安排时，intent 选 birthday_plan。',
   'parameters': {
     'type': 'object',
     'properties': {
-      'intent': {'type': 'string', 'enum': [
-          'query_balance', 'transfer', 'bill_analysis',
-          'subscription', 'birthday_plan', 'invest', 'unknown']},
+      'intent': {'type': 'string',
+                 'enum': ['query_balance', 'transfer', 'bill_analysis',
+                          'subscription', 'birthday_plan', 'invest', 'unknown'],
+                 'description': '用户这句话属于哪一类，从下面七项里选一个：'
+                                'query_balance=查余额、流水、额度、卡里还剩多少钱；'
+                                'transfer=给某人转钱、付款、还款；'
+                                'bill_analysis=分析某月账单、找出异常消费；'
+                                'subscription=查订阅、看自动扣款、取消订阅；'
+                                'birthday_plan=送礼安排：先预留一笔钱，等某个日子再付给商户，'
+                                '例如「下周三我妈生日，提前留出300块给她订束花送过去」；'
+                                'invest=基金理财的申购或赎回；'
+                                'unknown=以上都不是、实在判断不出来。'},
       'payee_name': {'type': 'string'},
       'amount_fen': {'type': 'integer'},
       'note': {'type': 'string'},
-      'merchant': {'type': 'string'},
+      'merchant': {'type': 'string',
+                   'description': '商户代码：花店填 flower_shop、蛋糕店填 cake_shop'},
       'card_tail': {'type': 'string',
                     'description': '仅当用户明确说到某张卡尾号时才填；转账、申购、账单都不需要'},
       'period': {'type': 'string', 'enum': ['month', 'year']},
       'month': {'type': 'integer'},
-      'action': {'type': 'string', 'enum': ['buy', 'redeem', 'query']},
+      'action': {'type': 'string', 'enum': ['buy', 'redeem', 'query'],
+                 'description': '理财动作：buy=申购、redeem=赎回、query=看在售产品'},
       'product_code': {'type': 'string',
-                      'description': '基金产品代码：F00001 现金添利货币A／F00002 稳盈债券A／'
-                                     'F00003 均衡配置混合A／F00004 沪深精选指数A／F00005 全球科技QDII；'
-                                     '用户报产品名时必须换成代码'},
+                       'description': '基金产品代码：F00001 现金添利货币A／F00002 稳盈债券A／'
+                                      'F00003 均衡配置混合A／F00004 沪深精选指数A／F00005 全球科技QDII；'
+                                      '用户报产品名时必须换成代码'},
+      'purpose': {'type': 'string', 'description': '这笔钱的用途，例如「生日礼物」'},
+      'gift': {'type': 'string', 'description': '要送的东西，例如「花束」「蛋糕」'},
+      'date_hint': {'type': 'string', 'description': '用户说的时间，原样保留，例如「下周三」「月底」'},
       'missing': {'type': 'array', 'items': {'type': 'string'}},
       'confidence': {'type': 'number'}
     },
@@ -60,6 +81,30 @@ def parse(text: str, history: list) -> IntentResult
   }
 }
 ```
+
+### 意图取值说明（`INTENT_GUIDE`）
+
+`intent` 的 description 逐个点名七个取值各是什么场景，不是只丢一个 enum 列表。
+
+**实测教训**：`intent` 只有 enum、没有说明时，真实模型把「下周三我妈生日，帮我提前留出300块，
+到时候给她订束花送过去」判成 `unknown`（intent=unknown、confidence=0.0，只回一句
+「你是想查询、转账还是看账单？」），场景 6 的四节点 DAG 根本建不起来。
+`product_code` 当初是同一个毛病：模型填的是产品名而不是 `F00003` 这样的代码，加了说明才填对。
+所以每个取值、每个槽位都要有一句人话说明。
+
+### 生日送礼槽位（`birthday_plan`）
+
+| 槽位 | 含义 | 落到哪 |
+|---|---|---|
+| `purpose` | 这笔钱的用途，例如「生日礼物」 | `reserve_funds` 的 `purpose` |
+| `gift` | 要送的东西，例如「花束」「蛋糕」 | `pay_merchant` 的 `item` |
+| `date_hint` | 用户说的时间，原样保留，例如「下周三」 | 只进意图与审计，不进工具参数 |
+
+- 三个槽位必须同时出现在 `SLOT_KEYS` 与 schema 里：schema 关着 `additionalProperties`，
+  没声明的槽位模型填不出来；白名单没放行的槽位模型填了也会被 `_slots` 丢掉。
+- 缺槽位时按 `MISSING_LABELS` 反问，一次只问一个：`purpose`→「这笔钱是做什么用的？」、
+  `gift`→「打算送什么？」、`date_hint`→「大概什么时候要花这笔钱？」。
+  反问轮不建 DAG、不动钱（见 §7.4 的 E 分支）。
 
 ### `parse` 分支表
 
@@ -110,6 +155,17 @@ def topo_sort(dag: Dag) -> list[DAGNode]
 | `invest`（`action=query`；认不出 `action` 时也走这一路） | `n1 list_products` |
 | 模板不在册（模型编的意图） | `n1 unsupported_request` → 策略层 `R03_unknown_tool` 红灯 + `confirm.rejected`，**不回退成默认意图** |
 | `unknown` | 不建 DAG，直接反问 |
+
+### 生日送礼的槽位落点
+
+`birthday_plan` 是四节点固定模板，模型只填槽位、不定拓扑：
+
+| 节点 | 工具 | 参数来源 |
+|---|---|---|
+| `n1` | `resolve_payee` | `payee_name`（找不到就反问，绝不猜收款人） |
+| `n2` | `query_balance` | 账户上下文 |
+| `n3` | `reserve_funds` | `amount_fen` + `purpose`（缺省「生日」） |
+| `n4` | `pay_merchant` | `merchant`（缺省 `flower_shop`）+ `item`（取 `gift`，缺省「生日鲜花」）+ `n3` 的 hold |
 
 为什么固定模板而不用模型自由生成 DAG：**可审计、可复现、可单测**。评审问「你的规划怎么保证不乱」时，答案是「模板 + 参数填充，模型只填槽位不定拓扑」。这是设计选择，写进答辩。
 
