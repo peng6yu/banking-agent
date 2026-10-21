@@ -176,6 +176,18 @@ def test_emit_intent_schema_is_closed_and_has_required_fields() -> None:
     assert intent.emit_intent_tool()["function"]["name"] == "emit_intent"
 
 
+def test_emit_intent_schema_declares_every_slot_key() -> None:
+    """schema 关着 additionalProperties，漏声明的槽位模型永远填不出来——白名单放行也是死代码。
+
+    历史缺陷：merchant 与 card_tail 进过 SLOT_KEYS 却没进 schema，真实模型给的商户名
+    会被 _slots 丢掉，注入扫描在真实链路上一格都扫不到。这条测试把两者钉在一起。
+    """
+    props = set(intent.emit_intent_schema()["parameters"]["properties"])
+    assert set(intent.SLOT_KEYS) <= props, f"schema 缺槽位：{sorted(set(intent.SLOT_KEYS) - props)}"
+    # 槽位之外的三个控制键，schema 只允许这三项比 SLOT_KEYS 多。
+    assert props - set(intent.SLOT_KEYS) == {"intent", "missing", "confidence"}
+
+
 def test_parse_reads_transfer_slots() -> None:
     adapter = Scripted(
         [{"intent": "transfer", "payee_name": "李静", "amount_fen": 50000, "note": "房租", "missing": [], "confidence": 0.92}]

@@ -119,7 +119,7 @@ class IntentResult:
 
 
 def emit_intent_schema() -> dict[str, Any]:
-    """emit_intent 的工具定义，逐字对齐 docs/07 7.2。"""
+    """emit_intent 的工具定义，键与类型对齐 docs/07 7.2（tests 断言键集合覆盖 SLOT_KEYS）。"""
     return {
         "name": EMIT_INTENT_NAME,
         "description": "把用户这句话解析成结构化意图。必须调用我，不要直接回答。",
@@ -130,12 +130,13 @@ def emit_intent_schema() -> dict[str, Any]:
                 "payee_name": {"type": "string"},
                 "amount_fen": {"type": "integer"},
                 "note": {"type": "string"},
-                "period": {"type": "string", "enum": ["month", "year"]},
-                "month": {"type": "integer"},
+                # merchant/card_tail 必须进 schema：additionalProperties=false，模型填不出 schema 外的键。
+                "merchant": {"type": "string"},
+                "card_tail": {"type": "string"},
+                "period": {"type": "string", "enum": ["month", "year"]}, "month": {"type": "integer"},
                 "action": {"type": "string", "enum": ["buy", "redeem", "query"]},
                 "product_code": {"type": "string"},
-                "missing": {"type": "array", "items": {"type": "string"}},
-                "confidence": {"type": "number"},
+                "missing": {"type": "array", "items": {"type": "string"}}, "confidence": {"type": "number"},
             },
             "required": ["intent", "missing", "confidence"],
             "additionalProperties": False,

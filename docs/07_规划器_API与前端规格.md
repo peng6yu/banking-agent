@@ -41,6 +41,8 @@ def parse(text: str, history: list) -> IntentResult
       'payee_name': {'type': 'string'},
       'amount_fen': {'type': 'integer'},
       'note': {'type': 'string'},
+      'merchant': {'type': 'string'},
+      'card_tail': {'type': 'string'},
       'period': {'type': 'string', 'enum': ['month', 'year']},
       'month': {'type': 'integer'},
       'action': {'type': 'string', 'enum': ['buy', 'redeem', 'query']},
