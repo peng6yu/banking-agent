@@ -8,7 +8,7 @@ flowchart TD
     subgraph L1["① 不可信区 · 认知层：LLM 只负责提申请，不碰钱"]
         ENV["数据信封 app/security/envelope.py"]
         INT["意图解析 app/planner/intent.py · 结构化槽位"]
-        DAG["DAG 规划 app/planner/dag.py · 5 个意图模板"]
+        DAG["DAG 规划 app/planner/dag.py · 6 个意图模板"]
     end
 
     subgraph L2["② 裁决区 · 确定性闸门：不调模型、不读环境、不取时钟"]
