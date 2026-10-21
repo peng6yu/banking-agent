@@ -302,7 +302,7 @@ SLIDES = [
             (1, "工具 14 个（app/tools/registry.py）｜ 安全规则 12 条 R01–R12（app/policy/rules.py）｜ 红队用例 43 条（tests/redteam/cases.yaml）", "m"),
             (1, "前端合规检查 62/62 项（scripts/check_frontend.py 实测）", "m"),
             (1, "红队自动判定 runner：scripts/redteam 四模块，一键跑完 43 条并打印七列判定表（commit c94a8cd）", "m"),
-            (1, "自动化测试：485 passed（以 pytest -q 实测为准；答辩前复跑回填）", "m"),
+            (1, "自动化测试：496 passed（以 pytest -q 实测为准；答辩前复跑回填）", "m"),
             (1, "红队用例 43 条：PASS 28 / FAIL 15（离线 ScriptedAdapter 实跑；以 python3.12 -m scripts.redteam 最终实跑为准）", "m"),
             (0, "不足（照实说）", "r"),
             (1, "红队判定尚未全部通过，最终通过数以终验复跑结果为准并回填", "m"),

@@ -1,5 +1,5 @@
 %% 银行 AI 智能体 · 分层架构图（mermaid flowchart）
-%% 生成命令：npx @mermaid-js/mermaid-cli -i docs/架构图.mmd -o docs/架构图.svg -p /usr/bin/google-chrome
+%% 生成命令：PUPPETEER_EXECUTABLE_PATH=/usr/bin/google-chrome npx @mermaid-js/mermaid-cli -i docs/架构图.mmd -o docs/架构图.svg
 flowchart TD
     U["用户 · 浏览器"] --> FE["决策剧场前端 web/index.html"]
     FE -->|"POST /api/chat（SSE 流式回帧）"| API["API 层 app/api/routes.py · 10 端点"]
