@@ -122,7 +122,7 @@ def emit_intent_schema() -> dict[str, Any]:
     """emit_intent 的工具定义，键与类型对齐 docs/07 7.2（tests 断言键集合覆盖 SLOT_KEYS）。"""
     return {
         "name": EMIT_INTENT_NAME,
-        "description": "把用户这句话解析成结构化意图。必须调用我，不要直接回答。",
+        "description": "把用户这句话解析成结构化意图。必须调用我，不要直接回答。missing 只填真正缺失、必须问用户才能补的槽位；card_tail / note / merchant 都是可选槽位，不要填进 missing。",
         "parameters": {
             "type": "object",
             "properties": {
@@ -132,10 +132,10 @@ def emit_intent_schema() -> dict[str, Any]:
                 "note": {"type": "string"},
                 # merchant/card_tail 必须进 schema：additionalProperties=false，模型填不出 schema 外的键。
                 "merchant": {"type": "string"},
-                "card_tail": {"type": "string"},
+                "card_tail": {"type": "string", "description": "仅当用户明确说到某张卡尾号时才填；转账、申购、账单都不需要"},
                 "period": {"type": "string", "enum": ["month", "year"]}, "month": {"type": "integer"},
                 "action": {"type": "string", "enum": ["buy", "redeem", "query"]},
-                "product_code": {"type": "string"},
+                "product_code": {"type": "string", "description": "基金产品代码：F00001 现金添利货币A／F00002 稳盈债券A／F00003 均衡配置混合A／F00004 沪深精选指数A／F00005 全球科技QDII；用户报产品名时必须换成代码"},
                 "missing": {"type": "array", "items": {"type": "string"}}, "confidence": {"type": "number"},
             },
             "required": ["intent", "missing", "confidence"],

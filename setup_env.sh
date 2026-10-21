@@ -11,7 +11,7 @@ if [ -z "$KEY" ]; then echo "没找到 MINIMAX_CN_API_KEY"; exit 1; fi
   echo "MINIMAX_API_HOST=https://api.minimaxi.com"
   echo "MODEL_BRAIN=MiniMax-M3.1-Flash-Preview"
   echo "MODEL_FAST=MiniMax-M2.5-highspeed"
-  echo "MODEL_BACKUP=MiniMax-M2.1"
+  echo "MODEL_BACKUP=MiniMax-M2.5"
   echo "# 能力令牌签名密钥，64 位十六进制；缺失则黄灯/红灯链路 fail closed"
   echo "CAPABILITY_SECRET=$(python3.12 -c 'import secrets;print(secrets.token_hex(32))')"
   echo "LLM_TEMPERATURE=0"

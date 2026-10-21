@@ -34,7 +34,7 @@ class Settings:
     host: str = os.getenv("MINIMAX_API_HOST", "https://api.minimaxi.com")
     model_brain: str = os.getenv("MODEL_BRAIN", "MiniMax-M3.1-Flash-Preview")
     model_fast: str = os.getenv("MODEL_FAST", "MiniMax-M2.5-highspeed")
-    model_backup: str = os.getenv("MODEL_BACKUP", "MiniMax-M2.1")
+    model_backup: str = os.getenv("MODEL_BACKUP", "MiniMax-M2.5")
     temperature: float = float(os.getenv("LLM_TEMPERATURE", "0") or "0")
     timeout: int = int(os.getenv("LLM_TIMEOUT", "60") or "60")
     mock: bool = os.getenv("MOCK_MODE", "false").strip().lower() in _TRUTHY
