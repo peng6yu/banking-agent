@@ -18,7 +18,7 @@ from app.clock import ValidationError
 from app.llm import LLMError, LLMResponse, ToolCall
 from app.models import Dag, DAGNode
 from app.planner import dag as planner_dag
-from app.planner import executor, intent
+from app.planner import executor, intent, runner
 from app.policy import rules as planner_rules
 from scripts.seed import PAYEE_LIJING, seed
 
@@ -704,21 +704,95 @@ def _traces(events: list[tuple[str, dict[str, Any]]]) -> dict[str, dict[str, Any
     return {data["node_id"]: data for name, data in events if name == "trace"}
 
 
-def test_red_amount_is_blocked_before_the_payee_question(bank: Path) -> None:
-    """收款人问不出来时金额红线先裁决：先拒，不给「换个收款人就能转」的暗示。"""
+def test_red_amount_is_decided_before_the_payee_question(bank: Path) -> None:
+    """收款人问不出来时金额红线先裁决：裁决照落，但不再终局拒绝。
+
+    t39：R08 的 required_factors 是 face+sms，赛题口径是「红色强验证」不是「禁止」。
+    这里只负责把红线裁决落进审计（policy.decided + trace），验因子的活儿交给执行层
+    在真正的花钱节点弹 factor 事件。没问出收款人之前钱不会动。
+    """
     events = drive("s_pre", transfer_dag(payee_name="一个陌生账户", amount_fen=5_000_000))
     traces = _traces(events)
     assert set(traces) == {"n1", "n3"}, "n2 查余额不该跑，n3 是被判红的钱节点"
     assert (traces["n3"]["level"], traces["n3"]["rule_id"]) == ("red", "R08_transfer_red_single")
     assert traces["n3"]["amount_fen"] == 5_000_000
-    assert "done" not in names(events), "终局拒绝不能又发一轮 done"
-    blocked = payload(events, "error")
-    assert blocked["code"] == "POLICY_BLOCKED"
-    assert not blocked["user_text"].endswith("？"), "终局拒绝不能以反问收尾"
+    assert "error" not in names(events), "有因子可验的红不该发 POLICY_BLOCKED"
+    done = payload(events, "done")
+    assert done["question"], "改问收款人，钱还没动"
     conn = db.connect()
     kinds = [
         row[0]
         for row in conn.execute("SELECT event_type FROM audit_log WHERE session_id='s_pre' ORDER BY seq")
+    ]
+    assert "policy.decided" in kinds
+    assert "confirm.rejected" not in kinds, "没有终局拒绝，就不该写拒绝留痕"
+    assert balance(conn) == 1_286_050
+    assert count(conn, "transactions") == 320
+    conn.close()
+
+
+def test_red_amount_with_factors_does_not_stop_before_the_payee_question(
+    bank: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """2000 元的转账：block_on_amount 必须放行（None），红灯留给执行层弹因子。
+
+    这条钉的是函数返回值本身：以前这里无条件 return STOP，等于把「等 face+sms」
+    说成「不可能」，双因子通道在生产链路上根本没机会出现。
+    """
+    seen: list[str | None] = []
+    real = runner.block_on_amount
+
+    async def spy(state: Any, node: Any, emit: Any) -> str | None:
+        result = await real(state, node, emit)
+        seen.append(result)
+        return result
+
+    monkeypatch.setattr(runner, "block_on_amount", spy)
+    events = drive("s_pre_2k", transfer_dag(payee_name="一个陌生账户", amount_fen=200_000))
+    assert seen == [None], f"有 face+sms 可验的红不该终局拒绝，实际返回 {seen}"
+    traces = _traces(events)
+    assert (traces["n3"]["level"], traces["n3"]["rule_id"]) == ("red", "R08_transfer_red_single")
+    assert "error" not in names(events)
+    assert payload(events, "done")["question"]
+    conn = db.connect()
+    rows = conn.execute(
+        "SELECT event_type, payload_json FROM audit_log WHERE session_id=? ORDER BY seq",
+        ("s_pre_2k",),
+    ).fetchall()
+    decided = [json.loads(row["payload_json"]) for row in rows if row["event_type"] == "policy.decided"]
+    assert any(item.get("rule_id") == "R08_transfer_red_single" for item in decided), decided
+    rejected = [json.loads(row["payload_json"]) for row in rows if row["event_type"] == "confirm.rejected"]
+    assert not any(item.get("stage") == "PRE_PAYEE_GATE" for item in rejected), rejected
+    assert balance(conn) == 1_286_050
+    assert count(conn, "transactions") == 320
+    conn.close()
+
+
+def test_red_without_factors_is_still_a_hard_reject(
+    bank: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """没有因子可验的红才终局拒绝：「等因子」和「不可能」不能混为一谈。
+
+    这里把策略层的裁决换成空因子的红灯（等价于 R03/R11/R12 这类没法验的红），
+    断言仍然是 POLICY_BLOCKED + confirm.rejected，不发 done。
+    """
+    real_decide = runner.decide
+
+    def fake_decide(action: Any, ctx: Any) -> Any:
+        decision = real_decide(action, ctx)
+        return decision.model_copy(update={"required_factors": []})
+
+    monkeypatch.setattr(runner, "decide", fake_decide)
+    events = drive("s_pre_hard", transfer_dag(payee_name="一个陌生账户", amount_fen=200_000))
+    blocked = payload(events, "error")
+    assert blocked["code"] == "POLICY_BLOCKED"
+    assert "done" not in names(events), "终局拒绝不能又发一轮 done"
+    conn = db.connect()
+    kinds = [
+        row[0]
+        for row in conn.execute(
+            "SELECT event_type FROM audit_log WHERE session_id=? ORDER BY seq", ("s_pre_hard",)
+        )
     ]
     assert "policy.decided" in kinds
     assert "confirm.rejected" in kinds

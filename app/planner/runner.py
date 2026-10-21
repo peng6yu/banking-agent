@@ -97,12 +97,20 @@ async def _settle(state: RunState, node: Any, rec: NodeRec, result: ToolResult, 
 
 
 async def block_on_amount(state: RunState, node: Any, emit: Emit) -> str | None:
-    """收款人问不出来的时候，先按金额判一次：红灯就直接拒，不问收款人。
+    """收款人问不出来的时候，先按金额判一次：红灯先落裁决，再决定是拒还是等因子。
 
     为什么这个顺序：R02/R07/R08 只看 action 里的金额，跟收款人是谁没关系。
     一笔 5 万的转账无论转给谁都过不了单笔限额——先反问「换个收款人名字试试」，
     等于用一句提示把用户往一条永远走不通的路上引，而且整条 policy.decided 审计永远不会落。
     只拦红灯：金额在黄区间的正常转账仍然先澄清收款人再弹确认，交互顺序不动。
+
+    红灯有两种，不能混为一谈（t39，赛题口径是「强验证」不是「禁止」）：
+    - 可验证的红（R07/R08/R09/R10，required_factors 非空）：策略层已经写明
+      「face+sms 验完就能过」。这里只负责把裁决落下来（policy.decided + trace），
+      然后放行收款人闸门；等 DAG 走到真正的花钱节点，由执行层弹 factor 事件、
+      走双因子，验过才放款。没有因子就硬拒，等于把「等因子」说成「不可能」。
+    - 不可执行的红（required_factors 为空，如 R03/R11/R12）：没有因子可验，
+      才是终局拒绝（POLICY_BLOCKED + confirm.rejected + 节点 failed）。
 
     返回 STOP 表示已经终局拒绝，返回 None 表示照旧走收款人歧义闸门。
     """
@@ -137,6 +145,18 @@ async def block_on_amount(state: RunState, node: Any, emit: Emit) -> str | None:
         session_id=state.session_id,
     )
     await emit_event(emit, "trace", trace_event(target, action, decision))
+    if decision.required_factors:
+        # 可验证的红：裁决照落（policy.decided + trace 都在），但不终局拒绝。
+        # 因子由执行层在真正的花钱节点弹（factor 事件 + 双因子），验过才放款。
+        log.info(
+            "runner.amount_red_waiting_factor session=%s node=%s rule=%s amount=%s factors=%s",
+            state.session_id,
+            target.id,
+            decision.rule_id,
+            amount,
+            ",".join(decision.required_factors),
+        )
+        return None
     await emit_event(
         emit,
         "error",
