@@ -213,3 +213,46 @@ git checkout main && git merge --no-ff feat/m3-policy && git push
         import asyncio
         from app.planner.executor import run
         asyncio.run(run(session_id='s1', dag=my_dag, emit=lambda *a: None))
+
+## 9.12 推送通道与镜像失效的绕行配方（2026-10-22 实测）
+
+本机全局 git 启用了镜像重写：`url.https://ghfast.top/https://github.com/.insteadof=https://github.com/`。
+这带来两个问题，都不是仓库本身的毛病：
+
+| 现象 | 根因 |
+|---|---|
+| `fatal: could not read Username for 'https://ghfast.top'` | 凭据 helper 只挂在 github.com 域（`credential.https://github.com.helper=!/usr/bin/gh auth git-credential`），镜像域拿不到凭据 |
+| `Recv failure: 连接被对方重置` | ghfast.top 镜像本身不可用（2026-10-22 实测挂掉，`git ls-remote`/`git push` 全失败） |
+
+### 9.12.1 已验证可用的推送配方
+
+用隔离 HOME + 内联 gh token + 把 mirror 映射反掉（等于禁用镜像直连 github.com）：
+
+```bash
+TMPH=$(mktemp -d)
+printf '[credential "https://github.com"]\n\thelper = "!f() { echo username=x-access-token; echo password=$(gh auth token); }; f"\n' > $TMPH/.gitconfig
+HOME=$TMPH GIT_CONFIG_GLOBAL=$TMPH/.gitconfig \
+  git -c "url.https://github.com/.insteadof=https://ghfast.top/https://github.com/" \
+  push origin main
+rm -rf $TMPH
+```
+
+要点三条：
+
+1. `HOME` 必须隔离——否则全局 credential helper 仍指向镜像域。
+2. `GIT_CONFIG_GLOBAL` 要跟着 HOME 走，inline token 才生效。
+3. `-c url.https://github.com/.insteadof=...` 把镜像规则反向覆盖，让地址变回 github.com 直连。
+
+### 9.12.2 只读核对远端（不依赖 git 传输）
+
+git 通道挂掉时，远端状态改用 GitHub API 查：
+
+```bash
+gh api repos/peng6yu/banking-agent --jq '.private, .size, .pushed_at, .default_branch'
+```
+
+### 9.12.3 交接注意
+
+- **提交前必须确认仓库可见性**：`gh repo view --json visibility`。赛题要求交仓库地址，`PRIVATE` 评委打不开，等于没交。
+- 改 public 前先扫密钥：`git grep -n 'sk-cp-'` 只应命中占位符（如 `sk-cp-...`）。`.env` 已在 `.gitignore` 内。
+- 若 git 两种通道都不可用，最后手段是 GitHub API 写文件（`gh api --method PUT /repos/{owner}/{repo}/contents/{path}`），但会丢失多文件的单次原子提交语义，仅作应急。
