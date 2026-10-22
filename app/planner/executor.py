@@ -362,6 +362,8 @@ async def _guard(
     if decision.level == "red" and not decision.required_factors:
         await _blocked(state, node, conf, decision, emit, action)
         return False, True
+    # 确认卡的 future 在 new_confirmation 里就建好了：答案早到（程序化客户端收到帧就回）
+    # 也能被接住，不会被 resolve_pending 丢掉后干等 120 秒。
     await emit_event(emit, prompt_event(decision), prompt_payload(node, conf, decision))
     audit.append(
         state.conn,

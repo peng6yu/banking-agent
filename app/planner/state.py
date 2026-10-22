@@ -186,9 +186,25 @@ def new_confirmation(state: RunState, node: Any, action: Action, decision: Decis
         created_ms=now_ms,
         expires_ms=now_ms + CONFIRM_TIMEOUT_MS,
         payee_name=who,
+        # future 在这里就建好，不推迟到 wait_for_answer 那一刻：
+        # 答案可能早到——程序化客户端（IM Bot、自动化脚本）收到 confirm 帧就立刻
+        # POST /api/confirm。future 建晚了，resolve_pending 会把早到的答案静默丢掉，
+        # 执行器只能干等到 120 秒 CONFIRM_TIMEOUT。早建 future，早到的答案照样接得住。
+        future=_new_answer_future(),
     )
     state.confirmations[conf.id] = conf
     return conf
+
+
+def _new_answer_future() -> asyncio.Future[dict[str, Any]]:
+    """建一个「等答案」的 future；必须在事件循环里调用。"""
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError as exc:
+        raise RuntimeError(
+            "new_confirmation 必须在事件循环里调用：确认卡要能接住早到的答案"
+        ) from exc
+    return loop.create_future()
 
 
 def _display_payee(conn: sqlite3.Connection, action: Action) -> str | None:
@@ -200,8 +216,13 @@ def _display_payee(conn: sqlite3.Connection, action: Action) -> str | None:
 
 
 def wait_for_answer(conf: Confirmation) -> asyncio.Future[dict[str, Any]]:
+    """取确认卡的「等答案」future。
+
+    正常路径上 future 在 new_confirmation 里就建好了，这里只是把它取出来；
+    留着兜底是为了将来若有别的建卡路径忘了建 future，也不至于把答案丢掉。
+    """
     if conf.future is None:
-        conf.future = asyncio.get_running_loop().create_future()
+        conf.future = _new_answer_future()
     return conf.future
 
 
@@ -222,7 +243,12 @@ def resolve_confirmation(state: RunState, conf: Confirmation, status: str, *, au
 
 
 def resolve_pending(state: RunState, answer: dict[str, Any]) -> None:
-    """把答案递给所有在等的确认；已解决的不动。"""
+    """把答案递给所有在等的确认；已解决的不动。
+
+    广播仍然安全，靠两条：
+    1) 执行器是串行的，同一时刻只有一张卡在等（黄牌/红牌都是等完才走下一步）；
+    2) resume() 对已落定的确认幂等返回，不会拿一张旧卡的答案来广播。
+    """
     for conf in state.confirmations.values():
         if conf.future is not None and not conf.future.done():
             conf.future.set_result(dict(answer))
