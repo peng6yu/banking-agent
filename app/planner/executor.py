@@ -23,6 +23,7 @@ from app.planner.state import (
     balance_of,
     factors_ok,
     finish_run,
+    mark_confirmation,
     ms_to_seconds,
     new_confirmation,
     open_run,
@@ -395,7 +396,7 @@ async def _blocked(
     action: Action | None = None,
 ) -> None:
     """E5：红色但没要因子——先告知被拦，再让用户改主意，不给「就这么办」的出口。"""
-    conf.status = "expired"
+    mark_confirmation(state, conf, "expired")
     await emit_event(
         emit,
         "factor",
@@ -421,7 +422,7 @@ async def _blocked(
 
 async def _timeout(state: RunState, rec: NodeRec, conf: Confirmation, emit: Emit) -> None:
     """E3：120 秒没人点头，这笔作废，预授权全部释放。"""
-    conf.status = "expired"
+    mark_confirmation(state, conf, "expired")
     released = release_holds(state, "CONFIRM_TIMEOUT")
     audit.append(
         state.conn,

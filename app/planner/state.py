@@ -192,6 +192,23 @@ def new_confirmation(state: RunState, node: Any, action: Action, decision: Decis
         # 执行器只能干等到 120 秒 CONFIRM_TIMEOUT。早建 future，早到的答案照样接得住。
         future=_new_answer_future(),
     )
+    # 落库：这张表原先只有 UPDATE 没有 INSERT，于是它恒空——`/api/session` 永远列不出
+    # 卡片，resolve_confirmation 的 UPDATE 也就成了空操作。建卡是唯一入口，插入放这里。
+    state.conn.execute(
+        "INSERT INTO confirmations"
+        " (id, session_id, run_id, node_id, action_json, status, created_ms, expires_ms)"
+        " VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        (
+            conf.id,
+            state.session_id,
+            state.run_id,
+            conf.node_id,
+            action.model_dump_json(),
+            conf.status,
+            conf.created_ms,
+            conf.expires_ms,
+        ),
+    )
     state.confirmations[conf.id] = conf
     return conf
 
@@ -226,13 +243,24 @@ def wait_for_answer(conf: Confirmation) -> asyncio.Future[dict[str, Any]]:
     return conf.future
 
 
-def resolve_confirmation(state: RunState, conf: Confirmation, status: str, *, audit_reason: str) -> None:
-    """落定一次确认：改状态、写审计、唤醒等待中的执行器。"""
+def mark_confirmation(state: RunState, conf: Confirmation, status: str) -> None:
+    """改确认卡状态并落库。
+
+    超时（CONFIRM_TIMEOUT）与策略拦停（POLICY_BLOCKED）这两条路径不经过
+    resolve_confirmation——它们不唤醒执行器、写的也不是同一句审计文案——但它们同样
+    必须落库：只在内存里改 conf.status，表里那张卡就会永远停在 pending，
+    `/api/session` 会一直把它当作「还在等你点」。
+    """
     conf.status = status
     state.conn.execute(
         "UPDATE confirmations SET status = ?, resolved_ms = ? WHERE id = ?",
         (status, clock.now_ms(), conf.id),
     )
+
+
+def resolve_confirmation(state: RunState, conf: Confirmation, status: str, *, audit_reason: str) -> None:
+    """落定一次确认：改状态、写审计、唤醒等待中的执行器。"""
+    mark_confirmation(state, conf, status)
     audit.append(
         state.conn,
         "confirm.approved" if status == "approved" else "confirm.rejected",
