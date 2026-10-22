@@ -53,7 +53,7 @@ from app.ids import new_id  # noqa: E402
 from app.llm import LLMAdapter, LLMError, ScriptAdapter  # noqa: E402
 from app.log import log as app_log  # noqa: E402
 from app.planner import dag as planner_dag  # noqa: E402
-from app.planner import executor, intent  # noqa: E402
+from app.planner import executor  # noqa: E402
 from scripts.seed import seed as seed_db  # noqa: E402
 
 TMP = ROOT / "tmp"
@@ -200,7 +200,29 @@ def _reset_db(key: str) -> Any:
     return conn
 
 
-async def _answer(session_id: str, name: str, data: dict[str, Any], log: list[dict[str, Any]]) -> None:
+async def _wait_future(session_id: str, conf_id: str, timeout: float = 5.0) -> bool:
+    """等执行器把确认卡的 future 建起来。
+
+    时序陷阱：确认卡的 future 是执行器在 emit 回调**返回之后**才建的
+    （app/planner/executor.py 的 _guard：先 await emit_event(...)，再
+    wait_for_answer(conf)）。在 emit 回调里同步 resume，答案比 future 早到，
+    resolve_pending 找不到 future 就把答案丢了，执行器只能等到超时。
+    所以只能在回调之外作答，并且要等 future 真的出现。
+    """
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        state = executor.get_run(session_id)
+        conf = state.confirmations.get(conf_id) if state is not None else None
+        if conf is not None and conf.future is not None:
+            return True
+        if conf is not None and conf.status != "pending":
+            return False
+        await asyncio.sleep(0.01)
+    return False
+
+
+async def _answer(session_id: str, name: str, data: dict[str, Any],
+                  log: list[dict[str, Any]]) -> None:
     """按现场用户的做法作答：黄灯点头；红灯补齐 required 里的全部因子。"""
     required = [str(x) for x in (data.get("required") or [])]
     record: dict[str, Any] = {
@@ -211,15 +233,32 @@ async def _answer(session_id: str, name: str, data: dict[str, Any], log: list[di
         "rule_id": data.get("rule_id"),
         "required": required,
     }
+    log.append(record)
     if name == "factor" and not required:
         # 生产已在该分支把确认卡置 expired 并发 error（_blocked），不再尝试批准
         record.update(action="blocked_no_factor", result="POLICY_BLOCKED")
-        log.append(record)
+        return
+    conf_id = str(data["confirmation_id"])
+    if not await _wait_future(session_id, conf_id):
+        record.update(action="no_future", result="NO_FUTURE")
         return
     factor = "+".join(required) if required else None
-    outcome = await executor.resume(session_id, str(data["confirmation_id"]), True, factor=factor)
+    outcome = await executor.resume(session_id, conf_id, True, factor=factor)
     record.update(action="approve", factor=factor, result=str(outcome.get("status")))
-    log.append(record)
+
+
+async def _answer_loop(session_id: str, prompts: list[dict[str, Any]],
+                       log: list[dict[str, Any]]) -> None:
+    """独立协程：盯着确认卡事件，一有就作答（必须与执行器并行，不能在 emit 里做）。"""
+    handled: set[str] = set()
+    while True:
+        await asyncio.sleep(0.02)
+        for record in list(prompts):
+            conf_id = str(record.get("confirmation_id"))
+            if conf_id in handled:
+                continue
+            handled.add(conf_id)
+            await _answer(session_id, str(record.get("event")), record, log)
 
 
 async def run_scenario(item: tuple[str, str, str], recorder: ChatRecorder) -> Result:
@@ -232,10 +271,13 @@ async def run_scenario(item: tuple[str, str, str], recorder: ChatRecorder) -> Re
         routes.set_adapter(recorder)
         events: list[tuple[str, dict[str, Any]]] = []
 
+        prompts: list[dict[str, Any]] = []
+
         async def emit(name: str, data: dict[str, Any]) -> None:
             events.append((name, dict(data)))
             if name in ("confirm", "factor"):
-                await _answer(session_id, name, data, result.confirmations)
+                # 只登记，不在这里作答：作答必须等执行器把 future 建好（见 _wait_future）
+                prompts.append({"event": name, **dict(data)})
 
         started = time.monotonic()
         try:
@@ -255,7 +297,24 @@ async def run_scenario(item: tuple[str, str, str], recorder: ChatRecorder) -> Re
                 built = planner_dag.build_or_single(
                     {"intent": parsed.intent, "slots": parsed.slots}
                 )
-                await executor.run(session_id, built, emit, confirm_timeout_ms=CONFIRM_TIMEOUT_MS)
+                # 执行器放后台跑；作答协程并行盯着确认卡 —— 两者必须同时在事件循环里，
+                # 在 emit 回调里作答会把答案丢在 future 之前（见 _wait_future 的说明）。
+                run_task = asyncio.create_task(
+                    executor.run(session_id, built, emit, confirm_timeout_ms=CONFIRM_TIMEOUT_MS)
+                )
+                answer_task = asyncio.create_task(
+                    _answer_loop(session_id, prompts, result.confirmations)
+                )
+                try:
+                    await run_task
+                finally:
+                    answer_task.cancel()
+                    try:
+                        await answer_task
+                    except asyncio.CancelledError:
+                        pass
+                    except Exception as exc:  # noqa: BLE001 - 作答失败不该盖掉主流程结果
+                        result.failures.append("作答协程异常 " + type(exc).__name__ + ": " + str(exc)[:200])
         except LLMError as exc:
             result.failures.append("模型不可用: " + str(exc)[:300])
         except BankError as exc:
@@ -385,7 +444,7 @@ def main(argv: list[str] | None = None) -> int:
     target = str(Path(original_db).resolve())
     leaked = [path for path in DB_OPENS if str(Path(path).resolve()) == target]
     untouched = not leaked
-    print("")
+    print()
     print(f"业务库隔离：本次运行打开子库 {len(DB_OPENS)} 次，命中 data/bank.db {len(leaked)} 次"
           f" → {'未污染' if untouched else '污染了！'}")
     print(f"（data/bank.db sha256 {before_hash[:12]}… → {after_hash[:12]}…，仅作参考："
