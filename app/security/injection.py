@@ -308,9 +308,10 @@ class _TurnEntry:
 class _TurnChannel:
     """用户原话命中的接力棒：意图层压棒，执行层取棒，一根棒只给一轮用。
 
-    认领优先找 session_id 对得上的那根（解析层拿不到 session_id 时留空），
-    找不到就取最老的一根；超过 TURN_TTL_MS 没人取的自动作废，
-    免得一句很久以前的脏话把后来的无关会话顶红。
+    认领按会话严格配对：先找 session_id 对得上的那根（多根取最老的一根），
+    没有精确匹配时只认领 session_id 留空的那根（解析层拿不到会话时的兼容路径），
+    两种都没有就空手而归——绝不越过会话边界去拿别人的棒。
+    超过 TURN_TTL_MS 没人取的自动作废，免得一句很久以前的脏话把后来的无关会话顶红。
     """
 
     def __init__(self) -> None:
@@ -326,15 +327,30 @@ class _TurnChannel:
         self._entries = [item for item in self._entries if now_ms - item.at_ms <= TURN_TTL_MS]
 
     def claim(self, session_id: str | None = None, *, now_ms: int | None = None) -> TurnTaint | None:
+        """认领一根棒：宁可这一轮不升色，也不许领走别的会话的棒。
+
+        取棒顺序：
+        1. 有精确的 session_id 匹配 → 取匹配的那几根里最老的一根；
+        2. 没有精确匹配 → 只认领 session_id 为 None 的棒（调用方确实拿不到会话时的兼容路径）；
+        3. 两种都没有 → 返回 None。
+
+        为什么不再用「取最老的一根」兜底：接力棒是模块级单例，一根棒只记着「这句原话
+        命中了注入」，不记「是谁说的」。两个用户同时说话时，兜底会让 B 领走 A 的棒
+        （A 假红、B 漏升色），也会让 A 领走 B 的棒——两种错法都会削弱注入裁决的可靠性，
+        还让红队与回归结果不可复现。这里选「宁可漏升色也不串味」：漏升色最多是这一轮
+        少一次提醒，串味会同时污染两个会话。
+        """
         now = clock.now_ms() if now_ms is None else now_ms
         self._expire(now)
         if not self._entries:
             return None
-        index = next(
-            (i for i, item in enumerate(self._entries) if session_id and item.session_id == session_id),
-            0,
-        )
-        return self._entries.pop(index).taint
+        exact = [i for i, item in enumerate(self._entries) if session_id and item.session_id == session_id]
+        if exact:
+            return self._entries.pop(exact[0]).taint
+        anonymous = [i for i, item in enumerate(self._entries) if item.session_id is None]
+        if anonymous:
+            return self._entries.pop(anonymous[0]).taint
+        return None
 
     def release(self, taint: TurnTaint | None) -> None:
         """用完清干净；认领时已经出棒，这里只兜住中途异常后的重复释放。"""
@@ -358,6 +374,7 @@ def mark_turn(
     """扫用户原话；命中就压一根棒（意图层调用），干净文本返回 None 什么也不压。
 
     扫描结果不影响用户可见的回复内容，只用于裁决——原话照常进 <DATA> 信封。
+    session_id 标上这根棒属于哪个会话；执行层只认领自己会话的棒（见 _TurnChannel.claim）。
     """
     result = scan(text, classifier=classifier)
     if not result.hit:
@@ -373,7 +390,10 @@ def mark_turn(
 
 
 def claim_turn(session_id: str | None = None, *, now_ms: int | None = None) -> TurnTaint | None:
-    """执行层取棒：这一轮的用户原话里有没有注入，返回标记或 None。"""
+    """执行层取棒：这一轮的用户原话里有没有注入，返回标记或 None。
+
+    只认领本会话的棒（取棒规则与取舍见 _TurnChannel.claim）。
+    """
     return _CHANNEL.claim(session_id, now_ms=now_ms)
 
 
