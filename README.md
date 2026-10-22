@@ -146,7 +146,7 @@ curl -s http://127.0.0.1:8000/api/audit/verify
 ### 单元与集成测试（实测全绿，用例数持续增补）
 
 ```bash
-python3.12 -m pytest -q tests/            # 662 passed（2026-10-22 实测；用例会随增补变化，复跑以实测为准）
+python3.12 -m pytest -q tests/            # 666 passed（2026-10-23 实测；用例会随增补变化，复跑以实测为准）
 ```
 
 ### 前端合规自检（实测 62 项全过）
@@ -154,6 +154,35 @@ python3.12 -m pytest -q tests/            # 662 passed（2026-10-22 实测；用
 ```bash
 python3.12 scripts/check_frontend.py      # 实测「前端检查通过：62/62 项全部达标」
 ```
+
+### 浏览器级冒烟（真 Chromium，实测 PASS + 3 张截图）
+
+`scripts/check_frontend.py` 用正则扫 HTML 源码，一行 JavaScript 都没执行过；`scripts/browser_smoke.py` 用 Playwright 驱动真实 Chromium 打开页面、真的往输入框敲一句话，再对渲染后的 DOM 断言。
+
+```bash
+export PATH=$PATH:/home/peng/.local/bin
+python3.12 scripts/browser_smoke.py                 # 全自动：起后端 + 跑两条场景 + 落截图（退出码 0 = 过）
+python3.12 scripts/browser_smoke.py --probe-only    # 只打印浏览器自动化探测结果，不跑场景
+python3.12 scripts/browser_smoke.py --headed        # 开有头浏览器，答辩前看一遍现场
+python3.12 scripts/browser_smoke.py --base-url http://127.0.0.1:8000   # 指定端口
+python3.12 scripts/browser_smoke.py --reuse         # 复用已在跑的服务（注意：它会在那个服务的库里真转 100 元）
+
+# 固化成回归测试（默认跳过，要显式开）：
+RUN_BROWSER_SMOKE=1 python3.12 -m pytest tests/test_browser_smoke.py -q   # 实测 4 passed
+```
+
+后端默认跑在 **沙箱目录** `tmp/browser_smoke_sandbox/`（`app/ web/ scripts/` 的副本 + 自己的一份 `data/bank.db`），
+所以**冒烟不会动答辩现场那份演示库** `data/bank.db`；脚本每次跑完都会断言「演示库余额未变、且里面没有本次那笔给妈妈的转账」。
+端口被占用时脚本会自动换一个空闲端口起自己的沙箱后端，不会因此失败。
+
+实测 2026-10-23 退出码 0，两条场景：
+
+1. 「查一下我储蓄卡尾号1234的余额」→ 聊天区出现助手气泡「余额 12,860.50 元」；右栏意图 / 计划 / 权限灯 / 审计链四块都有内容（意图 = query_balance 置信度 0.9，计划 = n1 成功，权限灯 = 绿灯直接放行，审计链 4 条）；流式证据：`/api/chat` 响应分 **2 个 chunk** 到达（首块含 `event: start`、末块含 `event: done`），`#chat-log` 有 **4 批** DOM 变更、文本长度 39 → 150 递增，说明是边收边渲染而不是最后一次性刷出。
+2. 「转 100 元给妈妈」→ 黄灯确认卡真的渲染（金额 100.00 / 收款人 妈妈 / 操作说明全文 / 有效期 120 秒），「确认」按钮 `disabled=false` 可点；点击后聊天区出现「已转出 100.00 元」回执，权限灯显示黄灯 R06_transfer_yellow，余额 12860.50 → 12760.50（差额正好 100 元）。
+
+截图落在 `docs/交付/截图/`：`01_balance_query.png`、`02_confirm_card.png`、`03_confirm_done.png`；断言失败时会另存 `99_failure.png` 作为现场。完整探测过程与残余风险见 [浏览器冒烟报告](docs/交付/浏览器冒烟报告.md)。
+
+依赖：Playwright（本机 1.60.0）+ Chromium。没装的话 `python3.12 -m playwright install chromium`；ego-browser CLI 本机未安装，探测过程见报告。单次全程约 6.5 秒。
 
 ### 红队 43 条用例
 
@@ -185,7 +214,7 @@ python3.12 -m app.smoke                    # 实测 4/4 PASS，主脑延迟约 1
 | `app/tools/` | 26 个工具：查人、查余额、账单、卡片、订阅、转账、资金冻结等 |
 | `app/api/` | 10 个 HTTP 端点 + 根页面 |
 | `web/index.html` | 单文件前端（原生 JS，无框架、无 CDN、零外链） |
-| `tests/` | pytest 用例集（662 条，2026-10-22 实测）+ 43 条红队 YAML |
+| `tests/` | pytest 用例集（666 条，2026-10-23 实测）+ 43 条红队 YAML |
 | `scripts/` | 种子脚本、前端合规检查器 |
 | `docs/` | 交接规格书 00—10（写代码前必读）+ 答辩与演示交付件 |
 | `规划/` | 前期选型与模型实测记录 |
@@ -198,7 +227,7 @@ python3.12 -m app.smoke                    # 实测 4/4 PASS，主脑延迟约 1
 |---|---|---|
 | `make run` | 启动服务（--reload） | ✅ |
 | `make seed` | 建库 + 种子（幂等） | ✅ |
-| `make test` | pytest 全跑 | ✅ 全绿（662 passed，2026-10-22 实测） |
+| `make test` | pytest 全跑 | ✅ 全绿（666 passed，2026-10-23 实测） |
 | `make smoke` | 模型连通性自检 | ✅ 4/4 |
 | `make cov` | 覆盖率（未装 pytest-cov 时自动退回纯跑） | ✅ |
 | `make reset` | `POST /api/demo/reset` 演示前清场 | ✅ |

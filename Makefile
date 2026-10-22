@@ -3,7 +3,7 @@
 
 PY ?= python3.12
 
-.PHONY: help install run seed reseed test cov redteam smoke fresh clean reset check-env
+.PHONY: help install run seed reseed test cov redteam smoke browser-smoke fresh clean reset check-env
 
 help:
 	@echo 可用命令：
@@ -14,6 +14,7 @@ help:
 	@echo   make test      跑 pytest
 	@echo   make redteam   跑 43 条红队用例
 	@echo   make smoke     模型连通性自检
+	@echo   make browser-smoke 真浏览器冒烟（Playwright + Chromium，截图进 docs/交付/截图/）
 	@echo   make fresh     从零到可演示
 	@echo   make clean     清理缓存与数据库
 
@@ -44,6 +45,9 @@ redteam:
 
 smoke:
 	$(PY) -m app.smoke
+
+browser-smoke:
+	$(PY) scripts/browser_smoke.py
 
 fresh: clean seed test
 	@echo ✓ 从零到可演示完成（fresh 已含 clean，重建的是干净库），执行 make run 启动
