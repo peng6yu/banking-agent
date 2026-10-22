@@ -105,6 +105,10 @@ MISSING_ALIASES: Final[dict[str, str]] = {
 # 槽位说明：模型不会照字段名猜语义，缺说明就填不对（product_code 就是这么填错过）。
 SLOT_GUIDE: Final[dict[str, str]] = {
     "card_tail": "仅当用户明确说到某张卡尾号时才填；转账、申购、账单都不需要",
+    "payee_name": (
+        "收款人姓名：用户用亲属称谓指代收款人时（我妈、我爸、我老婆、我爱人、我女儿这类），"
+        "把称谓原文填进来（我妈就填「我妈」），不要留空"
+    ),
     "merchant": "商户代码：花店填 flower_shop、蛋糕店填 cake_shop",
     "action": "理财动作：buy=申购、redeem=赎回、query=看在售产品",
     "product_code": (

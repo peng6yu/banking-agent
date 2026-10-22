@@ -54,7 +54,8 @@ def parse(text: str, history: list) -> IntentResult
                                                          'sub_name（例如「爱奇艺会员」）；birthday_plan=送礼安排：先预留一笔钱，等某个日子再付给商户，例如「下周三我妈生日，提前留出300块给她订束花送过去」；invest=基金理财的申购或赎回；card_manage=银行卡本身的操作：看有几张卡、申请虚拟卡、冻结或解冻某张卡、挂失某张卡、调整某张卡的单笔限额（例如「把我的卡冻结了」「尾号1234的卡挂失」）；schedule_transfer=约好某个日子再转钱、定时转账、每月自动转，例如「下周三给张三转500」「每个月1号给房东转3000」；split_bill=多人 '
                                                          'AA、一起分摊、几个人平分（例如「这顿饭600，我和张三、李静AA」），这时把每个人填进 '
                                                          'payee_names；reversal=要撤回、撤销、冲正一笔已经转出去的钱；unknown=以上都不是、实在判断不出来。'},
-                               'payee_name': {'type': 'string'},
+                               'payee_name': {'type': 'string',
+                                              'description': '收款人姓名：用户用亲属称谓指代收款人时（我妈、我爸、我老婆、我爱人、我女儿这类），把称谓原文填进来（我妈就填「我妈」），不要留空'},
                                'amount_fen': {'type': 'integer'},
                                'note': {'type': 'string'},
                                'merchant': {'type': 'string',
