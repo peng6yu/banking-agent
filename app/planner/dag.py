@@ -15,6 +15,7 @@ from app import clock
 from app.ids import new_id
 from app.models import Dag, DAGNode
 from app.planner.intent import ACCOUNT_OWNER_SLOT
+from app.planner.subscription import cancel_params, resolve_match, subscription_template
 from app.tools.base import ValidationError
 
 REF_PREFIX: Final[str] = "@"
@@ -143,7 +144,9 @@ def split(intent: dict[str, Any]) -> tuple[str, dict[str, Any]]:
 
 
 def _template(name: str, slots: dict[str, Any]) -> tuple[tuple[str, str], ...] | None:
-    """取这个意图要走哪张模板：理财按 action 分三路，其余一张表走到底。"""
+    """取这个意图要走哪张模板：理财按 action 分三路，订阅按要不要取消分两路，其余一张表走到底。"""
+    if name == "subscription":
+        return subscription_template(slots)
     if name == "invest":
         action = str(slots.get("action") or "").strip().lower()
         return INVEST_TEMPLATES.get(action, INVEST_TEMPLATES[INVEST_DEFAULT_ACTION])
@@ -182,6 +185,8 @@ def _tool_params(tool: str, slots: dict[str, Any], ids: dict[str, str]) -> dict[
         return _card_tail(slots, ids)
     if tool == "list_subs":
         return {}
+    if tool == "cancel_subscription":
+        return cancel_params(slots, ids)
     if tool == "analyze_bill":
         return _bill_params(slots)
     if tool == "resolve_payee":
@@ -338,7 +343,10 @@ def _lookup(reference: str, results: dict[str, Any]) -> Any:
     parts = reference[len(REF_PREFIX):].split(".")
     current: Any = results.get(parts[0]) if parts else None
     for part in parts[1:]:
-        if isinstance(current, dict):
+        if "[" in part:
+            # 带过滤的一段：@n1.subs[merchant=爱奇艺会员] —— 唯一匹配的那一条
+            current = resolve_match(current, part)
+        elif isinstance(current, dict):
             current = current.get(part)
         elif isinstance(current, (list, tuple)) and part.lstrip("-").isdigit():
             current = current[int(part)] if -len(current) <= int(part) < len(current) else None

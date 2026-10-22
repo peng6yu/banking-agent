@@ -50,7 +50,8 @@ def parse(text: str, history: list) -> IntentResult
                                 'query_balance=查余额、流水、额度、卡里还剩多少钱；'
                                 'transfer=给某人转钱、付款、还款；'
                                 'bill_analysis=分析某月账单、找出异常消费；'
-                                'subscription=查订阅、看自动扣款、取消订阅；'
+                                'subscription=查订阅、看自动扣款；'
+                                '用户明确要取消或关掉某条订阅时也选它，并把订阅名填进 sub_name（例如「爱奇艺会员」）；'
                                 'birthday_plan=送礼安排：先预留一笔钱，等某个日子再付给商户，'
                                 '例如「下周三我妈生日，提前留出300块给她订束花送过去」；'
                                 'invest=基金理财的申购或赎回；'
@@ -62,6 +63,9 @@ def parse(text: str, history: list) -> IntentResult
                    'description': '商户代码：花店填 flower_shop、蛋糕店填 cake_shop'},
       'card_tail': {'type': 'string',
                     'description': '仅当用户明确说到某张卡尾号时才填；转账、申购、账单都不需要'},
+      'sub_name': {'type': 'string',
+                   'description': '订阅名称：用户说「爱奇艺会员」就填「爱奇艺会员」；'
+                                  '只在用户明确要取消某条订阅时填，查订阅时不要填'},
       'period': {'type': 'string', 'enum': ['month', 'year']},
       'month': {'type': 'integer'},
       'action': {'type': 'string', 'enum': ['buy', 'redeem', 'query'],

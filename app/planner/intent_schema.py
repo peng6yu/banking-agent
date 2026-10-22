@@ -32,7 +32,8 @@ INTENT_GUIDE: Final[str] = (
     "query_balance=查余额、流水、额度、卡里还剩多少钱；"
     "transfer=给某人转钱、付款、还款；"
     "bill_analysis=分析某月账单、找出异常消费；"
-    "subscription=查订阅、看自动扣款、取消订阅；"
+    "subscription=查订阅、看自动扣款；"
+    "用户明确要取消或关掉某条订阅时也选它，并把订阅名填进 sub_name（例如「爱奇艺会员」）；"
     "birthday_plan=送礼安排：先预留一笔钱，等某个日子再付给商户，"
     "例如「下周三我妈生日，提前留出300块给她订束花送过去」；"
     "invest=基金理财的申购或赎回；"
@@ -55,6 +56,8 @@ SLOT_KEYS: Final[tuple[str, ...]] = (
     "purpose",
     "gift",
     "date_hint",
+    # 订阅名（商户名）：用户说「爱奇艺会员」就填「爱奇艺会员」
+    "sub_name",
 )
 
 # 模型偶尔会报一个我们根本没有的槽位名（真模型实测生日场景报的是 birthday_date，
@@ -85,7 +88,55 @@ SLOT_GUIDE: Final[dict[str, str]] = {
     "purpose": "这笔钱的用途，例如「生日礼物」",
     "gift": "要送的东西，例如「花束」「蛋糕」",
     "date_hint": "用户说的时间，原样保留，例如「下周三」「月底」",
+    "sub_name": (
+        "订阅名称：用户说「爱奇艺会员」就填「爱奇艺会员」；"
+        "只在用户明确要取消某条订阅时填，查订阅时不要填"
+    ),
 }
+
+# 订阅意图分两种用法：查订阅，和取消某一条。
+# 判「是不是要取消」只看用户原话里有没有取消动作词——模型顺手填了名字不算数：
+# 把一句「看看视频会员扣多少」变成替用户退订，是这个系统最不该犯的错（t47）。
+CANCEL_WORDS: Final[tuple[str, ...]] = (
+    "取消", "取消了", "关掉", "关闭", "关了", "关上", "停掉", "停了", "停用", "停收",
+    "退订", "解绑", "解除", "别再", "不再", "不用续", "不要续", "别续", "不要续费",
+    "别扣", "不要扣", "别自动扣款", "不要自动扣款",
+)
+# 泛称：用户说了要取消，但没说是哪一条（「把订阅都关了吧」）。
+# 泛称不能拿去匹配订阅名——「会员」会命中「爱奇艺会员」，那就变成替用户挑了一条退掉。
+GENERIC_SUB_NAMES: Final[frozenset[str]] = frozenset({
+    "订阅", "订阅们", "订阅服务", "自动续费", "续费", "扣款",
+    "包月", "包年", "会员", "会员服务", "所有订阅", "全部订阅",
+})
+# 意图层算出来的槽位：用户确实说了要取消订阅时为 True。
+# 它不进 SLOT_KEYS——模型不填它，只有解析器根据用户原话算。
+CANCEL_SLOT: Final[str] = "cancel_subs"
+# 说了要取消、却没说是哪一条时问的话（一次只问一个问题，docs/07 7.1 第 4 条）
+SUBSCRIPTION_NAME_QUESTION: Final[str] = "要取消哪一条订阅？请说订阅名称，比如「爱奇艺会员」。"
+
+
+def wants_cancel(text: str) -> bool:
+    """用户原话里有没有取消订阅的动作词。"""
+    return any(word in text for word in CANCEL_WORDS)
+
+
+def subscription_slots(slots: dict[str, Any], text: str) -> dict[str, Any]:
+    """订阅槽位整形：查订阅不留名字，要取消才留。
+
+    三条规则：
+    1. 原话里没有取消动作词 → 丢掉 sub_name（查询请求绝不能变成取消请求）；
+    2. 有取消动作词 → 记下 cancel_subs=True，订阅名留着去匹配；
+    3. 订阅名是泛称（「订阅」「都」）→ 丢掉 sub_name，交给规划层反问要哪一条。
+    订阅取消没有金额，金额兜底也别把「每月 2500」算成转账金额。
+    """
+    slots.pop("amount_fen", None)
+    if not wants_cancel(text):
+        slots.pop("sub_name", None)
+        return slots
+    slots[CANCEL_SLOT] = True
+    if str(slots.get("sub_name") or "").strip() in GENERIC_SUB_NAMES:
+        slots.pop("sub_name", None)
+    return slots
 
 
 def emit_intent_schema() -> dict[str, Any]:
@@ -97,6 +148,7 @@ def emit_intent_schema() -> dict[str, Any]:
         "note": {"type": "string"},
         "merchant": {"type": "string"},
         "card_tail": {"type": "string"},
+        "sub_name": {"type": "string"},
         "period": {"type": "string", "enum": ["month", "year"]},
         "month": {"type": "integer"},
         "action": {"type": "string", "enum": ["buy", "redeem", "query"]},
@@ -127,11 +179,17 @@ def emit_intent_schema() -> dict[str, Any]:
 
 
 __all__ = [
+    "CANCEL_SLOT",
+    "CANCEL_WORDS",
     "EMIT_INTENT_NAME",
+    "GENERIC_SUB_NAMES",
     "INTENT_GUIDE",
     "INTENT_NAMES",
     "MISSING_ALIASES",
     "SLOT_GUIDE",
     "SLOT_KEYS",
+    "SUBSCRIPTION_NAME_QUESTION",
     "emit_intent_schema",
+    "subscription_slots",
+    "wants_cancel",
 ]

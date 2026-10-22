@@ -16,11 +16,14 @@ from typing import Any, Final, Protocol
 
 from app.money import UNKNOWN_AMOUNT_FEN, parse_amount
 from app.planner.intent_schema import (
+    CANCEL_SLOT,
     EMIT_INTENT_NAME,
     INTENT_NAMES,
     MISSING_ALIASES,
     SLOT_KEYS,
+    SUBSCRIPTION_NAME_QUESTION,
     emit_intent_schema,
+    subscription_slots,
 )
 from app.security import envelope, injection
 
@@ -187,6 +190,13 @@ def _from_args(args: dict[str, Any], text: str, *, retried: bool) -> IntentResul
         confidence=confidence,
         retried=retried,
     )
+    if intent == "subscription" and slots.get(CANCEL_SLOT) and not slots.get("sub_name"):
+        # 用户说了要取消订阅，但没说是哪一条：这里反问一次（一次只问一个问题）。
+        # 刻意不填 missing——missing 走的是通用槽位话术，念出来的是英文槽位名；
+        # 这次要问的是「哪一条订阅」，只有这一处知道该怎么问。
+        result.question = SUBSCRIPTION_NAME_QUESTION
+        result.ok = False
+        return result
     result = _apply_branches(result)
     return _mark_injection(result, text)
 
@@ -251,6 +261,8 @@ def _slots(args: dict[str, Any], text: str, intent: str) -> dict[str, Any]:
             slots[key] = _int_or_none(slots[key])
             if slots[key] is None:
                 slots.pop(key)
+    if intent == "subscription":
+        slots = subscription_slots(slots, text)
     return slots
 
 
