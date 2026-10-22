@@ -310,6 +310,7 @@ for node in topo_sort(dag):
 | GET | `/api/audit/verify` | — | `{ok, head, count}` | **答辩演示用** |
 | GET | `/api/tools` | — | 工具清单 | 左栏「我能做什么」 |
 | GET | `/api/health` | — | `{ok, model, db}` | 存活探针 |
+| POST | `/api/scheduled/run` | — | `{ok, executed, items}` | 立刻执行一次到点的定时转账（**答辩演示用**，后台节拍每 30 秒也会跑） |
 | POST | `/api/demo/reset` | — | `{ok}` | 重置演示数据 |
 | GET | `/` | — | `index.html` | 静态页 |
 

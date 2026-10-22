@@ -174,6 +174,7 @@ git checkout main && git merge --no-ff feat/m3-policy && git push
 | `MODEL_BACKUP` | 备脑，**只给 `python3.12 -m app.smoke` 的思维链剥离自检用，生产链路不读、也不做自动降级** | `MiniMax-M2.5` |
 | `LLM_TEMPERATURE` | 固定 0 | `0` |
 | `LLM_TIMEOUT` | 单次调用超时（秒） | `60` |
+| `SCHEDULED_TICK_MS` | 定时转账后台节拍间隔（毫秒），`0` 关闭后台节拍 | `30000` |
 | `MOCK_MODE` | 真值（`1`/`true`/`yes`/`on`）= 全 mock 不起网络 | `false` |
 | `CAPABILITY_SECRET` | 能力令牌 HMAC 密钥，**缺失时黄灯/红灯全链路 fail closed**；`setup_env.sh` 会自动生成 | `token_hex(32)` |
 
