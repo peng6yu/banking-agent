@@ -200,7 +200,9 @@ async def _step(
     try:
         params = planner_dag.resolve_refs(node.params, state.results)
     except ValidationError as exc:
-        return _fail_node(state, rec, emit, exc)
+        # _fail_node 是协程：漏掉 await 时它根本不会执行（节点不会标 failed、也不发事件），
+        # 这条分支等于没写。订阅名匹配不上要走的就是这里。
+        return await _fail_node(state, rec, emit, exc)
     audit_param_hits(state, node, params, taint)
     action = build_node_action(state, node, params, taint)
     decision = ask_policy(state, action, node)

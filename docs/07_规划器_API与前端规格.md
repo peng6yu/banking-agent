@@ -110,6 +110,19 @@ def parse(text: str, history: list) -> IntentResult
   `gift`→「打算送什么？」、`date_hint`→「大概什么时候要花这笔钱？」。
   反问轮不建 DAG、不动钱（见 §7.4 的 E 分支）。
 
+### 订阅意图（`subscription`）的两种用法
+
+| 用法 | 判据 | 槽位 | 落到哪 |
+|---|---|---|---|
+| 查订阅 | 原话里**没有**取消动作词 | 不留 `sub_name` | `n1 list_subs`（只读绿灯） |
+| 取消某一条 | 原话里有取消动作词（取消/关掉/关了/停掉/退订/别再…） | `sub_name`（订阅名，如「爱奇艺会员」） | `n1 list_subs → n2 cancel_subscription`（黄灯确认） |
+
+- 判据只看**用户原话**里有没有取消动作词（`app/planner/intent_schema.py` 的 `CANCEL_WORDS`）：
+  模型顺手填了 `sub_name` 也不算数——「看看视频会员扣多少」是查询，不能变成替用户退订。
+- 说了要取消、却没说是哪一条（泛称「订阅」「都」），意图层反问一次
+  「要取消哪一条订阅？请说订阅名称，比如「爱奇艺会员」。」，**不建 DAG、不动钱**。
+- `sub_name` 是泛称时按「没说清」处理：`会员` 会命中「爱奇艺会员」，宁可多问一句。
+
 ### `parse` 分支表
 
 | 条件 | 行为 |
@@ -151,7 +164,8 @@ def topo_sort(dag: Dag) -> list[DAGNode]
 |---|---|
 | `query_balance` | `n1 query_balance` |
 | `bill_analysis` | `n1 analyze_bill` |
-| `subscription` | `n1 list_subs` |
+| `subscription`（查订阅：原话里没有取消动作词） | `n1 list_subs` |
+| `subscription`（取消某一条：原话里有取消动作词） | `n1 list_subs → n2 cancel_subscription` |
 | `transfer` | `n1 resolve_payee → n2 query_balance → n3 transfer` |
 | `birthday_plan` | `n1 resolve_payee → n2 query_balance → n3 reserve_funds → n4 pay_merchant` |
 | `invest`（`action=buy`） | `n1 buy_fund` |
@@ -170,6 +184,23 @@ def topo_sort(dag: Dag) -> list[DAGNode]
 | `n2` | `query_balance` | 账户上下文 |
 | `n3` | `reserve_funds` | `amount_fen` + `purpose`（缺省「生日」） |
 | `n4` | `pay_merchant` | `merchant`（缺省 `flower_shop`）+ `item`（取 `gift`，缺省「生日鲜花」）+ `n3` 的 hold |
+
+### 订阅取消的槽位落点
+
+`n2 cancel_subscription` 的 `sub_id` 不是模型给的，是上一步 `list_subs` 的结果里**按名字唯一匹配**出来的那一条：
+
+| 节点 | 工具 | 参数来源 |
+|---|---|---|
+| `n1` | `list_subs` | 账户上下文（列出名下订阅） |
+| `n2` | `cancel_subscription` | `sub_id` = `@n1.subs[merchant=爱奇艺会员].sub_id` |
+
+- 引用串多了一种**带过滤**的写法：`@节点.列表字段[键=值].取值字段`（值做 percent-encoding，
+  中文订阅名不会把串拆坏）。解析时在列表里按名字唯一匹配：完全相等，或一边包含另一边
+  （「爱奇艺」对「爱奇艺会员」算匹配）。
+- **匹配不到或匹配到多条就反问**（`DAG_SUB_NOT_FOUND` / `DAG_SUB_AMBIGUOUS`），
+  `cancel_subscription` 根本不会被调用；空名与泛称（「订阅」「会员」）同样反问。
+- 这一路的模板、匹配与反问话术在 `app/planner/subscription.py`——`app/planner/dag.py`
+  顶到 400 行硬上限，拆出去才放得下（docs/08）。
 
 为什么固定模板而不用模型自由生成 DAG：**可审计、可复现、可单测**。评审问「你的规划怎么保证不乱」时，答案是「模板 + 参数填充，模型只填槽位不定拓扑」。这是设计选择，写进答辩。
 
@@ -234,6 +265,7 @@ for node in topo_sort(dag):
 | E7 | 工具返回 `ok=False` | 标 `failed`，把 `error_text` 用人话转述，走 E1 |
 | E8 | 模型在规划阶段抛异常 | **在册**意图回退为单步执行（只做 intent 对应的第一个工具）；**未登记**意图不回退，落 `unsupported_request` 由 R03 拒（见 7.3） |
 | E9 | `resolve_payee` 问不出收款人，但本图里已有写死越线金额的花钱节点（R02/R07/R08 红） | **先裁决再反问**：落 `policy.decided`(red) + `confirm.rejected`(`stage`=`PRE_PAYEE_GATE`)，发 `error` 终止，**不发 `done` 反问**；黄区间仍先澄清收款人 |
+| E10 | 参数引用取不到值（订阅名匹配不上、名单为空） | 当前节点标 `failed`，发 `tool(ok=False)` + `error`（人话反问），**写工具不会被调用**；`done` 事件照发 |
 
 
 ## 7.5 API 端点（`app/api/routes.py`）
