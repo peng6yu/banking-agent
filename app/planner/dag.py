@@ -8,10 +8,11 @@
 
 from __future__ import annotations
 
+import logging
 from datetime import datetime
 from typing import Any, Final
 
-from app import clock
+from app import audit, clock, db
 from app.ids import new_id
 from app.models import Dag, DAGNode
 from app.planner.intent import ACCOUNT_OWNER_SLOT
@@ -20,6 +21,8 @@ from app.planner.due import parse_due_ms
 from app.planner.split_plan import SPLIT_INTENT, build_split
 from app.planner.subscription import cancel_params, resolve_match, subscription_template
 from app.tools.base import ValidationError
+
+log = logging.getLogger(__name__)
 
 REF_PREFIX: Final[str] = "@"
 # 理财意图按 action 分三路：买=申购、赎回=卖出、查=看产品清单。
@@ -87,6 +90,7 @@ def build(intent: dict[str, Any]) -> Dag:
         raise ValidationError("没有这个意图的模板", intent=name)
     dag = Dag(id=new_id("r"), nodes=_nodes(template, slots))
     validate(dag)
+    _audit_ignored_slots(dag, name, slots)
     return dag
 
 
@@ -359,7 +363,9 @@ def _bill_params(slots: dict[str, Any]) -> dict[str, Any]:
 
     被忽略的原始值塞不进工具参数（工具 spec 是 additionalProperties: False），
     但这一轮按哪个月查账是留痕的，三处对得上：
-    1) intent.parsed 审计行里是模型原话（它说的 month 是几）；
+    1) 审计里有一条 intent.parsed 行，记着模型原话的 month、生效的 month，
+       以及「模型给的月份非法已忽略」这句话（app/planner/dag.py 的
+       _audit_ignored_slots 写的）；
     2) 生效计划落在 dag_nodes.params_json 里（实际按几月查的）；
     3) 用户可见摘要带实际统计区间（app/planner/events.py 的 summarize）。
     """
@@ -390,6 +396,81 @@ def _bill_month(raw: Any, default: int) -> tuple[int, Any]:
     if BILL_MONTH_MIN <= raw <= BILL_MONTH_MAX:
         return raw, None
     return default, raw
+
+
+#: 账单节点的工具名：要审计被忽略的月份，先得找到这一轮实际生效的月份。
+BILL_TOOL: Final[str] = "analyze_bill"
+#: 模型给的月份非法被忽略时，审计行里写的那句话。
+BILL_MONTH_IGNORED_NOTE: Final[str] = "模型给的月份非法已忽略"
+
+
+def _audit_ignored_slots(dag: Dag, name: str, slots: dict[str, Any]) -> None:
+    """模型给的槽位被系统忽略时，把这件事写进审计链（目前只有账单月份这一处）。
+
+    为什么必须留痕：账单差一个月，金额照样像模像样，用户根本看不出来
+    （真模型实测出现过一次，「上个月的账单」被算成了 8 月）。计划里落的是生效
+    月份，摘要里落的是统计区间，但「模型本来说的是几月、被系统换成了几月」
+    只有审计里才有。
+
+    为什么写在这里：建图是全链路上唯一同时知道「模型原话」和「实际生效值」的
+    地方——API 层写的那条 intent.parsed 审计不带 slots。
+
+    为什么写不进去也不让对话失败：审计是留痕，不是业务；写失败只记日志，
+    与 app/api/routes.py 的 _audit_intent 同一套取舍。
+
+    已知局限：建图期还没有 session_id（会话要等执行器拿到这张图才开），
+    所以这行审计的 session_id 是空的，靠 payload 里的 run_id 跟那一轮对上。
+    """
+    raw = slots.get("month")
+    if raw is None:
+        return
+    effective = _effective_bill_month(dag)
+    if effective is None:
+        return
+    _kept, ignored = _bill_month(raw, effective)
+    if ignored is None:
+        return
+    _append_audit(
+        {
+            "run_id": dag.id,
+            "intent": name,
+            "note": BILL_MONTH_IGNORED_NOTE,
+            "slot": "month",
+            "raw_value": raw,
+            "effective_value": effective,
+            "source": "planner.dag",
+        }
+    )
+
+
+def _effective_bill_month(dag: Dag) -> int | None:
+    """从已经建好的图里读账单节点实际生效的月份；这一轮不走账单就返回 None。"""
+    for node in dag.nodes:
+        if node.tool != BILL_TOOL:
+            continue
+        month = node.params.get("month")
+        if isinstance(month, int) and not isinstance(month, bool):
+            return month
+    return None
+
+
+def _append_audit(payload: dict[str, Any]) -> None:
+    """写一条审计；写不进去只记日志，不让对话失败。"""
+    if not db.DEFAULT_DB_PATH.exists():
+        # 库还没建（例如还没 seed）：没有审计表可写，留日志，别凭空造一个空库。
+        log.warning("planner.dag.audit_db_missing path=%s", db.DEFAULT_DB_PATH)
+        return
+    try:
+        conn = db.connect()
+    except Exception:  # noqa: BLE001 - 审计写不进去也不能让对话失败
+        log.warning("planner.dag.audit_connect_failed run_id=%s", payload.get("run_id"))
+        return
+    try:
+        audit.append(conn, "intent.parsed", payload)
+    except Exception:  # noqa: BLE001 - 同上：留痕失败不是业务失败
+        log.warning("planner.dag.audit_append_failed run_id=%s", payload.get("run_id"))
+    finally:
+        conn.close()
 
 
 def _card_tail(slots: dict[str, Any], ids: dict[str, str]) -> dict[str, Any]:
