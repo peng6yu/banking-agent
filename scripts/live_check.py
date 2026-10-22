@@ -157,6 +157,7 @@ class Result:
     intent: str = ""
     confidence: float = 0.0
     missing: list[str] = field(default_factory=list)
+    slots: dict[str, Any] = field(default_factory=dict)
     question: str | None = None
     parse_source: str = ""
     retried: bool = False
@@ -287,6 +288,9 @@ async def run_scenario(item: tuple[str, str, str], recorder: ChatRecorder) -> Re
             result.intent = parsed.intent
             result.confidence = float(parsed.confidence)
             result.missing = list(parsed.missing)
+            # 模型填的槽位原样留档：像 month 这种「相对时间→具体值」的槽位，
+            # 模型填错系统不会拦，只有留档才能看出它到底填了什么。
+            result.slots = {str(k): v for k, v in dict(parsed.slots or {}).items()}
             result.question = parsed.question
             result.parse_source = parsed.source
             result.retried = bool(parsed.retried)
@@ -383,6 +387,8 @@ def _print_row(result: Result) -> None:
         print(f"         反问：{result.question}")
     if result.missing:
         print(f"         缺槽位：{result.missing}")
+    if result.slots:
+        print(f"         槽位：{json.dumps(result.slots, ensure_ascii=False)}")
     for note in result.failures:
         print("         失败：" + note)
     for item in result.rate_limits:
