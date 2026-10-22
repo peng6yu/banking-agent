@@ -36,8 +36,7 @@ def parse(text: str, history: list) -> IntentResult
 ```python
 {'name': 'emit_intent',
  'description': '把用户这句话解析成结构化意图。必须调用我，不要直接回答。missing 只填真正缺失、必须问用户才能补的槽位；card_tail / note / '
-                'merchant 都是可选槽位，不要填进 missing。用户说的是「先留出一笔钱、之后再买或订」这类跨场景安排时，intent 选 '
-                'birthday_plan。',
+                'merchant 都是可选槽位，不要填进 missing。用户说的是「先留出一笔钱、之后再买或订」这类跨场景安排时，intent 选 birthday_plan。',
  'parameters': {'type': 'object',
                 'properties': {'intent': {'type': 'string',
                                           'enum': ['query_balance',
@@ -47,15 +46,19 @@ def parse(text: str, history: list) -> IntentResult
                                                    'birthday_plan',
                                                    'invest',
                                                    'card_manage',
+                                                   'schedule_transfer',
+                                                   'split_bill',
+                                                   'reversal',
                                                    'unknown'],
-                                          'description': '用户这句话属于哪一类，从下面八项里选一个：query_balance=查余额、流水、额度、卡里还剩多少钱；transfer=给某人转钱、付款、还款；bill_analysis=分析某月账单、找出异常消费；subscription=查订阅、看自动扣款；用户明确要取消或关掉某条订阅时也选它，并把订阅名填进 '
-                                                         'sub_name（例如「爱奇艺会员」）；birthday_plan=送礼安排：先预留一笔钱，等某个日子再付给商户，例如「下周三我妈生日，提前留出300块给她订束花送过去」；invest=基金理财的申购或赎回；card_manage=银行卡本身的操作：看有几张卡、申请虚拟卡、冻结或解冻某张卡、挂失某张卡、调整某张卡的单笔限额（例如「把我的卡冻结了」「尾号1234的卡挂失」）；unknown=以上都不是、实在判断不出来。'},
+                                          'description': '用户这句话属于哪一类，从下面十一项里选一个：query_balance=查余额、流水、额度、卡里还剩多少钱；transfer=给某人转钱、付款、还款；bill_analysis=分析某月账单、找出异常消费；subscription=查订阅、看自动扣款；用户明确要取消或关掉某条订阅时也选它，并把订阅名填进 '
+                                                         'sub_name（例如「爱奇艺会员」）；birthday_plan=送礼安排：先预留一笔钱，等某个日子再付给商户，例如「下周三我妈生日，提前留出300块给她订束花送过去」；invest=基金理财的申购或赎回；card_manage=银行卡本身的操作：看有几张卡、申请虚拟卡、冻结或解冻某张卡、挂失某张卡、调整某张卡的单笔限额（例如「把我的卡冻结了」「尾号1234的卡挂失」）；schedule_transfer=约好某个日子再转钱、定时转账、每月自动转，例如「下周三给张三转500」「每个月1号给房东转3000」；split_bill=多人 '
+                                                         'AA、一起分摊、几个人平分（例如「这顿饭600，我和张三、李静AA」），这时把每个人填进 '
+                                                         'payee_names；reversal=要撤回、撤销、冲正一笔已经转出去的钱；unknown=以上都不是、实在判断不出来。'},
                                'payee_name': {'type': 'string'},
                                'amount_fen': {'type': 'integer'},
                                'note': {'type': 'string'},
                                'merchant': {'type': 'string',
-                                            'description': '商户代码：花店填 flower_shop、蛋糕店填 '
-                                                           'cake_shop'},
+                                            'description': '商户代码：花店填 flower_shop、蛋糕店填 cake_shop'},
                                'card_tail': {'type': 'string',
                                              'description': '仅当用户明确说到某张卡尾号时才填；转账、申购、账单都不需要'},
                                'sub_name': {'type': 'string',
@@ -74,6 +77,20 @@ def parse(text: str, history: list) -> IntentResult
                                'gift': {'type': 'string', 'description': '要送的东西，例如「花束」「蛋糕」'},
                                'date_hint': {'type': 'string',
                                              'description': '用户说的时间，原样保留，例如「下周三」「月底」'},
+                               'due_hint': {'type': 'string',
+                                            'description': '用户说的转账时间，原样保留，例如「下周三」「月底」「三天后」'},
+                               'due_ms': {'type': 'integer'},
+                               'recurrence': {'type': 'string',
+                                              'enum': ['once', 'monthly'],
+                                              'description': '只填 once 或 monthly：说「每月」才填 '
+                                                             'monthly，其余都填 once'},
+                               'payee_names': {'type': 'array',
+                                               'items': {'type': 'string'},
+                                               'description': 'AA 拆分的收款人名单，一个名字一项'},
+                               'txn_ref': {'type': 'string',
+                                           'description': '要冲正的那笔交易说明，例如「刚才转给张三的500」'},
+                               'payee_phone': {'type': 'string',
+                                               'description': '用户单独说了手机号才填，可以是完整号码或后四位'},
                                'missing': {'type': 'array', 'items': {'type': 'string'}},
                                'confidence': {'type': 'number'}},
                 'required': ['intent', 'missing', 'confidence'],
@@ -82,7 +99,7 @@ def parse(text: str, history: list) -> IntentResult
 
 ### 意图取值说明（`INTENT_GUIDE`）
 
-`intent` 的 description 逐个点名七个取值各是什么场景，不是只丢一个 enum 列表。
+`intent` 的 description 逐个点名十一个取值各是什么场景，不是只丢一个 enum 列表。
 
 **实测教训**：`intent` 只有 enum、没有说明时，真实模型把「下周三我妈生日，帮我提前留出300块，
 到时候给她订束花送过去」判成 `unknown`（intent=unknown、confidence=0.0，只回一句
@@ -169,6 +186,10 @@ def topo_sort(dag: Dag) -> list[DAGNode]
 | `card_manage`（申请虚拟卡） | `n1 apply_virtual_card` |
 | `card_manage`（调限额） | `n1 set_card_limit` |
 | `card_manage`（冻结 / 解冻 / 挂失） | `n1 freeze_card` / `n1 unfreeze_card` / `n1 report_card_loss` |
+| `card_manage`（销户 / 改密码） | `n1 close_card` / `n1 change_card_pin` |
+| `schedule_transfer` | `n1 resolve_payee → n2 schedule_transfer`（只排期不动钱；时间认不出就反问） |
+| `split_bill` | `n1..nk resolve_payee`（每人一个）` → n{k+1} split_transfer` |
+| `reversal` | `n1 query_transactions → n2 reverse_transfer`（金额与交易号都取自 n1 结果，不让模型报数） |
 | 模板不在册（模型编的意图） | `n1 unsupported_request` → 策略层 `R03_unknown_tool` 红灯 + `confirm.rejected`，**不回退成默认意图** |
 | `unknown` | 不建 DAG，直接反问 |
 

@@ -146,7 +146,7 @@ curl -s http://127.0.0.1:8000/api/audit/verify
 ### 单元与集成测试（实测全绿，用例数持续增补）
 
 ```bash
-python3.12 -m pytest -q tests/            # 597 passed（2026-10-22 实测；用例会随增补变化，复跑以实测为准）
+python3.12 -m pytest -q tests/            # 656 passed（2026-10-22 实测；用例会随增补变化，复跑以实测为准）
 ```
 
 ### 前端合规自检（实测 62 项全过）
@@ -182,10 +182,10 @@ python3.12 -m app.smoke                    # 实测 4/4 PASS，主脑延迟约 1
 | `app/planner/` | 意图识别、DAG 规划、事件定义、执行器（只认令牌） |
 | `app/policy/` | 裁决引擎与 12 条规则 R01–R12（纯函数，无网络无模型） |
 | `app/security/` | 能力令牌、签名信封、注入扫描、熔断器 |
-| `app/tools/` | 14 个工具：查人、查余额、账单、卡片、订阅、转账、资金冻结等 |
+| `app/tools/` | 26 个工具：查人、查余额、账单、卡片、订阅、转账、资金冻结等 |
 | `app/api/` | 10 个 HTTP 端点 + 根页面 |
 | `web/index.html` | 单文件前端（原生 JS，无框架、无 CDN、零外链） |
-| `tests/` | pytest 用例集（597 条，2026-10-22 实测）+ 43 条红队 YAML |
+| `tests/` | pytest 用例集（656 条，2026-10-22 实测）+ 43 条红队 YAML |
 | `scripts/` | 种子脚本、前端合规检查器 |
 | `docs/` | 交接规格书 00—10（写代码前必读）+ 答辩与演示交付件 |
 | `规划/` | 前期选型与模型实测记录 |
@@ -198,7 +198,7 @@ python3.12 -m app.smoke                    # 实测 4/4 PASS，主脑延迟约 1
 |---|---|---|
 | `make run` | 启动服务（--reload） | ✅ |
 | `make seed` | 建库 + 种子（幂等） | ✅ |
-| `make test` | pytest 全跑 | ✅ 全绿（597 passed，2026-10-22 实测） |
+| `make test` | pytest 全跑 | ✅ 全绿（656 passed，2026-10-22 实测） |
 | `make smoke` | 模型连通性自检 | ✅ 4/4 |
 | `make cov` | 覆盖率（未装 pytest-cov 时自动退回纯跑） | ✅ |
 | `make reset` | `POST /api/demo/reset` 演示前清场 | ✅ |
@@ -244,7 +244,7 @@ python3.12 -m app.smoke                    # 实测 4/4 PASS，主脑延迟约 1
 docs/00_总纲.md                  ← 十条铁律 + 里程碑 DoD
 docs/01_架构与数据流.md           ← 三段论与不变量
 docs/02_目录结构与文件职责.md     ← 每个文件干什么
-docs/03_数据库与种子数据.md       ← 17 张表 DDL
+docs/03_数据库与种子数据.md       ← 18 张表 DDL
 docs/04_核心模块实现规格.md       ← 逐函数分支表
 docs/05_安全层实现规格.md         ← 12 条规则 R01–R12 + 令牌七步 ★最重要
 docs/06_工具层与场景实现规格.md   ← 19 工具 + 6 场景分支

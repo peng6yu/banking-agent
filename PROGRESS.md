@@ -89,12 +89,26 @@
 
 ## m-final+ 场景4 补齐  2026-10-22
 
-- [x] 场景 4 卡片管理从「仅查询」补到完整：`apply_virtual_card` / `set_card_limit` / `freeze_card` / `unfreeze_card` / `report_card_loss` 五件套在册（工具 14→19），申请走黄灯 `R05`、其余四个走红灯 `R09`（face+sms+otp）；`PENDING_TOOLS` 收窄为 `{close_card, change_card_pin}`，保住 `R11` 默认红拒的活证据
+- [x] 场景 4 卡片管理从「仅查询」补到完整：`apply_virtual_card` / `set_card_limit` / `freeze_card` / `unfreeze_card` / `report_card_loss` 五件套在册（工具 14→19，m-final+ 再扩到 26），申请走黄灯 `R05`、其余四个走红灯 `R09`（face+sms+otp）；`PENDING_TOOLS` 收窄（随后清空，销户与改密码也已实现）；`R11` 的可达性改由 monkeypatch 单测证明
 - [x] 新增 `card_manage` 意图与 `app/planner/card_actions.py`：动作只从用户原话的动词读，**模型填的 `card_action` 一律覆盖**；要动某张卡却没说卡号时反问，不按主账户猜
 - [x] 修掉两个真缺陷：① `list_cards` 不传尾号只列主账户（名下两张卡只报一张）；② 卡片写工具的 SSE 回执念内部工具名（`freeze_card 执行完成`）
 - [x] 真模型端到端实测（`tmp/card_probe2.log`）：「我有几张卡」→ 名下卡片 2 张；「申请一张虚拟卡」→ 黄灯确认 → 尾号 9000、限额 5,000.00 元；「把我尾号1234的卡冻结了」→ 红灯三重验证 → 冻结落库；审计 `confirm.approved 2 / token.issued 2`
-- [x] 终验复跑：`pytest -q` = **597 passed**；`scripts.redteam` = PASS 29 / FAIL 14（不变）；`scripts.e2e --offline` 13/13；`check_frontend` 62/62；`seed --force` 17 表全绿
-- [x] 全仓数字同步：548/522 → **597**；工具 14 → **19**；场景表扩到六个场景并逐项标完成度；答辩 PPT 重出（第 10/11/12 页更正工具数与挂失规则、删掉已修复的「订阅取消无意图模板」）
+- [x] 终验复跑：`pytest -q` = **656 passed**；`scripts.redteam` = PASS 29 / FAIL 14（不变）；`scripts.e2e --offline` 13/13；`check_frontend` 62/62；`seed --force` 17 表全绿
+- [x] 全仓数字同步：548/522 → **656**；工具 14 → **19**；场景表扩到六个场景并逐项标完成度；答辩 PPT 重出（第 10/11/12 页更正工具数与挂失规则、删掉已修复的「订阅取消无意图模板」）
 - 遗留不变：红队 14 条仍为「拦得住但级别判低/裁决痕迹不全」，非攻击得手；场景 1 仍缺定时与 AA 拆分；演示视频（可选）未录制
 
 **发布点：`bc11bd3`（main），tag `v1.3.0`。**
+
+## v1.4.0 五项缺口全部补齐  2026-10-22
+
+- [x] **按手机号转账**：`resolve_payee` 支持 `phone` 参数与后四位匹配，候选带 `phone` 字段；查不到人返回空列表（`ok=True`），由上层反问，不猜
+- [x] **定时转账**：`app/planner/due.py:parse_due_ms` 认「今天/明天/后天/大后天/月底/下个月/N 天后/下周X/本周X」并折算到当天 09:00，认不出抛 `DUE_UNPARSED`；`schedule_transfer` / `list_scheduled` / `cancel_scheduled` 三工具在册，排队只排期不动钱，到点由 `execute_due` 重新签令牌再执行
+- [x] **拆分 AA**：`app/planner/split_plan.py` 自造 DAG（一人一个 `resolve_payee` 节点 + 末尾 `split_transfer`），`split_shares` 均分到分、余数给第一人；限额按总额算日累计
+- [x] **销户与改卡密码**：`close_card`（余额须为零、无未结 hold，lost 卡只能柜面）与 `change_card_pin`（只存 `salt$sha256`，返回不回显）
+- [x] **回退（冲正）**：`reverse_transfer`，7 天窗口、金额取自原交易而非模型报数、幂等、非出账与冲正再冲正均拒
+- 测试：`pytest -q tests/` = **656 passed**（9.8s，37 条新增分在 5 个新文件）；`scripts.redteam` = PASS 29 / FAIL 14（未退化）；`scripts.e2e --offline` 13/13；`check_frontend` 62/62；`seed --force` 18 张表全绿
+- 新测试逼出两个真 bug 并修掉：① `close_card` 读 `cards.balance_fen`（该列在 `accounts`）→ 销户必然 `IndexError`，改为 JOIN `accounts`；② `execute_due` 不透传 `secret` → 整批预约 `CAPABILITY_SECRET_MISSING` 全部置 failed
+- 顺带修正：`app/funds.py` 写流水 `category="转账"`（原为英文 `transfer`，导致按分类查询与账单分析漏掉 App 发起的转账）
+- 工具 19→26、意图模板 8→11、测试 597→656、表 17→18；`PENDING_TOOLS` 已清空，R11 可达性改由 `tests/test_policy.py::test_r11_default_deny_is_the_backstop` 的 monkeypatch 证明
+- 文档口径同步：`docs/05` 工具集合表按代码重写、`docs/06` 补 §6.11（定时/AA/冲正）与 26 行工具表、`docs/07` §7.3 补四行模板、`docs/安全自评报告` R09 敏感集合补全 11 个、`docs/技术文档` §6/§7 与 `提交物对照表` 六场景全部 ✅、`答辩PPT.pptx` 第 10—12 页重生成
+- 遗留：定时转账依赖 `execute_due` 手动/定时触发，无常驻调度器；AA 遇同名收款人取第一候选（已在模块 docstring 注明）
