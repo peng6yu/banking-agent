@@ -26,7 +26,7 @@ PRAGMAS: Final[tuple[str, ...]] = (
     "PRAGMA busy_timeout=5000;",
 )
 
-# 17 张表，顺序即依赖顺序（被引用的先建）
+# 18 张表，顺序即依赖顺序（被引用的先建）
 TABLE_NAMES: Final[tuple[str, ...]] = (
     "users",
     "accounts",
@@ -45,6 +45,7 @@ TABLE_NAMES: Final[tuple[str, ...]] = (
     "denials",
     "fund_products",
     "fund_holdings",
+    "scheduled_transfers",
 )
 
 SCHEMA_SQL: Final[str] = """
@@ -71,8 +72,9 @@ CREATE TABLE IF NOT EXISTS cards (
   account_id       TEXT NOT NULL REFERENCES accounts(id),
   tail             TEXT NOT NULL,
   kind             TEXT NOT NULL CHECK (kind IN ('physical','virtual')),
-  status           TEXT NOT NULL CHECK (status IN ('active','frozen','lost')),
-  per_tx_limit_fen INTEGER NOT NULL DEFAULT 500000
+  status           TEXT NOT NULL CHECK (status IN ('active','frozen','lost','closed')),
+  per_tx_limit_fen INTEGER NOT NULL DEFAULT 500000,
+  pin_hash         TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_cards_account ON cards(account_id);
 
@@ -82,10 +84,12 @@ CREATE TABLE IF NOT EXISTS payees (
   name      TEXT NOT NULL,
   bank      TEXT NOT NULL,
   card_tail TEXT NOT NULL,
-  alias     TEXT
+  alias     TEXT,
+  phone     TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_payees_user ON payees(user_id);
 CREATE INDEX IF NOT EXISTS idx_payees_name ON payees(name);
+CREATE INDEX IF NOT EXISTS idx_payees_phone ON payees(phone);
 
 CREATE TABLE IF NOT EXISTS holds (
   id              TEXT PRIMARY KEY,
@@ -113,7 +117,9 @@ CREATE TABLE IF NOT EXISTS transactions (
   ts_ms             INTEGER NOT NULL,
   balance_after_fen INTEGER NOT NULL,
   hold_id           TEXT REFERENCES holds(id),
-  channel           TEXT NOT NULL DEFAULT 'app'
+  channel           TEXT NOT NULL DEFAULT 'app',
+  reversal_of       TEXT,
+  reversed_by       TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_tx_account_ts ON transactions(account_id, ts_ms DESC);
 CREATE INDEX IF NOT EXISTS idx_tx_category ON transactions(category);
@@ -236,6 +242,24 @@ CREATE TABLE IF NOT EXISTS fund_holdings (
 );
 CREATE INDEX IF NOT EXISTS idx_fund_holdings_user ON fund_holdings(user_id);
 
+-- 定时转账（场景 1 补齐）：预约指令本身不动钱，到点执行时才走 hold/commit
+CREATE TABLE IF NOT EXISTS scheduled_transfers (
+  id              TEXT PRIMARY KEY,
+  user_id         TEXT NOT NULL REFERENCES users(id),
+  account_id      TEXT NOT NULL REFERENCES accounts(id),
+  payee_id        TEXT NOT NULL REFERENCES payees(id),
+  amount_fen      INTEGER NOT NULL CHECK (amount_fen > 0),
+  note            TEXT NOT NULL DEFAULT '',
+  due_ms          INTEGER NOT NULL,
+  recurrence      TEXT NOT NULL CHECK (recurrence IN ('once','monthly')),
+  status          TEXT NOT NULL CHECK (status IN ('scheduled','executed','cancelled','failed')),
+  created_ms      INTEGER NOT NULL,
+  executed_ms     INTEGER,
+  idempotency_key TEXT NOT NULL UNIQUE
+);
+CREATE INDEX IF NOT EXISTS idx_sched_due ON scheduled_transfers(status, due_ms);
+CREATE INDEX IF NOT EXISTS idx_sched_user ON scheduled_transfers(user_id, status);
+
 -- 审计只增不改：UPDATE/DELETE 一律由 SQLite 层拦掉（docs/03 3.2 第 7 张表）
 CREATE TRIGGER IF NOT EXISTS audit_no_update BEFORE UPDATE ON audit_log
 BEGIN SELECT RAISE(ABORT, 'audit_log is append-only'); END;
@@ -280,9 +304,29 @@ def tx(conn: sqlite3.Connection) -> Iterator[sqlite3.Connection]:
     conn.execute("COMMIT")
 
 
+# 后加的列：CREATE TABLE IF NOT EXISTS 不会改已存在的表，老库要单独补（docs/03 3.4）
+_ADDED_COLUMNS: Final[tuple[tuple[str, str, str], ...]] = (
+    ("cards", "pin_hash", "TEXT"),
+    ("payees", "phone", "TEXT"),
+    ("transactions", "reversal_of", "TEXT"),
+    ("transactions", "reversed_by", "TEXT"),
+)
+
+
+def _ensure_columns(conn: sqlite3.Connection) -> None:
+    """给老库补后加的列；已经是新库时全部命中、不发任何 ALTER。"""
+    for table, column, ddl in _ADDED_COLUMNS:
+        rows = conn.execute(f"PRAGMA table_info({table})").fetchall()
+        if not rows:
+            continue
+        if column not in {str(row["name"]) for row in rows}:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {ddl}")
+
+
 def init_db(conn: sqlite3.Connection) -> None:
-    """执行 DDL 建全部表与触发器，幂等（IF NOT EXISTS）。"""
+    """执行 DDL 建全部表与触发器，幂等（IF NOT EXISTS），老库顺带补列。"""
     conn.executescript(SCHEMA_SQL)
+    _ensure_columns(conn)
 
 
 def sweep_expired_holds(conn: sqlite3.Connection) -> int:

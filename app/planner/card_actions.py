@@ -30,6 +30,8 @@ CARD_ACTION_WORDS: Final[tuple[tuple[str, tuple[str, ...]], ...]] = (
     ("freeze", ("冻结", "冻", "锁卡", "锁住", "停用", "先别用")),
     ("set_limit", ("限额", "限到", "单笔上限", "调整额度", "提高额度", "降低额度")),
     ("apply", ("申请", "办一张", "开一张", "开卡", "新办", "虚拟卡")),
+    ("change_pin", ("改密码", "换密码", "重置密码", "修改密码")),
+    ("close", ("销户", "注销", "不用这张卡了", "消掉")),
 )
 
 # 每路一张单步模板；卡片管理没有多步链路，所有工具都不依赖上游结果。
@@ -40,9 +42,11 @@ CARD_TEMPLATES: Final[dict[str, tuple[tuple[str, str], ...]]] = {
     "freeze": (("n1", "freeze_card"),),
     "unfreeze": (("n1", "unfreeze_card"),),
     "loss": (("n1", "report_card_loss"),),
+    "change_pin": (("n1", "change_card_pin"),),
+    "close": (("n1", "close_card"),),
 }
 # 必须点名到具体某张卡的动作；查卡和开卡可以不带尾号（开卡默认挂主账户）。
-CARD_TAIL_REQUIRED: Final[frozenset[str]] = frozenset({"set_limit", "freeze", "unfreeze", "loss"})
+CARD_TAIL_REQUIRED: Final[frozenset[str]] = frozenset({"set_limit", "freeze", "unfreeze", "loss", "change_pin", "close"})
 CARD_TOOLS: Final[frozenset[str]] = frozenset(
     tool for template in CARD_TEMPLATES.values() for _, tool in template
 )

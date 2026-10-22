@@ -97,7 +97,10 @@ def resolve_payee(ctx: ToolContext, params: dict[str, Any], token: str | None = 
     用户点名的尾号必须真的对上，不能悄悄换成另一个同名的人。
     """
     query_text = str(params.get("name", "")).strip()
+    phone = str(params.get("phone") or "").strip()
     rows = _payee_candidates(ctx.conn, query_text, ctx.account_id)
+    if phone:
+        rows = _filter_phone(rows, phone)
     tail = str(params.get("card_tail") or "").strip()
     if tail:
         rows = [row for row in rows if str(row["card_tail"]) == tail]
@@ -108,6 +111,7 @@ def resolve_payee(ctx: ToolContext, params: dict[str, Any], token: str | None = 
             "alias": row["alias"],
             "card_tail": str(row["card_tail"]),
             "bank": str(row["bank"]),
+            "phone": row["phone"],
         }
         for row in rows
     ]
@@ -194,16 +198,42 @@ def _payee_candidates(
     where = "user_id = ?" if scope else "1 = 1"
     args: list[Any] = [scope] if scope else []
     exact_sql = (
-        f"SELECT * FROM payees WHERE {where} AND (name = ? OR alias = ?)"
+        f"SELECT * FROM payees WHERE {where} AND (name = ? OR alias = ? OR phone = ?)"
         " ORDER BY name, card_tail"
     )
-    exact = list(conn.execute(exact_sql, [*args, query_text, query_text]).fetchall())
+    exact = list(
+        conn.execute(exact_sql, [*args, query_text, query_text, query_text]).fetchall()
+    )
     if exact:
         return exact
     pattern = f"%{_escape_like(query_text)}%"
     fuzzy_sql = (
         f"SELECT * FROM payees WHERE {where}"
-        " AND (name LIKE ? ESCAPE '\\' OR alias LIKE ? ESCAPE '\\')"
+        " AND (name LIKE ? ESCAPE '\\' OR alias LIKE ? ESCAPE '\\'"
+        " OR phone LIKE ? ESCAPE '\\')"
         " ORDER BY name, card_tail"
     )
-    return list(conn.execute(fuzzy_sql, [*args, pattern, pattern]).fetchall())
+    hits = list(conn.execute(fuzzy_sql, [*args, pattern, pattern, pattern]).fetchall())
+    if hits:
+        return hits
+    # 手机号允许只报后四位/中间几位：纯数字且够长时按尾号段再找一次
+    digits = "".join(ch for ch in query_text if ch.isdigit())
+    if digits and len(digits) >= 4 and digits == query_text:
+        tail_sql = (
+            f"SELECT * FROM payees WHERE {where} AND phone LIKE ? ESCAPE '\\'"
+            " ORDER BY name, card_tail"
+        )
+        return list(conn.execute(tail_sql, [*args, f"%{digits}"]).fetchall())
+    return []
+
+
+def _filter_phone(rows: list[sqlite3.Row], phone: str) -> list[sqlite3.Row]:
+    """显式给了手机号就只留对得上的；对不上一条都不留，不悄悄换人。"""
+    digits = "".join(ch for ch in phone if ch.isdigit())
+    if not digits:
+        return rows
+    return [
+        row
+        for row in rows
+        if row["phone"] and digits in str(row["phone"]).replace(" ", "")
+    ]

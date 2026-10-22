@@ -23,6 +23,7 @@ from app.planner import dag as planner_dag
 from app.planner import executor, intent
 from app.policy.engine import decide
 from app.policy.rules import KNOWN_TOOLS, PENDING_TOOLS, PolicyContext
+import app.policy.rules as rules_mod
 from app.tools import registry
 from scripts.seed import seed
 
@@ -209,20 +210,27 @@ def test_product_list_question_becomes_a_readonly_list_products_node() -> None:
 # ---------------------------------------------------------------- 策略层登记
 
 
-def test_invest_write_tools_are_not_pending_and_two_pending_proofs_remain() -> None:
-    """申购/赎回是已实现工具，不该再挂在 PENDING_TOOLS 上；PENDING_TOOLS 还得留活证据。"""
-    assert "buy_fund" not in PENDING_TOOLS
-    assert "redeem_fund" not in PENDING_TOOLS
-    assert len(PENDING_TOOLS) >= 2
-    for name in PENDING_TOOLS:
+def test_placeholder_tools_are_all_implemented_now() -> None:
+    """所有占位工具都已实现，PENDING_TOOLS 清空。
+
+    这条从「至少留两个占位当 R11 活证据」改过来，是因为四件占位（销户、改卡密码、
+    虚拟卡申请、调限额）真的都做完了。R11 的可达性不依赖 PENDING_TOOLS，
+    而依赖「模型编出一个没登记的工具名」，见 test_r11_default_deny_is_the_backstop。
+    """
+    assert PENDING_TOOLS == frozenset()
+    for name in ("buy_fund", "redeem_fund", "close_card", "change_card_pin"):
         assert name in KNOWN_TOOLS, name
-        assert name not in registry.TOOL_NAMES, name
+        assert name in registry.TOOL_NAMES, name
 
 
-def test_default_deny_still_has_a_reachable_path() -> None:
-    """R11 不是死代码：挂在 PENDING_TOOLS 上的工具会落到它。"""
-    action = Action(tool="close_card", params={"card_tail": "1234"}, account_id="a_3d7e60c2")
-    decision = decide(action, PolicyContext())
+def test_default_deny_still_has_a_reachable_path(monkeypatch) -> None:
+    """R11 不是死代码：登记了工具却忘了配规则时，它是最后一道红拒。
+
+    不拿现成的工具名做证据，因为现有工具全都被前面某条规则接住了；
+    直接构造「加了登记但漏配规则」这个真实失误场景。
+    """
+    monkeypatch.setattr(rules_mod, "KNOWN_TOOLS", KNOWN_TOOLS | {"future_tool"})
+    decision = decide(Action(tool="future_tool", params={}, account_id="a_3d7e60c2"))
     assert decision.rule_id == "R11_default_deny"
     assert decision.level == "red"
 

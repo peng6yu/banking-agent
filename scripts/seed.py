@@ -278,12 +278,13 @@ def _seed_accounts(conn: sqlite3.Connection, opened_ms: int) -> None:
 def _seed_payees(conn: sqlite3.Connection) -> None:
     # 故意放两个同名的张三，用于验证「重名收款人」分支
     conn.executemany(
-        "INSERT INTO payees (id, user_id, name, bank, card_tail, alias) VALUES (?, ?, ?, ?, ?, ?)",
-        [(PAYEE_LIJING, USER_ID, "李静", "工商银行", "8821", "房东"),
-         (PAYEE_WANGQIANG, USER_ID, "王强", "建设银行", "3095", None),
-         (PAYEE_ZHANGSAN_A, USER_ID, "张三", "招商银行", "4417", "同事A"),
-         (PAYEE_ZHANGSAN_B, USER_ID, "张三", "民生银行", "6620", "同事B"),
-         (PAYEE_MAMA, USER_ID, "妈妈", "农业银行", "7788", "我妈")],
+        "INSERT INTO payees (id, user_id, name, bank, card_tail, alias, phone)"
+        " VALUES (?, ?, ?, ?, ?, ?, ?)",
+        [(PAYEE_LIJING, USER_ID, "李静", "工商银行", "8821", "房东", "13900138001"),
+         (PAYEE_WANGQIANG, USER_ID, "王强", "建设银行", "3095", None, "13900138002"),
+         (PAYEE_ZHANGSAN_A, USER_ID, "张三", "招商银行", "4417", "同事A", "13900138003"),
+         (PAYEE_ZHANGSAN_B, USER_ID, "张三", "民生银行", "6620", "同事B", "13900138004"),
+         (PAYEE_MAMA, USER_ID, "妈妈", "农业银行", "7788", "我妈", "13800138000")],
     )
 
 
@@ -382,6 +383,7 @@ def verify(conn: sqlite3.Connection) -> bool:
         ("credit_limit_20000", credit_limit == CREDIT_LIMIT_FEN),
         ("payees_5", _count(conn, "SELECT COUNT(*) AS n FROM payees") == 5),
         ("payee_mama_1", _count(conn, "SELECT COUNT(*) AS n FROM payees WHERE name = '妈妈' AND alias = '我妈'") == 1),
+        ("payee_phone_5", _count(conn, "SELECT COUNT(*) AS n FROM payees WHERE phone IS NOT NULL") == 5),
         ("duplicate_name_2", _count(conn, "SELECT COUNT(*) AS n FROM payees WHERE name = '张三'") == 2),
         ("subs_5", _count(conn, "SELECT COUNT(*) AS n FROM subs") == 5),
         ("fund_products_5", _count(conn, "SELECT COUNT(*) AS n FROM fund_products") == 5),

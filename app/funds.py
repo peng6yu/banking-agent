@@ -139,6 +139,51 @@ def initiate(
     return _to_outcome(fetch_hold(conn, hold_id), reused=False)
 
 
+def initiate_split(
+    conn: sqlite3.Connection,
+    action: Action,
+    *,
+    session_id: str,
+    node_id: str,
+    shares: list[tuple[str, int]],
+    token: str | None = None,
+    secret: str | None = None,
+) -> list[HoldOutcome]:
+    """AA 拆分：一次授权、N 条台账。
+
+    令牌绑的是**总额**（策略层批的就是这个总额），但每一份钱单独建 hold、单独 commit，
+    这样账上能看到「张三 250、李静 250」而不是一条 500 的糊涂账。
+    三条硬校验：份额之和必须等于令牌授权的总额、每份金额为正、每份的收款人不能重复。
+    """
+    token_mod.require_token(token, conn, session_id=session_id)
+    token_mod.verify(conn, str(token), action, secret=secret)
+    total = _require_amount(action)
+    if not shares:
+        raise ValidationError("没有指定分摊对象", reason="SPLIT_EMPTY")
+    if len({pid for pid, _ in shares}) != len(shares):
+        raise ValidationError("分摊对象有重复", reason="SPLIT_DUPLICATE_PAYEE")
+    if any(amount <= 0 for _, amount in shares):
+        raise ValidationError("每份金额必须为正", reason="SPLIT_BAD_SHARE")
+    if sum(amount for _, amount in shares) != total:
+        raise ValidationError(
+            "分摊金额之和必须等于授权总额", reason="SPLIT_SUM_MISMATCH", total_fen=total
+        )
+    outcomes: list[HoldOutcome] = []
+    for index, (payee_id, amount) in enumerate(shares):
+        sub = Action(
+            tool=action.tool,
+            params={"payee_id": payee_id, "amount_fen": amount, "share_index": index},
+            account_id=action.account_id,
+            amount_fen=amount,
+        )
+        key = idempotency_key_for(
+            session_id, f"{node_id}#{index}", token_mod.params_hash(sub.params)
+        )
+        hold_id = _create_hold(conn, sub, amount, payee_id, key, session_id, True)
+        outcomes.append(_to_outcome(fetch_hold(conn, hold_id), reused=False))
+    return outcomes
+
+
 def commit(conn: sqlite3.Connection, hold_id: str, *, counterparty: str | None = None) -> CommitOutcome:
     """第 2 阶段：真正扣钱。重复 commit 幂等；已释放或已过期一律 HoldExpired。
 
@@ -156,6 +201,74 @@ def commit(conn: sqlite3.Connection, hold_id: str, *, counterparty: str | None =
         _expire(conn, hold)
         raise HoldExpired(reason="HOLD_EXPIRED", hold_id=hold_id)
     return _settle(conn, hold, counterparty)
+
+
+def refund(
+    conn: sqlite3.Connection,
+    action: Action,
+    *,
+    original_txn_id: str,
+    reason: str,
+    session_id: str,
+    token: str | None = None,
+    secret: str | None = None,
+) -> dict[str, object]:
+    '''冲正一笔已出账的交易：把钱加回去，并留下双向关联。
+
+    为什么必须放在 funds 层：项目的不变量是「余额只经 funds 变动」，工具层直接 UPDATE accounts
+    就绕过了这条线。冲正是**入账**，但也得走同一个 _post_leg，否则流水和余额会各说各话。
+
+    四道拒绝：原交易不存在/不属于本账户、原交易不是出账、已经是冲正交易本身、已经冲正过。
+    已冲正过按幂等成功返回，不重复入账——重复点击「撤销」不该多出一笔钱。
+    '''
+    token_mod.require_token(token, conn, session_id=session_id)
+    token_mod.verify(conn, str(token), action, secret=secret)
+    original = _fetch_txn(conn, original_txn_id)
+    if original is None or str(original['account_id']) != str(action.account_id):
+        raise ValidationError('找不到这笔交易', reason='TXN_NOT_FOUND', txn_id=original_txn_id)
+    if original['reversal_of']:
+        raise ValidationError('这笔本身就是冲正交易，不能再冲正', reason='TXN_REVERSAL_OF_REVERSAL')
+    if str(original['direction']) != 'out':
+        raise ValidationError('只有出账才能冲正', reason='TXN_NOT_OUT')
+    amount_fen = int(original['amount_fen'])
+    if amount_fen != int(action.amount_fen):
+        raise ValidationError('冲正金额必须与原交易一致', reason='TXN_AMOUNT_MISMATCH')
+    if original['reversed_by']:
+        return {'original_txn_id': original_txn_id, 'reversal_txn_id': str(original['reversed_by']),
+                'amount_fen': amount_fen, 'idempotent': True}
+    stamp_ms = now_ms()
+    with tx(conn):
+        balance_after_fen = _post_leg(
+            conn, account_id=str(action.account_id), direction='in', amount_fen=amount_fen,
+            counterparty=str(original['counterparty']), category='转账',
+            note='冲正：' + reason, hold_id=None, stamp_ms=stamp_ms,
+        )
+        reversal_id = conn.execute(
+            'SELECT id FROM transactions WHERE account_id = ? ORDER BY rowid DESC LIMIT 1',
+            (str(action.account_id),),
+        ).fetchone()['id']
+        conn.execute('UPDATE transactions SET reversal_of = ? WHERE id = ?',
+                     (original_txn_id, str(reversal_id)))
+        conn.execute('UPDATE transactions SET reversed_by = ? WHERE id = ?',
+                     (str(reversal_id), original_txn_id))
+        audit.append(
+            conn,
+            'transfer.reversed',
+            {
+                'original_txn_id': original_txn_id,
+                'reversal_txn_id': str(reversal_id),
+                'amount_fen': amount_fen,
+                'reason': reason,
+                'balance_after_fen': balance_after_fen,
+            },
+            session_id=session_id,
+        )
+    return {'original_txn_id': original_txn_id, 'reversal_txn_id': str(reversal_id),
+            'amount_fen': amount_fen, 'balance_after_fen': balance_after_fen, 'idempotent': False}
+
+
+def _fetch_txn(conn: sqlite3.Connection, txn_id: str) -> sqlite3.Row | None:
+    return conn.execute('SELECT * FROM transactions WHERE id = ?', (txn_id,)).fetchone()
 
 
 def release(
@@ -307,7 +420,7 @@ def _settle(conn: sqlite3.Connection, hold: Hold, counterparty: str | None = Non
     with tx(conn):
         balance_after_fen = _post_leg(
             conn, account_id=hold.account_id, direction="out", amount_fen=hold.amount_fen,
-            counterparty=counterparty or _counterparty(conn, hold.payee_id), category="transfer",
+            counterparty=counterparty or _counterparty(conn, hold.payee_id), category="转账",
             note=hold.note or "", hold_id=hold.id, stamp_ms=stamp_ms,
         )
         conn.execute(

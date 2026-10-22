@@ -78,6 +78,9 @@ MISSING_LABELS: Final[dict[str, str]] = {
     # 下面这些槽位模型偶尔会报缺；一律给中文说法，别把内部槽位名念给用户
     "merchant": "在哪个商户消费？",
     "note": "还有别的信息要补充吗？",
+    "due_ms": "什么时候转？说个日子就行，比如「下周三」「月底」。",
+    "due_hint": "什么时候转？说个日子就行，比如「下周三」「月底」。",
+    "payee_names": "这几个人分别是谁？把名字都说一下。",
     "period": "要看哪一段时间？",
     "month": "要看哪个月？",
     "card_tail": "卡号后四位是多少？",
@@ -102,9 +105,12 @@ INTENT_LABELS: Final[dict[str, str]] = {
     "subscription": "查订阅或取消自动扣款",
     "birthday_plan": "送礼安排（先预留资金再付款）",
     "invest": "基金申购或赎回",
-    "card_manage": "银行卡操作（查卡、开卡、调限额、冻结解冻、挂失）",
+    "card_manage": "银行卡操作（查卡、开卡、调限额、冻结解冻、挂失、销户、改密码）",
+    "schedule_transfer": "定时或预约转账",
+    "split_bill": "多人 AA 拆分",
+    "reversal": "冲正一笔已转出的钱",
 }
-NEED_SLOTS: Final[frozenset[str]] = frozenset({"transfer", "birthday_plan"})
+NEED_SLOTS: Final[frozenset[str]] = frozenset({"transfer", "birthday_plan", "schedule_transfer"})
 ALL_KEYWORDS: Final[tuple[str, ...]] = ("全部", "全额", "所有钱", "剩下的钱")
 AMOUNT_SPLITTERS: Final[tuple[str, ...]] = ("转", "付", "给")
 HISTORY_TURNS: Final[int] = 6
@@ -374,6 +380,14 @@ def _missing(intent: str, slots: dict[str, Any], reported: Any) -> list[str]:
         if not slots.get("payee_name"):
             missing.append("payee_name")
         if not slots.get("amount_fen") and not slots.get("amount_all"):
+            missing.append("amount_fen")
+    if intent == "schedule_transfer" and not (slots.get("due_ms") or slots.get("due_hint")):
+        missing.append("due_ms")
+    if intent == "split_bill":
+        names = slots.get("payee_names")
+        if not isinstance(names, (list, tuple)) or len([x for x in names if str(x).strip()]) < 2:
+            missing.append("payee_names")
+        if not slots.get("amount_fen"):
             missing.append("amount_fen")
     if intent == CARD_INTENT:
         action = str(slots.get(CARD_ACTION_SLOT) or "")

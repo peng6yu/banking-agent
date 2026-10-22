@@ -40,6 +40,14 @@ MINIMAL_PARAMS: dict[str, dict[str, Any]] = {
     "freeze_card": {"card_tail": "1234"},
     "unfreeze_card": {"card_tail": "1234"},
     "report_card_loss": {"card_tail": "1234"},
+    # 场景一补齐：定时转账与 AA 拆分；场景四补齐：销户与改卡密码；另有回退冲正。
+    "schedule_transfer": {"payee_id": PAYEE_LIJING, "amount_fen": 30_000,
+                          "due_ms": FROZEN_MS + 86_400_000},
+    "cancel_scheduled": {"scheduled_id": "s_ghost"},
+    "split_transfer": {"payee_ids": [PAYEE_LIJING, "p_zhang_a"], "amount_fen": 40_000},
+    "close_card": {"card_tail": "1234"},
+    "change_card_pin": {"card_tail": "1234", "pin": "123456"},
+    "reverse_transfer": {"txn_id": "t_ghost"},
 }
 
 

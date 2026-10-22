@@ -16,6 +16,8 @@ from app.ids import new_id
 from app.models import Dag, DAGNode
 from app.planner.intent import ACCOUNT_OWNER_SLOT
 from app.planner.card_actions import CARD_TOOLS, card_params, card_template
+from app.planner.due import parse_due_ms
+from app.planner.split_plan import SPLIT_INTENT, build_split
 from app.planner.subscription import cancel_params, resolve_match, subscription_template
 from app.tools.base import ValidationError
 
@@ -47,6 +49,16 @@ INTENT_TEMPLATES: Final[dict[str, tuple[tuple[str, str], ...]]] = {
         ("n4", "pay_merchant"),
     ),
     "invest": INVEST_TEMPLATES["query"],
+    # 定时转账：先认收款人，再落一条预约（钱到日子才划，不当场占 hold）
+    "schedule_transfer": (
+        ("n1", "resolve_payee"),
+        ("n2", "schedule_transfer"),
+    ),
+    # 冲正：先查最近的流水，再按那一笔的 id 和金额冲回（金额不取模型报的）
+    "reversal": (
+        ("n1", "query_transactions"),
+        ("n2", "reverse_transfer"),
+    ),
     # 卡片管理的默认一路（只查卡）；另外五路见 app/planner/card_actions.py
     "card_manage": (("n1", "list_cards"),),
 }
@@ -67,6 +79,9 @@ BIRTHDAY_ITEM: Final[str] = "生日鲜花"
 def build(intent: dict[str, Any]) -> Dag:
     """按模板生成执行图；缺必填槽位抛 ValidationError，由调用方回退单步。"""
     name, slots = split(intent)
+    if name == SPLIT_INTENT:
+        # AA 拆分要按人数动态造图（同名工具不能出现在固定模板里），见 split_plan.py
+        return build_split(slots)
     template = _template(name, slots)
     if template is None:
         raise ValidationError("没有这个意图的模板", intent=name)
@@ -82,6 +97,15 @@ def build_or_single(intent: dict[str, Any]) -> Dag:
     是把一个说不出口的请求换成一个用户没提的请求去做。见 UNSUPPORTED_TOOL。
     """
     name, slots = split(intent)
+    if name == SPLIT_INTENT:
+        try:
+            return build_split(slots)
+        except ValidationError:
+            # 人数不够或金额缺失：不猜，落到未支持请求上由策略层拒绝并留痕
+            return Dag(
+                id=new_id("r"),
+                nodes=[DAGNode(id="n1", tool=UNSUPPORTED_TOOL, params={"intent": str(name)})],
+            )
     template = _template(name, slots)
     if template is None:
         return Dag(
@@ -206,9 +230,61 @@ def _tool_params(tool: str, slots: dict[str, Any], ids: dict[str, str]) -> dict[
         return _invest_params(slots)
     if tool == "list_products":
         return _product_params(slots)
+    if tool == "query_transactions":
+        return _txn_params(slots)
+    if tool == "schedule_transfer":
+        return _schedule_params(slots, ids)
+    if tool == "reverse_transfer":
+        return _reverse_params(slots, ids)
     if tool in CARD_TOOLS:
         return card_params(tool, slots)
     raise ValidationError("模板里出现未登记的工具", reason="DAG_UNKNOWN_TOOL", tool=tool)
+
+
+def _txn_params(slots: dict[str, Any]) -> dict[str, Any]:
+    """查流水：冲正只回看 7 天（与 transfers.REVERSAL_WINDOW_MS 同口径）。"""
+    params: dict[str, Any] = {"days": 7}
+    amount = _positive_int(slots.get("amount_fen"))
+    if amount is not None:
+        params["min_fen"] = amount
+    return params
+
+
+def _due_ms(slots: dict[str, Any]) -> int:
+    """先认模型给的毫秒时间戳，没有再按中文时间说法换算，认不出就抛给 E8。"""
+    stamp = _positive_int(slots.get("due_ms"))
+    if stamp is not None:
+        return stamp
+    return parse_due_ms(str(slots.get("due_hint") or ""), clock.now_ms())
+
+
+def _schedule_params(slots: dict[str, Any], ids: dict[str, str]) -> dict[str, Any]:
+    """定时转账：收款人来自查询节点，时间来自 due_ms 或 due_hint。"""
+    params: dict[str, Any] = {
+        "payee_id": ref(_need(ids, "resolve_payee"), "candidates", "0", "payee_id"),
+        "amount_fen": _amount(slots),
+        "due_ms": _due_ms(slots),
+    }
+    recurrence = str(slots.get("recurrence") or "").strip()
+    if recurrence in ("once", "monthly"):
+        params["recurrence"] = recurrence
+    note = str(slots.get("note") or "").strip()
+    if note:
+        params["note"] = note
+    name = str(slots.get("payee_name") or "").strip()
+    if name:
+        params["payee_name"] = name
+    return params
+
+
+def _reverse_params(slots: dict[str, Any], ids: dict[str, str]) -> dict[str, Any]:
+    """冲正：交易 id 与金额都取自查到的第一笔流水，不让模型报金额。"""
+    query_node = _need(ids, "query_transactions")
+    return {
+        "txn_id": ref(query_node, "items", "0", "txn_id"),
+        "amount_fen": ref(query_node, "items", "0", "amount_fen"),
+        "reason": str(slots.get("note") or slots.get("txn_ref") or "用户申请冲正"),
+    }
 
 
 def _transfer_params(slots: dict[str, Any], ids: dict[str, str]) -> dict[str, Any]:

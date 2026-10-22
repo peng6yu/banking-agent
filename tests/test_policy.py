@@ -14,6 +14,8 @@ import pytest
 from app.models import Action, Decision
 from app.policy import RULES, PolicyContext, decide, explain
 from app.policy import engine as engine_mod
+from app.policy.rules import KNOWN_TOOLS, PENDING_TOOLS
+import app.policy.rules as rules_mod
 
 TRANSFER_TOOL = "transfer"
 
@@ -138,11 +140,34 @@ def test_r10_invest_red_has_face_and_otp() -> None:
     assert decision.required_factors == ["face", "otp"]
 
 
-def test_r11_default_deny_is_the_backstop() -> None:
-    """R11 的活证据是 close_card：在 KNOWN_TOOLS 里但没有任何规则认它。"""
-    decision = decide(Action(tool="close_card", params={}, account_id="a_1"))
+def test_r11_default_deny_is_the_backstop(monkeypatch) -> None:
+    """R11 是最后一道兜底：登记了工具却没配规则的，一律红拒。
+
+    PENDING_TOOLS 清空之后，R11 在现有工具集里确实走不到了——每个 KNOWN_TOOLS 成员
+    都被前面某条规则接住，没登记的则先撞 R03。所以这条用例直接构造它真正防的那个场景：
+    **有人往 KNOWN_TOOLS 里加了个工具，却忘了配规则**。那正是 R11 存在的意义，
+    也是唯一能证明它不是死代码的方式（monkeypatch 补上登记，规则表照旧）。
+    """
+    monkeypatch.setattr(rules_mod, "KNOWN_TOOLS", KNOWN_TOOLS | {"future_tool"})
+    decision = decide(Action(tool="future_tool", params={}, account_id="a_1"))
     assert (decision.level, decision.rule_id) == ("red", "R11_default_deny")
     assert decision.reason_text == "这个操作我不确定是否安全，先不做"
+
+
+def test_unregistered_tool_hits_r03_before_r11() -> None:
+    """完全没登记的工具先被 R03 接住——R11 不是第一道防线，说清楚免得误读。"""
+    decision = decide(Action(tool="close_account", params={}, account_id="a_1"))
+    assert decision.rule_id == "R03_unknown_tool"
+    assert decision.level == "red"
+
+
+def test_known_tools_no_longer_contain_pending_names() -> None:
+    """销户、改卡密码都已实现，PENDING_TOOLS 清空；这些名字也不再落 R11。"""
+    assert PENDING_TOOLS == frozenset()
+    for name in ("close_card", "change_card_pin"):
+        assert name in KNOWN_TOOLS
+        decision = decide(Action(tool=name, params={"card_tail": "1234"}, account_id="a_1"))
+        assert decision.rule_id != "R11_default_deny"
 
 
 def test_r12_other_account_red() -> None:

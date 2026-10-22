@@ -25,13 +25,19 @@ INTENT_NAMES: Final[tuple[str, ...]] = (
     # 卡片管理（场景四）：申请虚拟卡、查额度、调限额、冻结、解冻、挂失共用一个意图，
     # 动作由解析器按用户原话的动词算（见 app/planner/card_actions.py）
     "card_manage",
+    # 定时/预约转账：说「下周三给张三转 500」走这条路，钱到日子才划
+    "schedule_transfer",
+    # 多人 AA：一顿饭几个人平分，一个人一笔转出去
+    "split_bill",
+    # 冲正：撤销已经转出去的一笔钱
+    "reversal",
     "unknown",
 )
 
 # 每个意图什么时候用。缺了这段说明模型只能猜：实测 birthday_plan 没有说明时，
 # 「下周三我妈生日，帮我提前留出300块给她订束花」会被解析成 unknown 再反问（场景 6 走不通）。
 INTENT_GUIDE: Final[str] = (
-    "用户这句话属于哪一类，从下面八项里选一个："
+    "用户这句话属于哪一类，从下面十一项里选一个："
     "query_balance=查余额、流水、额度、卡里还剩多少钱；"
     "transfer=给某人转钱、付款、还款；"
     "bill_analysis=分析某月账单、找出异常消费；"
@@ -42,6 +48,11 @@ INTENT_GUIDE: Final[str] = (
     "invest=基金理财的申购或赎回；"
     "card_manage=银行卡本身的操作：看有几张卡、申请虚拟卡、冻结或解冻某张卡、"
     "挂失某张卡、调整某张卡的单笔限额（例如「把我的卡冻结了」「尾号1234的卡挂失」）；"
+    "schedule_transfer=约好某个日子再转钱、定时转账、每月自动转，"
+    "例如「下周三给张三转500」「每个月1号给房东转3000」；"
+    "split_bill=多人 AA、一起分摊、几个人平分（例如「这顿饭600，我和张三、李静AA」），"
+    "这时把每个人填进 payee_names；"
+    "reversal=要撤回、撤销、冲正一笔已经转出去的钱；"
     "unknown=以上都不是、实在判断不出来。"
 )
 
@@ -63,6 +74,16 @@ SLOT_KEYS: Final[tuple[str, ...]] = (
     "date_hint",
     # 订阅名（商户名）：用户说「爱奇艺会员」就填「爱奇艺会员」
     "sub_name",
+    # 定时转账：due_ms 是毫秒时间戳；用户说的是人话时放进 due_hint（「下周三」）
+    "due_ms",
+    "due_hint",
+    "recurrence",
+    # AA 拆分：收款人名单，一个名字一项
+    "payee_names",
+    # 冲正：要撤销的那笔交易
+    "txn_ref",
+    # 收款人手机号：用户念号码时说（「转 500 给 13900138001」）
+    "payee_phone",
 )
 
 # 模型偶尔会报一个我们根本没有的槽位名（真模型实测生日场景报的是 birthday_date，
@@ -97,6 +118,11 @@ SLOT_GUIDE: Final[dict[str, str]] = {
         "订阅名称：用户说「爱奇艺会员」就填「爱奇艺会员」；"
         "只在用户明确要取消某条订阅时填，查订阅时不要填"
     ),
+    "due_hint": "用户说的转账时间，原样保留，例如「下周三」「月底」「三天后」",
+    "recurrence": "只填 once 或 monthly：说「每月」才填 monthly，其余都填 once",
+    "payee_names": "AA 拆分的收款人名单，一个名字一项",
+    "txn_ref": "要冲正的那笔交易说明，例如「刚才转给张三的500」",
+    "payee_phone": "用户单独说了手机号才填，可以是完整号码或后四位",
 }
 
 # 订阅意图分两种用法：查订阅，和取消某一条。
@@ -161,6 +187,12 @@ def emit_intent_schema() -> dict[str, Any]:
         "purpose": {"type": "string"},
         "gift": {"type": "string"},
         "date_hint": {"type": "string"},
+        "due_hint": {"type": "string"},
+        "due_ms": {"type": "integer"},
+        "recurrence": {"type": "string", "enum": ["once", "monthly"]},
+        "payee_names": {"type": "array", "items": {"type": "string"}},
+        "txn_ref": {"type": "string"},
+        "payee_phone": {"type": "string"},
         "missing": {"type": "array", "items": {"type": "string"}},
         "confidence": {"type": "number"},
     }

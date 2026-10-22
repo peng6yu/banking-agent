@@ -57,6 +57,10 @@ def test_low_confidence_question_speaks_chinese_not_enum_name(intent_name: str) 
                     "intent": intent_name,
                     "payee_name": "李静",
                     "amount_fen": 50000,
+                    # split_bill 要名单、schedule_transfer 要日子：不补齐的话
+                    # 反问会先被「缺槽位」分支接住，测不到低置信度这条路径
+                    "payee_names": ["张三", "李静"],
+                    "due_hint": "下周三",
                     "missing": [],
                     "confidence": 0.1,
                 }

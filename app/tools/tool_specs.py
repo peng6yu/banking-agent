@@ -1,4 +1,4 @@
-"""工具权威表：19 个工具的名字、参数模式、处理器与写标记。
+"""工具权威表：26 个工具的名字、参数模式、处理器与写标记。
 
 对应文档：docs/06_工具层与场景实现规格.md 6.1/6.2。
 
@@ -20,6 +20,8 @@ import app.tools.cards as cards  # noqa: PLR0402
 import app.tools.invest as invest  # noqa: PLR0402
 import app.tools.products as products  # noqa: PLR0402
 import app.tools.queries as queries  # noqa: PLR0402
+import app.tools.scheduled as scheduled  # noqa: PLR0402
+import app.tools.split as split_tools  # noqa: PLR0402
 import app.tools.subs as subs  # noqa: PLR0402
 import app.tools.transfers as transfers  # noqa: PLR0402
 from app.models import ToolResult
@@ -176,7 +178,7 @@ TOOL_SPECS: Final[tuple[ToolSpec, ...]] = (
     ),
     ToolSpec(
         name="resolve_payee",
-        description="按姓名或备注找收款人；同名多个时带上卡尾号可以区分。",
+        description="按姓名、备注名或手机号找收款人；同名多个时带上卡尾号可以区分。",
         params={
             "type": "object",
             "properties": {
@@ -184,7 +186,13 @@ TOOL_SPECS: Final[tuple[ToolSpec, ...]] = (
                     "type": "string",
                     "minLength": 1,
                     "maxLength": 50,
-                    "description": "姓名或备注名，例如 李静 / 老妈",
+                    "description": "姓名、备注名或手机号，例如 李静 / 老妈 / 13800138000",
+                },
+                "phone": {
+                    "type": "string",
+                    "minLength": 4,
+                    "maxLength": 20,
+                    "description": "用户单独说了手机号就带上，可以是完整号码或后四位",
                 },
                 "card_tail": {
                     "type": "string",
@@ -414,6 +422,113 @@ TOOL_SPECS: Final[tuple[ToolSpec, ...]] = (
             "additionalProperties": False,
         },
         handler=cards.report_card_loss,
+        writes=True,
+    ),
+    ToolSpec(
+        name='schedule_transfer',
+        description='预约一笔转账到未来的某个时间。用户说了「下个月」「周三」「明天」这类时间就要用这个，而不是立刻转。',
+        params={
+            "type": "object",
+            "properties": {
+                "payee_id": {"type": "string", "minLength": 1, "description": "收款人 id，先用 resolve_payee 拿到"},
+                "amount_fen": _AMOUNT_FEN,
+                "due_ms": {"type": "integer", "minimum": 1, "description": "预约执行的毫秒时间戳"},
+                "recurrence": {"type": "string", "enum": list(scheduled.RECURRENCES), "description": "once 一次性；monthly 每月重复"},
+                "note": {"type": "string", "minLength": 1, "maxLength": 60, "description": "转账备注"},
+                "payee_name": {"type": "string", "minLength": 1, "description": "收款人显示名，只用于文案"}
+            },
+            "required": ['payee_id', 'amount_fen', 'due_ms'],
+            "additionalProperties": False,
+        },
+        handler=scheduled.schedule_transfer,
+        writes=True,
+    ),
+    ToolSpec(
+        name='list_scheduled',
+        description='列出还没执行的预约转账，含金额、收款人和执行时间。',
+        params={
+            "type": "object",
+            "properties": {
+                "include_done": {"type": "boolean", "description": "是否把已执行/已取消的也列出来"}
+            },
+            "required": [],
+            "additionalProperties": False,
+        },
+        handler=scheduled.list_scheduled,
+        writes=False,
+    ),
+    ToolSpec(
+        name='cancel_scheduled',
+        description='取消一笔还没执行的预约转账。已经执行过的取消不了。',
+        params={
+            "type": "object",
+            "properties": {
+                "scheduled_id": {"type": "string", "minLength": 1, "description": "预约 id，先用 list_scheduled 拿到"}
+            },
+            "required": ['scheduled_id'],
+            "additionalProperties": False,
+        },
+        handler=scheduled.cancel_scheduled,
+        writes=True,
+    ),
+    ToolSpec(
+        name='split_transfer',
+        description='AA 收款：把一笔钱按人头平摊给多个收款人。一次授权、每个收款人各记一笔账。',
+        params={
+            "type": "object",
+            "properties": {
+                "payee_ids": {"type": "array", "items": {"type": "string"}, "minItems": 2, "maxItems": 10, "description": "分摊对象的收款人 id 列表"},
+                "amount_fen": _AMOUNT_FEN,
+                "note": {"type": "string", "minLength": 1, "maxLength": 60, "description": "备注"}
+            },
+            "required": ['payee_ids', 'amount_fen'],
+            "additionalProperties": False,
+        },
+        handler=split_tools.split_transfer,
+        writes=True,
+    ),
+    ToolSpec(
+        name='close_card',
+        description='销户一张卡，销了不能恢复。卡里还有钱或者还有没结清的资金占用时要先处理这些。',
+        params={
+            "type": "object",
+            "properties": {
+                "card_tail": _CARD_TAIL
+            },
+            "required": ['card_tail'],
+            "additionalProperties": False,
+        },
+        handler=cards.close_card,
+        writes=True,
+    ),
+    ToolSpec(
+        name='change_card_pin',
+        description='修改一张卡的密码，必须是 6 位数字。密码本身不会被回显。',
+        params={
+            "type": "object",
+            "properties": {
+                "card_tail": _CARD_TAIL,
+                "pin": {"type": "string", "minLength": 6, "maxLength": 6, "pattern": "^[0-9]{6}$", "description": "6 位数字新密码"}
+            },
+            "required": ['card_tail', 'pin'],
+            "additionalProperties": False,
+        },
+        handler=cards.change_card_pin,
+        writes=True,
+    ),
+    ToolSpec(
+        name='reverse_transfer',
+        description='冲正一笔已经转出去的钱，把钱退回原账户。只能冲正 7 天内、自己账户的出账，且一笔只能冲一次。',
+        params={
+            "type": "object",
+            "properties": {
+                "txn_id": {"type": "string", "minLength": 1, "description": "要冲正的交易 id，先用 query_transactions 拿到"},
+                "reason": {"type": "string", "minLength": 1, "maxLength": 60, "description": "冲正原因"}
+            },
+            "required": ['txn_id'],
+            "additionalProperties": False,
+        },
+        handler=transfers.reverse_transfer,
         writes=True,
     ),
 )

@@ -305,5 +305,5 @@ def test_transfer_commits_in_one_call_and_extends_the_audit_chain(ctx: ToolConte
         (hold_id,),
     ).fetchall()
     settled = [(row["direction"], row["amount_fen"], row["category"]) for row in rows]
-    assert settled == [("out", 10_000, "transfer")]
+    assert settled == [("out", 10_000, "转账")]
     assert audit.verify_chain(ctx.conn) is True

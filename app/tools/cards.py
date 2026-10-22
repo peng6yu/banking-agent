@@ -10,6 +10,8 @@ list_cards 只读；其余五个都是写工具，第一句就是 require_token�
 
 from __future__ import annotations
 
+import hashlib
+import secrets
 from typing import Any
 
 # 模块级导入（不用 from 包 import 模块）：tests/test_imports.py 用 ast 按模块名登记依赖，
@@ -33,7 +35,7 @@ DEFAULT_PER_TX_LIMIT_FEN = 500_000
 # 单笔限额的业务上界：5 万元。超过这个数不该由用户自助设，需要柜面。
 MAX_PER_TX_LIMIT_FEN = 5_000_000
 
-_STATUS_ZH = {"active": "正常", "frozen": "已冻结", "lost": "已挂失"}
+_STATUS_ZH = {"active": "正常", "frozen": "已冻结", "lost": "已挂失", "closed": "已销户"}
 
 
 def list_cards(ctx: ToolContext, params: dict[str, Any], token: str | None = None) -> ToolResult:
@@ -187,6 +189,94 @@ def report_card_loss(
     )
 
 
+
+def close_card(ctx: ToolContext, params: dict[str, Any], token: str | None = None) -> ToolResult:
+    '''销户一张卡：active/frozen -> closed，终态不可恢复。
+
+    两道拒绝理由都是真实的：卡里还有钱就先别销户（销了钱去哪没答案），
+    还有没结算完的资金占用也不许销（那是笔悬账）。已销户返回幂等成功。
+    '''
+    require_token('close_card', params, token)
+    card, error = _locate_card(ctx, params)
+    if card is None:
+        return _lookup_failure(error, params)
+    current = str(card['status'])
+    tail = str(card['tail'])
+    if current == 'closed':
+        return ok_result(
+            _card_payload(card, status='closed', idempotent=True,
+                          summary=_state_summary(card, 'closed', True))
+        )
+    if current == 'lost':
+        return fail_result('CARD_LOST', f'尾号 {tail} 的卡已挂失，只能到柜面办理销户。')
+    balance_fen = int(card['balance_fen'])
+    if balance_fen > 0:
+        return fail_result(
+            'CARD_BALANCE_NOT_ZERO',
+            f'尾号 {tail} 的卡里还有 {fen_to_yuan_str(balance_fen)} 元，先把钱转出来再销户。',
+        )
+    held = ctx.conn.execute(
+        'SELECT COUNT(*) AS n FROM holds WHERE account_id = ? AND status = ?',
+        (str(card['account_id']), 'held'),
+    ).fetchone()
+    if held is not None and int(held['n']) > 0:
+        return fail_result('CARD_HOLD_PENDING', '这张卡还有没结算完的资金占用，等结清之后再销户。')
+    with db.tx(ctx.conn):
+        changed = ctx.conn.execute(
+            'UPDATE cards SET status = ? WHERE id = ? AND status = ?',
+            ('closed', str(card['id']), current),
+        ).rowcount
+    if changed != 1:
+        return fail_result('CARD_STATE_INVALID', '这张卡的状态刚刚变了，请重新确认后再操作。')
+    audit.append(
+        ctx.conn,
+        'tool.executed',
+        {
+            'tool': 'close_card',
+            'card_id': str(card['id']),
+            'card_tail': tail,
+            'state_change': current + '->closed',
+        },
+    )
+    return ok_result(
+        _card_payload(card, status='closed', idempotent=False,
+                      summary=_state_summary(card, 'closed', False))
+    )
+
+
+def change_card_pin(ctx: ToolContext, params: dict[str, Any], token: str | None = None) -> ToolResult:
+    '''改卡密码。库里只存加盐哈希，返回值里绝不回显密码或哈希。
+
+    PIN 是 6 位数字。校验放在工具层而不是只靠 schema，因为 schema 是给模型看的说明，
+    不是执行期的门；模型完全可能带着 5 位数进来。
+    '''
+    require_token('change_card_pin', params, token)
+    pin = str(params.get('pin') or '').strip()
+    if len(pin) != 6 or not pin.isdigit():
+        return fail_result('PIN_INVALID', '卡密码得是 6 位数字，请再确认一下。')
+    card, error = _locate_card(ctx, params)
+    if card is None:
+        return _lookup_failure(error, params)
+    current = str(card['status'])
+    tail = str(card['tail'])
+    if current in ('lost', 'closed'):
+        code = 'CARD_LOST' if current == 'lost' else 'CARD_CLOSED'
+        return fail_result(code, f'尾号 {tail} 的卡{_STATUS_ZH[current]}，改密码得到柜面办理。')
+    salt = secrets.token_hex(8)
+    digest = hashlib.sha256((salt + pin).encode('utf-8')).hexdigest()
+    with db.tx(ctx.conn):
+        ctx.conn.execute(
+            'UPDATE cards SET pin_hash = ? WHERE id = ?',
+            (salt + '$' + digest, str(card['id'])),
+        )
+    audit.append(
+        ctx.conn,
+        'tool.executed',
+        {'tool': 'change_card_pin', 'card_id': str(card['id']), 'card_tail': tail},
+    )
+    return ok_result({'card_tail': tail, 'summary': f'尾号 {tail} 的卡的密码已经改好了。'})
+
+
 def _transition(
     ctx: ToolContext,
     params: dict[str, Any],
@@ -252,7 +342,9 @@ def _locate_card(ctx: ToolContext, params: dict[str, Any]):
     if not tail:
         return None, "CARD_TAIL_REQUIRED"
     rows = ctx.conn.execute(
-        "SELECT * FROM cards WHERE account_id = ? AND tail = ?",
+        "SELECT c.*, a.balance_fen AS balance_fen"
+        " FROM cards AS c JOIN accounts AS a ON a.id = c.account_id"
+        " WHERE c.account_id = ? AND c.tail = ?",
         (str(account["id"]), tail),
     ).fetchall()
     if not rows:

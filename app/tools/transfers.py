@@ -17,7 +17,7 @@ from typing import Any, Final
 # 模块级导入（不用 from 包 import 模块）：tests/test_imports.py 用 ast 按模块名登记依赖，
 # 包级导入会被它漏掉，允许依赖表就会与代码现状对不上。
 import app.funds as funds  # noqa: PLR0402
-from app.clock import BankError, HoldExpired, InsufficientFunds
+from app.clock import BankError, HoldExpired, InsufficientFunds, ValidationError, now_ms
 from app.models import ToolResult
 from app.money import fen_to_yuan_str
 from app.security import token as token_mod
@@ -34,6 +34,9 @@ from app.tools.base import (
 )
 
 log = logging.getLogger(__name__)
+
+# 自助冲正窗口：7 天。再久就得柜面，否则账目没有终点。
+REVERSAL_WINDOW_MS: Final[int] = 7 * 86_400_000
 
 MERCHANT_WHITELIST: Final[dict[str, str]] = {
     "flower_shop": "鲜花店",
@@ -188,6 +191,73 @@ def pay_merchant(
     except InsufficientFunds as exc:
         return _insufficient(exc)
     return _commit(ctx, hold.hold_id, params)
+
+
+def reverse_transfer(ctx: ToolContext, params: dict[str, Any], token: str | None = None) -> ToolResult:
+    '''冲正一笔已出账的转账：钱加回原账户，并留下双向关联。
+
+    为什么要有窗口：无限期可冲正等于给了一个「撤销上月生活费」的口子，账目就没有终点了。
+    为什么金额取自原交易而不是参数：让模型自己报金额，就是让不可信区决定退多少钱。
+    '''
+    require_token('reverse_transfer', params, token)
+    txn_id = str(params.get('txn_id') or '').strip()
+    if not txn_id:
+        return fail_result('TXN_REQUIRED', '要先知道是哪一笔交易才能冲正。')
+    reason = str(params.get('reason') or '').strip() or '用户申请冲正'
+    account = primary_account(ctx.conn, ctx.account_id)
+    original = ctx.conn.execute(
+        'SELECT * FROM transactions WHERE id = ? AND account_id = ?',
+        (txn_id, str(account['id'])),
+    ).fetchone()
+    if original is None:
+        return fail_result('TXN_NOT_FOUND', '名下没有找到这笔交易。')
+    amount_fen = int(original['amount_fen'])
+    if original['reversed_by']:
+        return ok_result(
+            {
+                'original_txn_id': txn_id,
+                'reversal_txn_id': str(original['reversed_by']),
+                'amount_fen': amount_fen,
+                'amount_yuan': fen_to_yuan_str(amount_fen),
+                'idempotent': True,
+                'summary': f'这笔 {fen_to_yuan_str(amount_fen)} 元已经冲正过了，没有重复入账。',
+            }
+        )
+    age_ms = now_ms() - int(original['ts_ms'])
+    if age_ms > REVERSAL_WINDOW_MS:
+        days = REVERSAL_WINDOW_MS // 86_400_000
+        return fail_result('TXN_TOO_OLD', f'超过 {days} 天的交易不能自助冲正，需要到柜面办理。')
+    action = build_action(
+        'reverse_transfer',
+        {'txn_id': txn_id, 'reason': reason, 'amount_fen': amount_fen},
+        str(account['id']),
+        amount_fen,
+    )
+    try:
+        outcome = funds.refund(
+            ctx.conn,
+            action,
+            original_txn_id=txn_id,
+            reason=reason,
+            session_id=ctx.session_key(),
+            token=token,
+            secret=ctx.secret,
+        )
+    except ValidationError as exc:
+        # ValidationError 的第一参数是中文人话，具体原因在 fields['reason'] 里，
+        # 所以错误码优先取 reason，取不到才回落到基类的 VALIDATION。
+        return fail_result(str(exc.fields.get('reason') or exc.code), exc.user_text)
+    return ok_result(
+        {
+            'original_txn_id': txn_id,
+            'reversal_txn_id': outcome['reversal_txn_id'],
+            'amount_fen': amount_fen,
+            'amount_yuan': fen_to_yuan_str(amount_fen),
+            'balance_after_fen': int(outcome['balance_after_fen']),
+            'idempotent': bool(outcome['idempotent']),
+            'summary': f'已经把 {fen_to_yuan_str(amount_fen)} 元退回你的账户。',
+        }
+    )
 
 
 def _commit_existing(

@@ -15,7 +15,7 @@ from app.clock import ValidationError
 
 # docs/04 4.4：前缀白名单，避免日志里出现看不懂的 id
 ID_PREFIXES: Final[frozenset[str]] = frozenset(
-    {"u", "a", "c", "p", "t", "h", "s", "r", "n", "cf", "dn", "au"}
+    {"u", "a", "c", "p", "t", "h", "s", "sch", "r", "n", "cf", "dn", "au"}
 )
 
 ID_HEX_LEN: Final[int] = 8
