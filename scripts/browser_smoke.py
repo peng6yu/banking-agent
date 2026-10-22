@@ -10,6 +10,7 @@
     python3.12 scripts/browser_smoke.py --base-url http://127.0.0.1:8123
     python3.12 scripts/browser_smoke.py --probe-only   # 只打印环境探测结果
     python3.12 scripts/browser_smoke.py --reuse        # 复用已在跑的服务（会改它自己的库）
+    python3.12 scripts/browser_smoke.py --headed       # 开有头浏览器，答辩前看一遍现场
 
 沙箱：脚本先把 app/ web/ scripts/ 复制到 tmp/browser_smoke_sandbox/ 再起后端，
 后端的根目录落在沙箱里，data/bank.db 于是也落在沙箱里 —— 答辩现场那份演示库
@@ -26,6 +27,7 @@ import json
 import os
 import secrets
 import shutil
+import sqlite3
 import subprocess
 import sys
 import time
@@ -147,6 +149,36 @@ def sha256_file(path: Path) -> str | None:
     return digest.hexdigest()
 
 
+def demo_db_snapshot(path: Path) -> dict[str, Any] | None:
+    """演示库的「逻辑状态」快照：账户余额、流水条数、有没有本次那笔给妈妈的转账。
+
+    比文件 sha256 可靠：同一台机器上还有别的进程（队友的 live_check、probe 脚本）
+    会读写同一个 data/bank.db，字节指纹会因为 WAL checkpoint 之类的原因变化，
+    但「演示库里有没有这笔转账」是明确的因果证据。读不到就返回 None。
+    """
+    if not path.exists():
+        return None
+    for uri in (f"file:{path}?mode=ro", f"file:{path}?mode=ro&immutable=1"):
+        try:
+            conn = sqlite3.connect(uri, uri=True)
+            try:
+                balance = conn.execute(
+                    "SELECT COALESCE(SUM(balance_fen), 0) FROM accounts"
+                ).fetchone()[0]
+                count = conn.execute("SELECT COUNT(*) FROM transactions").fetchone()[0]
+                moved = conn.execute(
+                    "SELECT COUNT(*) FROM transactions "
+                    "WHERE direction = 'out' AND amount_fen = 10000 "
+                    "AND counterparty LIKE '%妈妈%'"
+                ).fetchone()[0]
+            finally:
+                conn.close()
+            return {"balance_fen": balance, "txn_count": count, "mom_transfers": moved}
+        except sqlite3.Error:
+            continue
+    return None
+
+
 def secret_from_env_file() -> str:
     """从仓库根的 .env 里只取 CAPABILITY_SECRET 一个键，不把整个文件复制走。"""
     env_path = ROOT / ".env"
@@ -199,17 +231,31 @@ def seed_sandbox(dest: Path) -> None:
     print("[沙箱] 种子已播（储蓄卡末条流水余额 12,860.50 元，与 docs/03 校验表一致）")
 
 
-def ensure_backend(base_url: str, sandbox: Path, reuse: bool) -> subprocess.Popen[str] | None:
-    """后端没起就自己起一个（MOCK_MODE=script，不碰外网）。"""
+def free_port() -> int:
+    """找一个当前没人占用的本机端口。"""
+    import socket
+
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.bind(("127.0.0.1", 0))
+        return int(sock.getsockname()[1])
+
+
+def ensure_backend(base_url: str, sandbox: Path, reuse: bool) -> tuple[subprocess.Popen[str] | None, str]:
+    """后端没起就自己起一个（MOCK_MODE=script，不碰外网）。
+
+    返回 (进程, 实际用的 base_url)。端口被别的服务占着时不失败，而是换一个端口
+    起自己的沙箱后端 —— 同一台机器上队友的联调脚本也占端口，冒烟不该因此挂掉。
+    """
     if wait_health(base_url, 2):
-        if not reuse:
-            raise SystemExit(
-                f"[后端] {base_url} 上已经有服务在跑。加 --reuse 表示复用它"
-                "（注意：确认场景会在它自己的库里真转 100 元），"
-                "或者用 --base-url 换一个端口。"
-            )
-        print(f"[后端] 复用已在跑的服务：{base_url}")
-        return None
+        if reuse:
+            print(f"[后端] 复用已在跑的服务：{base_url}")
+            return None, base_url
+        port = free_port()
+        base_url = f"http://127.0.0.1:{port}"
+        print(
+            f"[后端] {base_url} 之前那个端口上已经有别的服务在跑"
+            "（可能是同机联调脚本），改用新端口起自己的沙箱后端"
+        )
     port = base_url.rsplit(":", 1)[-1].rstrip("/")
     env = sandbox_env(sandbox)
     log_path = ROOT / "tmp" / "browser_smoke_backend.log"
@@ -224,7 +270,7 @@ def ensure_backend(base_url: str, sandbox: Path, reuse: bool) -> subprocess.Pope
     if not wait_health(base_url, 25):
         proc.terminate()
         raise SystemExit(f"[后端] 25 秒内没起来，看 {log_path}")
-    return proc
+    return proc, base_url
 
 
 def shot(page: Any, path: Path, full_page: bool = True) -> Path:
@@ -363,19 +409,20 @@ def run(args: argparse.Namespace) -> int:
         return 2
 
     demo_db_before = sha256_file(DEMO_DB)
+    demo_snap_before = demo_db_snapshot(DEMO_DB)
     sandbox = build_sandbox(SANDBOX_DIR)
     seed_sandbox(sandbox)
-    proc = ensure_backend(args.base_url, sandbox, args.reuse)
+    proc, base_url = ensure_backend(args.base_url, sandbox, args.reuse)
     failures: list[str] = []
     try:
         from playwright.sync_api import sync_playwright  # noqa: PLC0415
 
         with sync_playwright() as pw:
-            browser = pw.chromium.launch()
+            browser = pw.chromium.launch(headless=not args.headed)
             context = browser.new_context(viewport={"width": 1440, "height": 960}, locale="zh-CN")
             context.add_init_script(PROBE_JS)
             page = context.new_page()
-            page.base_url = args.base_url  # type: ignore[attr-defined]
+            page.base_url = base_url  # type: ignore[attr-defined]
             errors: list[str] = []
             page.on("pageerror", lambda exc: errors.append(f"pageerror: {exc}"))
             shots = Path(args.shot_dir)
@@ -396,15 +443,44 @@ def run(args: argparse.Namespace) -> int:
         # 顺带把控制台错误也抓出来（放最后，避免影响主断言顺序）
         if errors:
             failures.append(f"页面 JS 异常：{errors}")
-        # 不变量：这次冒烟不该碰答辩现场那份演示库（沙箱隔离的反证）
+        # 不变量：这次冒烟的钱不该落在答辩现场那份演示库里（沙箱隔离的反证）。
+        # 判据是逻辑的（演示库里有没有这笔给妈妈的转账），不是字节指纹 ——
+        # 同机上别的进程（联调脚本、probe）也会碰这个库，字节指纹会因为 WAL
+        # checkpoint 变化，那不能拿来判定是不是这次冒烟干的。
         if proc is not None:
             demo_db_after = sha256_file(DEMO_DB)
-            if demo_db_before != demo_db_after:
+            demo_snap_after = demo_db_snapshot(DEMO_DB)
+            if demo_snap_before is None or demo_snap_after is None:
                 failures.append(
-                    f"演示库 data/bank.db 被这次冒烟改动了（{demo_db_before} -> {demo_db_after}）"
+                    "读不到演示库 data/bank.db 的逻辑状态，无法证明冒烟没污染它"
                 )
             else:
-                print(f"[不变量] 演示库 data/bank.db sha256 未变：{demo_db_after}")
+                if demo_snap_after["mom_transfers"] > demo_snap_before["mom_transfers"]:
+                    failures.append(
+                        "演示库 data/bank.db 里出现了本次那笔「转 100 元给妈妈」"
+                        f"（{demo_snap_before['mom_transfers']} -> {demo_snap_after['mom_transfers']} 笔）"
+                        " —— 冒烟的钱落到了答辩现场那份库上"
+                    )
+                elif demo_snap_after["balance_fen"] != demo_snap_before["balance_fen"]:
+                    failures.append(
+                        "演示库账户余额被这次冒烟改了"
+                        f"（{demo_snap_before['balance_fen']} -> {demo_snap_after['balance_fen']} 分）"
+                    )
+                else:
+                    print(
+                        "[不变量] 演示库 data/bank.db 余额 "
+                        f"{demo_snap_after['balance_fen']} 分未变，"
+                        f"给妈妈的转账 {demo_snap_after['mom_transfers']} 笔（冒烟的钱没落进去）"
+                    )
+                if demo_db_before != demo_db_after:
+                    print(
+                        "[不变量·说明] 演示库字节指纹变了"
+                        f"（{(demo_db_before or '?')[:12]} -> {(demo_db_after or '?')[:12]}），"
+                        "但上面那笔转账不在演示库里 —— 同机上还有别的进程在写这个库，"
+                        "不是这次冒烟干的"
+                    )
+                else:
+                    print(f"[不变量] 演示库 data/bank.db sha256 未变：{demo_db_after}")
         else:
             print("[不变量] 复用了外部服务，演示库改不改由那个服务决定，本脚本不检查")
     finally:
@@ -433,6 +509,10 @@ def main() -> int:
     parser.add_argument(
         "--reuse", action="store_true",
         help="复用 --base-url 上已在跑的服务（放弃沙箱隔离，确认场景会改它自己的库）",
+    )
+    parser.add_argument(
+        "--headed", action="store_true",
+        help="开有头浏览器（默认无头；答辩前用有头再跑一次更接近现场）",
     )
     return run(parser.parse_args())
 
