@@ -10,7 +10,7 @@
 
 ```bash
 cd banking-agent
-python3.12 -m scripts.seed                      # 建库 + 种子数据（幂等，重复跑不会重复插）
+python3.12 -m scripts.seed                      # 建库 + 种子数据（幂等，重复跑不会重复插；演示玩过之后余额变了，用 --force 删库重建恢复初始态）
 export CAPABILITY_SECRET=$(python3.12 -c "import secrets;print(secrets.token_hex(32))")   # 能力令牌签名密钥，必填，见「已知限制 1」
 python3.12 -m uvicorn app.main:app --port 8000  # 起服务
 ```
@@ -36,9 +36,9 @@ python3.12 -m uvicorn app.main:app --port 8000  # 起服务
 | 0. 装依赖 | `python3.12 -m pip install fastapi uvicorn pydantic httpx pyyaml` | 换机器时才需要；本机已装 |
 | 1. 配密钥 | `bash setup_env.sh` | 从本机已有配置抽 `.env`（权限 600，不入库），并生成能力令牌密钥 |
 | 1b. 补能力密钥 | `export CAPABILITY_SECRET=$(python3.12 -c "import secrets;print(secrets.token_hex(32))")` | **必须**，否则黄灯/红灯全部 fail closed |
-| 2. 建库 | `python3.12 -m scripts.seed` | 幂等；末行 `seed.ok random_seed=20261018 tables=15 window_days=180` |
+| 2. 建库 | `python3.12 -m scripts.seed` | 幂等；末行 `seed.ok random_seed=20261018 tables=17 window_days=180`。**演示跑过转账后余额已变，自检会报 `seed.stale` 并失败——这是设计，用 `python3.12 -m scripts.seed --force` 删库重建即可恢复初始态** |
 | 3. 起服务 | `python3.12 -m uvicorn app.main:app --port 8000` | 打开 <http://127.0.0.1:8000> |
-| 4. 自检 | `curl -s http://127.0.0.1:8000/api/health` | `{"ok":true,"status":"ok","model":"MiniMax-M3.1-Flash-Preview","tools":10,"db":true}` |
+| 4. 自检 | `curl -s http://127.0.0.1:8000/api/health` | `{"ok":true,"status":"ok","model":"MiniMax-M3.1-Flash-Preview","tools":14,"db":true,...}` |
 
 `make run` / `make seed` / `make test` / `make smoke` 是上面几条的快捷方式，行为完全一致。
 

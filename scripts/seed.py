@@ -11,8 +11,10 @@
 
 from __future__ import annotations
 
+import argparse
 import random
 import sqlite3
+from pathlib import Path
 from typing import Any, Final
 
 from app import audit, db
@@ -391,12 +393,38 @@ def verify(conn: sqlite3.Connection) -> bool:
     return all(passed for _, passed in checks)
 
 
-def main() -> int:
+def purge_db() -> int:
+    """删库重建用：连同 -wal/-shm 一起删掉，返回实际删除的文件数。"""
+    removed = 0
+    base = db.DEFAULT_DB_PATH
+    for path in (base, Path(str(base) + "-wal"), Path(str(base) + "-shm")):
+        if path.exists():
+            path.unlink()
+            removed += 1
+    return removed
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(prog="python3.12 -m scripts.seed")
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="删库重建：丢掉现有库（含演示跑出来的流水与余额）后重新播种",
+    )
+    args = parser.parse_args(argv)
+    if args.force:
+        log.info("seed.purge", removed=purge_db(), path=str(db.DEFAULT_DB_PATH))
     conn = db.connect()
     try:
         db.init_db(conn)
-        seed(conn)
+        seeded = seed(conn)
         if not verify(conn):
+            if not seeded:
+                log.error(
+                    "seed.stale",
+                    hint="库里已有数据（多半是演示跑过转账，余额已变）。"
+                         "要恢复初始态请加 --force 重新播种：python3.12 -m scripts.seed --force",
+                )
             raise ValidationError("种子数据自检未通过")
     finally:
         conn.close()

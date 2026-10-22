@@ -203,7 +203,7 @@ git checkout main && git merge --no-ff feat/m3-policy && git push
 |---|---|
 | 跑测试 | python3.12 -m pytest -q tests/ |
 | 起服务 | python3.12 -m uvicorn app.main:app --reload --port 8000 |
-| 种子 | python3.12 -m scripts.seed |
+| 种子 | python3.12 -m scripts.seed（已有数据会跳过；恢复初始态用 --force 删库重建，等价 make reseed） |
 | 红队 | python3.12 -m scripts.redteam |
 | 模型自检 | python3.12 -m app.smoke |
 

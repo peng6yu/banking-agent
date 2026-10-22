@@ -3,13 +3,14 @@
 
 PY ?= python3.12
 
-.PHONY: help install run seed test cov redteam smoke fresh clean reset check-env
+.PHONY: help install run seed reseed test cov redteam smoke fresh clean reset check-env
 
 help:
 	@echo 可用命令：
 	@echo   make check-env 打印解释器版本
 	@echo   make run       启动服务 http://127.0.0.1:8000
-	@echo   make seed      重建数据库与种子数据
+	@echo   make seed      建库与种子数据（已有数据则跳过）
+	@echo   make reseed    删库重建（演示跑过转账、余额变了之后用）
 	@echo   make test      跑 pytest
 	@echo   make redteam   跑 43 条红队用例
 	@echo   make smoke     模型连通性自检
@@ -28,6 +29,9 @@ run:
 seed:
 	$(PY) -m scripts.seed
 
+reseed:
+	$(PY) -m scripts.seed --force
+
 test:
 	$(PY) -m pytest -q tests/
 
@@ -42,7 +46,7 @@ smoke:
 	$(PY) -m app.smoke
 
 fresh: clean seed test
-	@echo ✓ 从零到可演示完成，执行 make run 启动
+	@echo ✓ 从零到可演示完成（fresh 已含 clean，重建的是干净库），执行 make run 启动
 
 reset:
 	@curl -s -X POST http://127.0.0.1:8000/api/demo/reset || echo 服务未启动
