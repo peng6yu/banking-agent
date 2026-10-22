@@ -34,6 +34,12 @@ MINIMAL_PARAMS: dict[str, dict[str, Any]] = {
     "pay_merchant": {"merchant": "cake_shop", "item": "生日蛋糕", "amount_fen": 88_800},
     "buy_fund": {"product_code": "F00003", "amount_fen": 20_000},
     "redeem_fund": {"product_code": "F00002", "amount_fen": 10_000},
+    # 场景四：卡片管理五件套。尾号用的是种子里的实体卡，虚拟卡由用例自己开。
+    "apply_virtual_card": {},
+    "set_card_limit": {"card_tail": "1234", "per_tx_limit_fen": 200_000},
+    "freeze_card": {"card_tail": "1234"},
+    "unfreeze_card": {"card_tail": "1234"},
+    "report_card_loss": {"card_tail": "1234"},
 }
 
 

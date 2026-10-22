@@ -139,7 +139,8 @@ def test_r10_invest_red_has_face_and_otp() -> None:
 
 
 def test_r11_default_deny_is_the_backstop() -> None:
-    decision = decide(Action(tool="apply_virtual_card", params={}, account_id="a_1"))
+    """R11 的活证据是 close_card：在 KNOWN_TOOLS 里但没有任何规则认它。"""
+    decision = decide(Action(tool="close_card", params={}, account_id="a_1"))
     assert (decision.level, decision.rule_id) == ("red", "R11_default_deny")
     assert decision.reason_text == "这个操作我不确定是否安全，先不做"
 

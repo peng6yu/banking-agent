@@ -221,7 +221,7 @@ def test_invest_write_tools_are_not_pending_and_two_pending_proofs_remain() -> N
 
 def test_default_deny_still_has_a_reachable_path() -> None:
     """R11 不是死代码：挂在 PENDING_TOOLS 上的工具会落到它。"""
-    action = Action(tool="apply_virtual_card", params={"card_id": "c_x"}, account_id="a_3d7e60c2")
+    action = Action(tool="close_card", params={"card_tail": "1234"}, account_id="a_3d7e60c2")
     decision = decide(action, PolicyContext())
     assert decision.rule_id == "R11_default_deny"
     assert decision.level == "red"

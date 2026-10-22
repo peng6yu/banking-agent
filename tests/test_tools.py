@@ -42,11 +42,19 @@ DOCS_06_TOOL_NAMES = (
 )
 #: 场景三理财新增的四个工具，追加在基础表之后
 FUND_TOOL_NAMES = ("list_products", "estimate_risk", "buy_fund", "redeem_fund")
+#: 场景四卡片管理新增的五个写工具，再追加在理财之后
+CARD_TOOL_NAMES = (
+    "apply_virtual_card",
+    "set_card_limit",
+    "freeze_card",
+    "unfreeze_card",
+    "report_card_loss",
+)
 
 
 def test_tool_names_match_authoritative_table() -> None:
-    """docs/06 6.1 的权威表：名字与顺序都不能改；理财四件套跟在后面。"""
-    assert TOOL_NAMES == DOCS_06_TOOL_NAMES + FUND_TOOL_NAMES
+    """docs/06 6.1 的权威表：名字与顺序都不能改；理财四件套与卡片五件套依次跟在后面。"""
+    assert TOOL_NAMES == DOCS_06_TOOL_NAMES + FUND_TOOL_NAMES + CARD_TOOL_NAMES
     assert set(TOOL_NAMES) == set(registry.TOOLS)
     assert len(registry.tool_schemas()) == len(TOOL_NAMES)
 
@@ -79,11 +87,25 @@ def test_readonly_and_write_split_matches_policy_rules() -> None:
     from app.policy import rules as policy_rules
 
     policy_write = (
-        policy_rules.SPEND_TOOLS | policy_rules.CONFIRM_ONLY_TOOLS | policy_rules.INVEST_TOOLS
+        policy_rules.SPEND_TOOLS
+        | policy_rules.CONFIRM_ONLY_TOOLS
+        | policy_rules.INVEST_TOOLS
+        | policy_rules.SENSITIVE_TOOLS
     )
-    assert set(registry.WRITE_TOOL_NAMES) == set(policy_write)
+    # 工具层每个写工具都必须被策略层某个写集合认领，否则它就没有规则管。
+    registered_write = set(policy_write) & set(registry.TOOL_NAMES)
+    assert set(registry.WRITE_TOOL_NAMES) == registered_write
+    # 策略层留名但工具层暂无 handler 的敏感工具（R09 会直接拒，走不到执行）：
+    # 这份差额是显式已知的，新增未实现工具要同步改这里，不能悄悄变大。
+    assert set(policy_write) - set(registry.TOOL_NAMES) == {
+        "change_transfer_limit",
+        "unbind_card",
+        "update_contact",
+        "reset_password",
+    }
     assert set(policy_rules.READONLY_TOOLS) == set(registry.READONLY_TOOL_NAMES)
     assert set(registry.READONLY_TOOL_NAMES) - set(policy_rules.READONLY_TOOLS) == set()
+    assert not set(registry.READONLY_TOOL_NAMES) & set(registry.WRITE_TOOL_NAMES)
 
 
 def test_tool_schemas_never_leak_handler() -> None:

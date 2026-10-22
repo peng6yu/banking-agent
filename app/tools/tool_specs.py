@@ -1,9 +1,10 @@
-"""工具权威表：14 个工具的名字、参数模式、处理器与写标记。
+"""工具权威表：19 个工具的名字、参数模式、处理器与写标记。
 
 对应文档：docs/06_工具层与场景实现规格.md 6.1/6.2。
 
-docs/06 6.1 的 10 个基础工具按原顺序在前，场景三新增的四个理财工具追加在后，
-名字是权威表，TOOL_NAMES 会拿去做回归测试；不在表里的工具名就是 ToolNotFound。
+docs/06 6.1 的 10 个基础工具按原顺序在前，场景三新增的四个理财工具、场景四新增的
+五个卡片管理工具依次追加在后。名字是权威表，TOOL_NAMES 会拿去做回归测试；
+不在表里的工具名就是 ToolNotFound。
 """
 
 from __future__ import annotations
@@ -42,6 +43,18 @@ _TAIL: Final[dict[str, Any]] = {
     "minLength": 4,
     "maxLength": 4,
     "description": "卡号后四位；不填就是默认账户",
+}
+_CARD_TAIL: Final[dict[str, Any]] = {
+    "type": "string",
+    "minLength": 4,
+    "maxLength": 4,
+    "description": "要操作的那张卡的卡号后四位。先用 list_cards 查出来，不要猜。",
+}
+_CARD_LIMIT_FEN: Final[dict[str, Any]] = {
+    "type": "integer",
+    "minimum": 1,
+    "maximum": 5_000_000,
+    "description": "单笔限额，单位分（1 元 = 100 分），上限 500 万分即 5 万元",
 }
 
 
@@ -341,6 +354,66 @@ TOOL_SPECS: Final[tuple[ToolSpec, ...]] = (
             "additionalProperties": False,
         },
         handler=invest.redeem_fund,
+        writes=True,
+    ),
+    ToolSpec(
+        name="apply_virtual_card",
+        description="申请一张虚拟卡，立刻可用。默认单笔限额 5000 元，之后可以用 set_card_limit 调整。",
+        params={
+            "type": "object",
+            "properties": {"account_tail": _TAIL},
+            "required": [],
+            "additionalProperties": False,
+        },
+        handler=cards.apply_virtual_card,
+        writes=True,
+    ),
+    ToolSpec(
+        name="set_card_limit",
+        description="调整一张卡的单笔限额。要改的是哪张卡，用卡号后四位指定。",
+        params={
+            "type": "object",
+            "properties": {"card_tail": _CARD_TAIL, "per_tx_limit_fen": _CARD_LIMIT_FEN},
+            "required": ["card_tail", "per_tx_limit_fen"],
+            "additionalProperties": False,
+        },
+        handler=cards.set_card_limit,
+        writes=True,
+    ),
+    ToolSpec(
+        name="freeze_card",
+        description="冻结一张卡，冻结后这张卡不能再用。只影响这一张卡，不影响账户里的其他卡。",
+        params={
+            "type": "object",
+            "properties": {"card_tail": _CARD_TAIL},
+            "required": ["card_tail"],
+            "additionalProperties": False,
+        },
+        handler=cards.freeze_card,
+        writes=True,
+    ),
+    ToolSpec(
+        name="unfreeze_card",
+        description="把冻结的卡恢复正常。已挂失的卡不能用这个方法解挂，必须到柜面办理。",
+        params={
+            "type": "object",
+            "properties": {"card_tail": _CARD_TAIL},
+            "required": ["card_tail"],
+            "additionalProperties": False,
+        },
+        handler=cards.unfreeze_card,
+        writes=True,
+    ),
+    ToolSpec(
+        name="report_card_loss",
+        description="挂失一张卡。挂失后这张卡立刻停用，且不能自助撤销，需要到柜面补办。",
+        params={
+            "type": "object",
+            "properties": {"card_tail": _CARD_TAIL},
+            "required": ["card_tail"],
+            "additionalProperties": False,
+        },
+        handler=cards.report_card_loss,
         writes=True,
     ),
 )

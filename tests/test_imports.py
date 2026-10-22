@@ -235,6 +235,9 @@ ALLOWED: dict[str, frozenset[str]] = {
         "app.tools.queries",
     }),
     "app.tools.cards": frozenset({
+        "app.audit",
+        "app.db",
+        "app.ids",
         "app.models",
         "app.money",
         "app.tools.base",

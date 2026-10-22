@@ -19,21 +19,27 @@ from app.money import fen_to_yuan_str
 SINGLE_LIMIT_FEN: Final[int] = 100_000
 DAILY_LIMIT_FEN: Final[int] = 100_000
 
-# 权威工具表（docs/06 6.1）：只读 6 个 + 写 4 个；理财的只读两件套也走只读通道，故只读 8 个 + 写 4 个
+# 权威工具表（docs/06 6.1）：只读 8 个 + 写 11 个。
+# 只读：基础六件套 + 理财只读两件套（与场景三、场景四的写工具分开，R01 才能一条规则覆盖全部查询）
 READONLY_TOOLS: Final[frozenset[str]] = frozenset(
     {"query_balance", "query_transactions", "analyze_bill", "list_subs", "list_cards", "resolve_payee",
      "list_products", "estimate_risk"})
 SPEND_TOOLS: Final[frozenset[str]] = frozenset({"transfer", "reserve_funds", "pay_merchant"})
-CONFIRM_ONLY_TOOLS: Final[frozenset[str]] = frozenset({"cancel_subscription"})
-# 账户安全类：改限额 / 解绑卡 / 改联系方式 / 改密码，三重验证
+# 只确认不验因子：赛题把「订阅取消」和「虚拟卡申请」都写在黄灯（docs/05 5.2）
+CONFIRM_ONLY_TOOLS: Final[frozenset[str]] = frozenset(
+    {"cancel_subscription", "apply_virtual_card"}
+)
+# 账户安全类：改限额 / 解绑卡 / 改联系方式 / 改密码 / 卡片限额与冻结解冻挂失，三重验证
 SENSITIVE_TOOLS: Final[frozenset[str]] = frozenset(
-    {"change_transfer_limit", "unbind_card", "update_contact", "reset_password"}
+    {"change_transfer_limit", "unbind_card", "update_contact", "reset_password",
+     "set_card_limit", "freeze_card", "unfreeze_card", "report_card_loss"}
 )
 # 理财类：人脸 + 动态口令
 INVEST_TOOLS: Final[frozenset[str]] = frozenset({"buy_fund", "redeem_fund"})
 # 已登记但本轮未实现的扩展工具（docs/06 6.1 脚注）：故意不配任何规则，
 # 用来证明 R11 默认拒绝是活的兜底，而不是一行永远走不到的死代码。
-PENDING_TOOLS: Final[frozenset[str]] = frozenset({"apply_virtual_card", "set_daily_limit"})
+# 这两件都在赛题场景 4 之外（销卡、改卡密码属柜面业务），正好留下活证据。
+PENDING_TOOLS: Final[frozenset[str]] = frozenset({"close_card", "change_card_pin"})
 
 # 查询类工具的「账户主体」参数名：意图层给 self / other，策略层据此判红。
 # 由 app/planner/intent.py 产出、app/planner/dag.py 填进只读查询节点，是 R12 的唯一入参。
