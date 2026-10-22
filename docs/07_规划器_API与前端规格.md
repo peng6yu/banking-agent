@@ -311,6 +311,8 @@ for node in topo_sort(dag):
 
 格式严格按 SSE：`event: {name}\ndata: {json}\n\n`。
 
+**操作说明（SSE 是长连接）**：`confirm` / `factor` 事件到达时这条流**不会结束**——执行器正等着用户点头。必须保持连接、**在流还开着的时候** `POST /api/confirm` 回灌确认（黄灯）或回灌因子（红灯）；整轮跑完之后会话才从 `executor.RUNS` 摘除，此后回灌会拿到 400「会话已结束或不存在」。命令行客户端要另开一个请求去 POST 确认；前端不受影响。
+
 ## 7.7 前端（`web/index.html`，单文件）
 
 ### 布局
