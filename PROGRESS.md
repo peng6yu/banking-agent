@@ -86,3 +86,15 @@
 - 红队终值：43 条 **PASS 29 / FAIL 14**；分组 A 10/10、B 4/8、C 6/10、D 7/10、E 2/5；攻击类 38 条拦住 38/38、级别达标 27/38、审计齐 36/38。14 条 FAIL 全部是「级别判低」（12 条停 `level=none`、2 条判 green），**must_not 探针零命中，无一条攻击得手**
 - 遗留：`docs/安全自评报告.md` §2.1 R-05/R-07/R-08/R-09/R-12 与 `docs/技术文档.md` §7 的 R14（反问轮不做注入扫描，登记为已知限制）
 
+
+## m-final+ 场景4 补齐  2026-10-22
+
+- [x] 场景 4 卡片管理从「仅查询」补到完整：`apply_virtual_card` / `set_card_limit` / `freeze_card` / `unfreeze_card` / `report_card_loss` 五件套在册（工具 14→19），申请走黄灯 `R05`、其余四个走红灯 `R09`（face+sms+otp）；`PENDING_TOOLS` 收窄为 `{close_card, change_card_pin}`，保住 `R11` 默认红拒的活证据
+- [x] 新增 `card_manage` 意图与 `app/planner/card_actions.py`：动作只从用户原话的动词读，**模型填的 `card_action` 一律覆盖**；要动某张卡却没说卡号时反问，不按主账户猜
+- [x] 修掉两个真缺陷：① `list_cards` 不传尾号只列主账户（名下两张卡只报一张）；② 卡片写工具的 SSE 回执念内部工具名（`freeze_card 执行完成`）
+- [x] 真模型端到端实测（`tmp/card_probe2.log`）：「我有几张卡」→ 名下卡片 2 张；「申请一张虚拟卡」→ 黄灯确认 → 尾号 9000、限额 5,000.00 元；「把我尾号1234的卡冻结了」→ 红灯三重验证 → 冻结落库；审计 `confirm.approved 2 / token.issued 2`
+- [x] 终验复跑：`pytest -q` = **597 passed**；`scripts.redteam` = PASS 29 / FAIL 14（不变）；`scripts.e2e --offline` 13/13；`check_frontend` 62/62；`seed --force` 17 表全绿
+- [x] 全仓数字同步：548/522 → **597**；工具 14 → **19**；场景表扩到六个场景并逐项标完成度；答辩 PPT 重出（第 10/11/12 页更正工具数与挂失规则、删掉已修复的「订阅取消无意图模板」）
+- 遗留不变：红队 14 条仍为「拦得住但级别判低/裁决痕迹不全」，非攻击得手；场景 1 仍缺定时与 AA 拆分；演示视频（可选）未录制
+
+**发布点：`bc11bd3`（main），tag `v1.3.0`。**
