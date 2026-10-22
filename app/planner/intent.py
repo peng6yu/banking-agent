@@ -182,8 +182,13 @@ async def parse(
     history: list[dict[str, Any]] | None = None,
     *,
     adapter: ChatAdapter | None = None,
+    session_id: str | None = None,
 ) -> IntentResult:
-    """解析一句话；返回结果里带 question 就表示这一轮只能反问。"""
+    """解析一句话；返回结果里带 question 就表示这一轮只能反问。
+
+    session_id 是这一轮会话的身份：原话命中注入时要压一根「属于这个会话」的棒，
+    执行层取棒时按会话认领，宁可漏升色也不跨会话串味（app/security/injection.py）。
+    """
     client = adapter if adapter is not None else _default_adapter()
     messages = build_messages(text, history)
     args = _first_call_args(client, messages)
@@ -202,7 +207,7 @@ async def parse(
             retried=True,
             source="fallback",
         )
-    return _from_args(args, text, retried=retried)
+    return _from_args(args, text, retried=retried, session_id=session_id)
 
 
 def _default_adapter() -> ChatAdapter:
@@ -217,7 +222,13 @@ def _first_call_args(client: ChatAdapter, messages: list[dict[str, Any]]) -> dic
     return dict(call.args()) if call is not None else None
 
 
-def _from_args(args: dict[str, Any], text: str, *, retried: bool) -> IntentResult:
+def _from_args(
+    args: dict[str, Any],
+    text: str,
+    *,
+    retried: bool,
+    session_id: str | None = None,
+) -> IntentResult:
     """模型给了工具调用：取槽位、补金额口语化、算 missing，按分支表决定要不要反问。"""
     intent = str(args.get("intent") or "unknown").strip() or "unknown"
     slots = _slots(args, text, intent)
@@ -238,19 +249,25 @@ def _from_args(args: dict[str, Any], text: str, *, retried: bool) -> IntentResul
         result.ok = False
         return result
     result = _apply_branches(result)
-    return _mark_injection(result, text)
+    return _mark_injection(result, text, session_id=session_id)
 
 
-def _mark_injection(result: IntentResult, text: str) -> IntentResult:
+def _mark_injection(
+    result: IntentResult,
+    text: str,
+    *,
+    session_id: str | None = None,
+) -> IntentResult:
     """对用户原话本身做一次注入扫描，并把命中压一根棒给执行层。
 
     工具参数里扫不到的那部分载荷全在这里（IM 转发整段、开头那句「忽略以上所有指令」）。
     命中不改 question、不改槽位、不改任何用户可见的回复内容——扫描结果只用于裁决
     （执行层取棒后并进 untrusted_fields，R04 再升红）。反问轮（ok=False）不压棒。
+    session_id 标上这根棒属于哪个会话：执行层只认领自己会话的棒，跨会话不串味。
     """
     if not result.ok:
         return result
-    taint = injection.mark_turn(text)
+    taint = injection.mark_turn(text, session_id=session_id)
     if taint is None:
         return result
     result.untrusted_fields = list(taint.fields)

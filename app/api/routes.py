@@ -256,7 +256,7 @@ async def index() -> Any:
 async def _parse(session_id: str, text: str) -> intent.IntentResult:
     """解析意图并写审计；模型不可用时把 LLMError 原样抛给处理器。"""
     try:
-        parsed = await asyncio.to_thread(_parse_sync, text, _turns(session_id))
+        parsed = await asyncio.to_thread(_parse_sync, text, _turns(session_id), session_id=session_id)
     except LLMError:
         _audit_failure(session_id, text, "MODEL_UNAVAILABLE")
         raise
@@ -264,9 +264,18 @@ async def _parse(session_id: str, text: str) -> intent.IntentResult:
     return parsed
 
 
-def _parse_sync(text: str, history: list[dict[str, str]]) -> intent.IntentResult:
-    """在线程里跑一次同步阻塞的模型调用，别把事件循环堵住。"""
-    return asyncio.run(intent.parse(text, history, adapter=get_adapter()))
+def _parse_sync(
+    text: str,
+    history: list[dict[str, str]],
+    *,
+    session_id: str | None = None,
+) -> intent.IntentResult:
+    """在线程里跑一次同步阻塞的模型调用，别把事件循环堵住。
+
+    session_id 一路带到底：原话命中注入时要压一根「属于这个会话」的棒，
+    执行层取棒时按会话认领——接力棒不许跨会话串味（app/security/injection.py）。
+    """
+    return asyncio.run(intent.parse(text, history, adapter=get_adapter(), session_id=session_id))
 
 
 async def _events(session_id: str, parsed: intent.IntentResult) -> Any:
