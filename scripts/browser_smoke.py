@@ -6,9 +6,14 @@
 
 用法：
     export PATH=$PATH:/home/peng/.local/bin
-    python3.12 scripts/browser_smoke.py                # 自动起后端 + 跑两条场景
+    python3.12 scripts/browser_smoke.py                # 自动起沙箱后端 + 跑两条场景
     python3.12 scripts/browser_smoke.py --base-url http://127.0.0.1:8123
     python3.12 scripts/browser_smoke.py --probe-only   # 只打印环境探测结果
+    python3.12 scripts/browser_smoke.py --reuse        # 复用已在跑的服务（会改它自己的库）
+
+沙箱：脚本先把 app/ web/ scripts/ 复制到 tmp/browser_smoke_sandbox/ 再起后端，
+后端的根目录落在沙箱里，data/bank.db 于是也落在沙箱里 —— 答辩现场那份演示库
+data/bank.db 一个字节都不会被这次冒烟碰到，跑完还用 sha256 反证这一点。
 
 退出码 0 = 全过；1 = 有断言失败；2 = 环境/后端不可用。
 """
@@ -16,8 +21,10 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
+import secrets
 import shutil
 import subprocess
 import sys
@@ -31,6 +38,9 @@ ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_URL = "http://127.0.0.1:8123"
 DEFAULT_SHOT_DIR = ROOT / "docs" / "交付" / "截图"
 CHAT_TEXT = "查一下我储蓄卡尾号1234的余额"
+DEMO_DB = ROOT / "data" / "bank.db"          # 答辩现场那份演示库，冒烟不能碰它
+SANDBOX_DIR = ROOT / "tmp" / "browser_smoke_sandbox"
+SEED_MODULES = ("__init__.py", "seed.py", "fund_seeds.py")
 
 # 页面里注入的探针：只观察，不改产品行为。
 # 1) 包住 fetch('/api/chat') 的响应流，记录每个 chunk 的到达时刻与解码后的文本；
@@ -126,22 +136,91 @@ def wait_health(base_url: str, timeout: float) -> bool:
     return False
 
 
-def ensure_backend(base_url: str) -> subprocess.Popen[str] | None:
+def sha256_file(path: Path) -> str | None:
+    """文件指纹；文件不存在返回 None。"""
+    if not path.exists():
+        return None
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1 << 20), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def secret_from_env_file() -> str:
+    """从仓库根的 .env 里只取 CAPABILITY_SECRET 一个键，不把整个文件复制走。"""
+    env_path = ROOT / ".env"
+    if not env_path.exists():
+        return ""
+    for raw in env_path.read_text(encoding="utf-8").splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, val = line.split("=", 1)
+        if key.strip() == "CAPABILITY_SECRET":
+            return val.strip().strip('"').strip("'")
+    return ""
+
+
+def sandbox_env(sandbox: Path) -> dict[str, str]:
+    """沙箱后端的进程环境：离线脚本桩 + 沙箱自己的 PYTHONPATH + 一把可用密钥。"""
+    env = dict(os.environ)
+    secret = os.environ.get("CAPABILITY_SECRET") or secret_from_env_file() or secrets.token_hex(32)
+    env.update({"MOCK_MODE": "script", "PYTHONPATH": str(sandbox), "CAPABILITY_SECRET": secret})
+    return env
+
+
+def build_sandbox(dest: Path) -> Path:
+    """把 app/ web/ scripts/ 复制到沙箱。
+
+    app/db.py 的 DEFAULT_DB_PATH 是「按模块位置算出来的仓库根 / data / bank.db」，
+    所以只要把 app/ 复制到别的目录，后端看到的库就在沙箱里 —— 演示库不会被这次冒烟碰到。
+    """
+    if dest.exists():
+        shutil.rmtree(dest)
+    dest.mkdir(parents=True)
+    shutil.copytree(ROOT / "app", dest / "app", ignore=shutil.ignore_patterns("__pycache__"))
+    shutil.copytree(ROOT / "web", dest / "web", ignore=shutil.ignore_patterns("__pycache__"))
+    (dest / "scripts").mkdir()
+    for name in SEED_MODULES:
+        shutil.copy2(ROOT / "scripts" / name, dest / "scripts" / name)
+    (dest / "data").mkdir()
+    return dest
+
+
+def seed_sandbox(dest: Path) -> None:
+    """在沙箱里播一遍种子：确定性（RANDOM_SEED=20261018），余额回到 12,860.50 元。"""
+    proc = subprocess.run(
+        [sys.executable, "-m", "scripts.seed"],
+        cwd=dest, env=sandbox_env(dest), capture_output=True, text=True,
+    )
+    if proc.returncode != 0:
+        raise SystemExit(f"[沙箱] 播种失败：{proc.stdout[-400:]} / {proc.stderr[-400:]}")
+    print("[沙箱] 种子已播（储蓄卡末条流水余额 12,860.50 元，与 docs/03 校验表一致）")
+
+
+def ensure_backend(base_url: str, sandbox: Path, reuse: bool) -> subprocess.Popen[str] | None:
     """后端没起就自己起一个（MOCK_MODE=script，不碰外网）。"""
     if wait_health(base_url, 2):
-        print(f"[后端] 已在运行：{base_url}")
+        if not reuse:
+            raise SystemExit(
+                f"[后端] {base_url} 上已经有服务在跑。加 --reuse 表示复用它"
+                "（注意：确认场景会在它自己的库里真转 100 元），"
+                "或者用 --base-url 换一个端口。"
+            )
+        print(f"[后端] 复用已在跑的服务：{base_url}")
         return None
     port = base_url.rsplit(":", 1)[-1].rstrip("/")
-    env = dict(os.environ)
-    env.update({"MOCK_MODE": "script", "PYTHONPATH": str(ROOT)})
+    env = sandbox_env(sandbox)
     log_path = ROOT / "tmp" / "browser_smoke_backend.log"
     log_path.parent.mkdir(parents=True, exist_ok=True)
     log = log_path.open("w", encoding="utf-8")
     proc = subprocess.Popen(
         [sys.executable, "-m", "uvicorn", "app.main:app", "--port", port, "--log-level", "warning"],
-        cwd=ROOT, env=env, stdout=log, stderr=subprocess.STDOUT, text=True,
+        cwd=sandbox, env=env, stdout=log, stderr=subprocess.STDOUT, text=True,
     )
-    print(f"[后端] 自行拉起 MOCK_MODE=script uvicorn pid={proc.pid} -> {base_url}（日志 tmp/browser_smoke_backend.log）")
+    print(f"[后端] 自行拉起 MOCK_MODE=script uvicorn pid={proc.pid} -> {base_url}"
+          f"（沙箱 {sandbox.relative_to(ROOT)}，日志 tmp/browser_smoke_backend.log）")
     if not wait_health(base_url, 25):
         proc.terminate()
         raise SystemExit(f"[后端] 25 秒内没起来，看 {log_path}")
@@ -283,7 +362,10 @@ def run(args: argparse.Namespace) -> int:
         print("[探测] 没有可用的浏览器自动化（ego-browser 未安装、playwright 导入失败）", file=sys.stderr)
         return 2
 
-    proc = ensure_backend(args.base_url)
+    demo_db_before = sha256_file(DEMO_DB)
+    sandbox = build_sandbox(SANDBOX_DIR)
+    seed_sandbox(sandbox)
+    proc = ensure_backend(args.base_url, sandbox, args.reuse)
     failures: list[str] = []
     try:
         from playwright.sync_api import sync_playwright  # noqa: PLC0415
@@ -314,6 +396,17 @@ def run(args: argparse.Namespace) -> int:
         # 顺带把控制台错误也抓出来（放最后，避免影响主断言顺序）
         if errors:
             failures.append(f"页面 JS 异常：{errors}")
+        # 不变量：这次冒烟不该碰答辩现场那份演示库（沙箱隔离的反证）
+        if proc is not None:
+            demo_db_after = sha256_file(DEMO_DB)
+            if demo_db_before != demo_db_after:
+                failures.append(
+                    f"演示库 data/bank.db 被这次冒烟改动了（{demo_db_before} -> {demo_db_after}）"
+                )
+            else:
+                print(f"[不变量] 演示库 data/bank.db sha256 未变：{demo_db_after}")
+        else:
+            print("[不变量] 复用了外部服务，演示库改不改由那个服务决定，本脚本不检查")
     finally:
         if proc is not None:
             proc.terminate()
@@ -337,6 +430,10 @@ def main() -> int:
     parser.add_argument("--base-url", default=os.environ.get("SMOKE_BASE_URL", DEFAULT_URL))
     parser.add_argument("--shot-dir", default=str(DEFAULT_SHOT_DIR))
     parser.add_argument("--probe-only", action="store_true", help="只打印浏览器自动化探测结果")
+    parser.add_argument(
+        "--reuse", action="store_true",
+        help="复用 --base-url 上已在跑的服务（放弃沙箱隔离，确认场景会改它自己的库）",
+    )
     return run(parser.parse_args())
 
 
