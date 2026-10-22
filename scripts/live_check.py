@@ -58,6 +58,20 @@ from scripts.seed import seed as seed_db  # noqa: E402
 
 TMP = ROOT / "tmp"
 CONFIRM_TIMEOUT_MS = 30_000
+
+#: 本次进程里凡是走到 db.connect() 的库路径都记下来（证明没碰业务库）。
+#: app 内部统一写 `db.connect()`（grep 确认无 `from app.db import connect`），
+#: 所以在这里替换模块属性即可覆盖全部调用点。
+DB_OPENS: list[str] = []
+_ORIGINAL_CONNECT = db.connect
+
+
+def _tracked_connect(path: Any = None) -> Any:
+    DB_OPENS.append(str(path if path is not None else db.DEFAULT_DB_PATH))
+    return _ORIGINAL_CONNECT(path)
+
+
+db.connect = _tracked_connect  # type: ignore[assignment]
 #: 每个场景一句话；key 同时是临时库文件名的一部分（tmp/live_<key>.db）。
 SCENARIOS: tuple[tuple[str, str, str], ...] = (
     ("balance", "查余额", "我工资卡现在还有多少钱？"),
@@ -368,9 +382,14 @@ def main(argv: list[str] | None = None) -> int:
         print(f"         临时库 {result.db_path}（{time.monotonic() - started:.1f}s）")
 
     after_hash = _fingerprint(original_db)
-    untouched = after_hash == before_hash
+    target = str(Path(original_db).resolve())
+    leaked = [path for path in DB_OPENS if str(Path(path).resolve()) == target]
+    untouched = not leaked
     print("")
-    print(f"业务库 data/bank.db：{'未被改动' if untouched else '被改动了！'}（sha256 {after_hash[:12]}…）")
+    print(f"业务库隔离：本次运行打开子库 {len(DB_OPENS)} 次，命中 data/bank.db {len(leaked)} 次"
+          f" → {'未污染' if untouched else '污染了！'}")
+    print(f"（data/bank.db sha256 {before_hash[:12]}… → {after_hash[:12]}…，仅作参考："
+          f"队友并发跑 e2e/redteam 也会写这个文件）")
     print(f"场景 {len(results)} 个：完成 {sum(1 for r in results if r.ok)} / 失败 {sum(1 for r in results if not r.ok)}")
     total_429 = sum(len(r.rate_limits) for r in results)
     print(f"429 退避次数：{total_429}")
@@ -381,7 +400,9 @@ def main(argv: list[str] | None = None) -> int:
             "model": settings.model_brain if args.live else "ScriptAdapter",
             "started_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
             "data_bank_db": {"path": str(original_db), "sha256_before": before_hash,
-                             "sha256_after": after_hash, "untouched": untouched},
+                             "sha256_after": after_hash, "untouched": untouched,
+                             "opens_total": len(DB_OPENS), "opens_hit_business_db": len(leaked),
+                             "opens": DB_OPENS},
             "scenarios": [r.to_dict() for r in results],
         }
         path = Path(args.json_path)
