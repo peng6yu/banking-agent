@@ -350,13 +350,46 @@ def _product_code(slots: dict[str, Any]) -> str:
 
 
 def _bill_params(slots: dict[str, Any]) -> dict[str, Any]:
-    """账单默认看上个自然月，年份按当前时间推。"""
+    """账单默认看上个自然月，年份按当前时间推。
+
+    模型填的月份只作参考：只有 1–12 的整数才算数。非法值（0、13、"9月"、"2026-09"、
+    True）一律忽略并回默认月份 —— 宁可算默认月份，也不按一个来路不明的月份算账：
+    账单差一个月，金额照样像模像样，用户根本看不出来（真模型实测出现过一次，
+    「上个月的账单」被算成了 8 月）。
+
+    被忽略的原始值塞不进工具参数（工具 spec 是 additionalProperties: False），
+    但这一轮按哪个月查账是留痕的，三处对得上：
+    1) intent.parsed 审计行里是模型原话（它说的 month 是几）；
+    2) 生效计划落在 dag_nodes.params_json 里（实际按几月查的）；
+    3) 用户可见摘要带实际统计区间（app/planner/events.py 的 summarize）。
+    """
     year, month = _previous_month(clock.now_ms())
+    effective, _ignored = _bill_month(slots.get("month"), month)
     return {
         "period": str(slots.get("period") or BILL_DEFAULT_PERIOD),
         "year": _positive_int(slots.get("year")) or year,
-        "month": _positive_int(slots.get("month")) or month,
+        "month": effective,
     }
+
+
+#: 账单月份只认 1–12：0 和 13 没人这么说话，模型写出来多半是把卡号当成了月份。
+BILL_MONTH_MIN: Final[int] = 1
+BILL_MONTH_MAX: Final[int] = 12
+
+
+def _bill_month(raw: Any, default: int) -> tuple[int, Any]:
+    """模型给的月份收敛成可用的月份：只认 1–12 的整数。
+
+    返回 (生效月份, 被忽略的原始值)；没被忽略时第二项是 None。
+    bool 是 int 的子类，True 不算月份（Python 会把它当 1）。
+    """
+    if raw is None:
+        return default, None
+    if isinstance(raw, bool) or not isinstance(raw, int):
+        return default, raw
+    if BILL_MONTH_MIN <= raw <= BILL_MONTH_MAX:
+        return raw, None
+    return default, raw
 
 
 def _card_tail(slots: dict[str, Any], ids: dict[str, str]) -> dict[str, Any]:

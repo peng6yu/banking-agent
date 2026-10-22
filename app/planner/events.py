@@ -37,7 +37,7 @@ def summarize(tool: str, data: dict[str, Any]) -> str:
     if tool == "query_transactions":
         return f"共查到 {data.get('count', 0)} 笔交易"
     if tool == "analyze_bill":
-        return f"账单支出合计 {data.get('total_out_yuan', '0.00')} 元"
+        return f"账单支出合计 {data.get('total_out_yuan', '0.00')} 元（{_bill_range_label(data)}）"
     if tool == "list_subs":
         return f"在订订阅 {data.get('count', 0)} 项，每月 {data.get('monthly_total_yuan', '0.00')} 元"
     if tool == "list_cards":
@@ -62,6 +62,26 @@ CARD_WRITE_TOOLS = frozenset({
 def _first_account(data: dict[str, Any]) -> dict[str, Any]:
     accounts = [item for item in (data.get("accounts") or []) if isinstance(item, dict)]
     return accounts[0] if accounts else {}
+
+
+def _bill_range_label(data: dict[str, Any]) -> str:
+    """账单摘要里的统计区间标签：优先用账单结果自带的 range.label。
+
+    标签必须来自工具算出来的区间（app/tools/bill.py 的 _range_label），
+    不在这里另算月份——另算就是「账单差一个月、金额照样像模像样」的来源。
+    """
+    span = data.get("range")
+    if isinstance(span, dict):
+        label = str(span.get("label") or "").strip()
+        if label:
+            return label
+    year = data.get("year")
+    month = data.get("month")
+    if year and month:
+        return f"{year} 年 {month} 月"
+    if month:
+        return f"{month} 月"
+    return "统计区间未知"
 
 
 

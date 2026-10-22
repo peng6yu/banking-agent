@@ -64,7 +64,9 @@ def parse(text: str, history: list) -> IntentResult
                                'sub_name': {'type': 'string',
                                             'description': '订阅名称：用户说「爱奇艺会员」就填「爱奇艺会员」；只在用户明确要取消某条订阅时填，查订阅时不要填'},
                                'period': {'type': 'string', 'enum': ['month', 'year']},
-                               'month': {'type': 'integer'},
+                               'month': {'type': 'integer',
+                                         'description': '只有用户明说具体月份才填 1–12 的整数（如「8 月的账单」填 '
+                                                        '8）；说「上个月」「上月」「这个月」这类相对时间时留空，由系统按当前时间取默认月份，不要自己换算，也不要写「9月」「2026-09」这类写法'},
                                'action': {'type': 'string',
                                           'enum': ['buy', 'redeem', 'query'],
                                           'description': '理财动作：buy=申购、redeem=赎回、query=看在售产品'},
