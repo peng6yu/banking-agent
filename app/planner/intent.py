@@ -69,6 +69,29 @@ MISSING_LABELS: Final[dict[str, str]] = {
     "gift": "打算送什么？",
     "date_hint": "大概什么时候要花这笔钱？",
     "product_code": "要操作哪只基金？",
+    # 下面这些槽位模型偶尔会报缺；一律给中文说法，别把内部槽位名念给用户
+    "merchant": "在哪个商户消费？",
+    "note": "还有别的信息要补充吗？",
+    "period": "要看哪一段时间？",
+    "month": "要看哪个月？",
+    "card_tail": "卡号后四位是多少？",
+    "action": "要申购还是赎回？",
+}
+# 同一个槽位在不同意图下问法不同：生日送礼问「给谁过生日」，转账才问「转给谁」。
+# 键是意图名，值是「槽位 → 问法」的覆盖表；命中覆盖表优先于 MISSING_LABELS。
+INTENT_MISSING_LABELS: Final[dict[str, dict[str, str]]] = {
+    "birthday_plan": {
+        "payee_name": "这份礼物是给谁过生日？",
+    },
+}
+# 意图的中文说法：低置信度要反问确认时，念的是这句话，不是内部枚举名（query_balance）。
+INTENT_LABELS: Final[dict[str, str]] = {
+    "query_balance": "查账户余额",
+    "transfer": "转账或付款",
+    "bill_analysis": "分析账单",
+    "subscription": "查订阅或取消自动扣款",
+    "birthday_plan": "送礼安排（先预留资金再付款）",
+    "invest": "基金申购或赎回",
 }
 NEED_SLOTS: Final[frozenset[str]] = frozenset({"transfer", "birthday_plan"})
 ALL_KEYWORDS: Final[tuple[str, ...]] = ("全部", "全额", "所有钱", "剩下的钱")
@@ -227,7 +250,7 @@ def _apply_branches(result: IntentResult) -> IntentResult:
         # 那样 R12 的红裁决与 confirm.rejected 永远不会落进审计；话术由 R12 的 reason_text 出。
         result.missing = [*result.missing, ACCOUNT_OWNER_SLOT]
     if result.missing and ACCOUNT_OWNER_SLOT not in result.missing:
-        result.question = MISSING_LABELS.get(result.missing[0], f"请补充一下「{result.missing[0]}」。")
+        result.question = _missing_question(result.intent, result.missing[0])
         result.ok = False
         return result
     if result.intent == "unknown":
@@ -235,10 +258,30 @@ def _apply_branches(result: IntentResult) -> IntentResult:
         result.ok = False
         return result
     if result.confidence < CONFIDENCE_FLOOR:
-        result.question = f"我没太确定你是要「{result.intent}」这件事，帮我确认一下？"
+        result.question = _low_confidence_question(result.intent)
         result.ok = False
         return result
     return result
+
+
+def _missing_question(intent: str, slot: str) -> str:
+    """缺槽位时的反问：先看按意图的覆盖表，再退回通用槽位表。
+
+    生日送礼缺收款人问「给谁过生日」，转账缺收款人问「转给谁」——
+    同一个槽位在不同场景下问法不一样，否则用户说的是送礼，系统却问得像在办转账。
+    """
+    override = INTENT_MISSING_LABELS.get(intent)
+    if override and slot in override:
+        return override[slot]
+    return MISSING_LABELS.get(slot, "请补充一下相关的信息。")
+
+
+def _low_confidence_question(intent: str) -> str:
+    """低置信度时的反问：念中文意图说法，不把内部枚举名念给用户。"""
+    label = INTENT_LABELS.get(intent)
+    if not label:
+        return "我没太确定你要办什么事，帮我确认一下？"
+    return f"我没太确定你是要「{label}」这件事，帮我确认一下？"
 
 
 def _slots(args: dict[str, Any], text: str, intent: str) -> dict[str, Any]:
@@ -373,6 +416,8 @@ __all__ = [
     "ACCOUNT_OWNER_SLOT",
     "CONFIDENCE_FLOOR",
     "EMIT_INTENT_NAME",
+    "INTENT_LABELS",
+    "INTENT_MISSING_LABELS",
     "INTENT_NAMES",
     "OTHER_OWNER",
     "SELF_OWNER",
