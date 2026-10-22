@@ -24,15 +24,20 @@ DAILY_LIMIT_FEN: Final[int] = 100_000
 READONLY_TOOLS: Final[frozenset[str]] = frozenset(
     {"query_balance", "query_transactions", "analyze_bill", "list_subs", "list_cards", "resolve_payee",
      "list_products", "estimate_risk", "list_scheduled"})
-# 当场动钱的写工具：金额进 R06/R07/R08 的分档判定。
+# 会动钱的写工具：金额进 R06/R07/R08 的分档判定。
 # split_transfer 用总额判档（AA 四个人各 250，出账仍是 1000，日累计按总额算才对）。
+# schedule_transfer 也在里面：预约的钱到日子才划，但「要排多大一笔」当场就要判——
+# 排一笔 2000 元的预约和当场转 2000 元不能一个走黄灯、一个走人脸+短信（t11 缺陷 B）。
 SPEND_TOOLS: Final[frozenset[str]] = frozenset(
-    {"transfer", "reserve_funds", "pay_merchant", "split_transfer"}
+    {"transfer", "reserve_funds", "pay_merchant", "split_transfer", "schedule_transfer"}
 )
 # 只确认不验因子：赛题把「订阅取消」和「虚拟卡申请」都写在黄灯（docs/05 5.2）
 CONFIRM_ONLY_TOOLS: Final[frozenset[str]] = frozenset(
-    {"cancel_subscription", "apply_virtual_card", "schedule_transfer", "cancel_scheduled"}
+    {"cancel_subscription", "apply_virtual_card", "cancel_scheduled"}
 )
+# 日累计线按「钱真正出账的那一天」判。预约的钱到日子才走，所以创建期只判单笔上限，
+# 日线留到执行那天由 app/tools/scheduled.py 的资金闸门原子地核：撞线就顺延次日（t11）。
+_DAILY_RULE_EXEMPT_TOOLS: Final[frozenset[str]] = frozenset({"schedule_transfer"})
 # 账户安全类：改限额 / 解绑卡 / 改联系方式 / 改密码 / 卡片限额与冻结解冻挂失，三重验证
 SENSITIVE_TOOLS: Final[frozenset[str]] = frozenset(
     {"change_transfer_limit", "unbind_card", "update_contact", "reset_password",
@@ -161,11 +166,18 @@ def _emit_confirm_only(action: Action, ctx: PolicyContext) -> Decision:
 
 
 def _emit_yellow_transfer(action: Action, ctx: PolicyContext) -> Decision:
+    if action.tool == "schedule_transfer":
+        # 预约的钱今天不走，文案要说清是「排期」，别让用户以为当场就转出去了。
+        text = (
+            f"预约一笔向 {_payee_label(action)} 转出 {_yuan(_amount(action))} 的转账，需要你确认"
+        )
+    else:
+        text = f"即将向 {_payee_label(action)} 转出 {_yuan(_amount(action))}，需要你确认"
     return _decision(
         "yellow",
         "R06_transfer_yellow",
         "TRANSFER_YELLOW",
-        f"即将向 {_payee_label(action)} 转出 {_yuan(_amount(action))}，需要你确认",
+        text,
         ctx,
     )
 
@@ -182,10 +194,16 @@ def _emit_red_daily(action: Action, ctx: PolicyContext) -> Decision:
 def _emit_red_single(action: Action, ctx: PolicyContext) -> Decision:
     # 单笔越线同样是可验证的红：face + sms 验过就放行（2026-10-21 起），
     # 文案要说清「验证后继续」，不能还停在「我不能直接做」。
-    text = (
-        f"单笔 {_yuan(_amount(action))} 超过 {_yuan(ctx.single_limit_fen)}上限，"
-        "这笔需要人脸和短信验证后才能继续"
-    )
+    if action.tool == "schedule_transfer":
+        text = (
+            f"预约金额 {_yuan(_amount(action))} 超过 {_yuan(ctx.single_limit_fen)}上限，"
+            "这笔预约需要人脸和短信验证后才能确认"
+        )
+    else:
+        text = (
+            f"单笔 {_yuan(_amount(action))} 超过 {_yuan(ctx.single_limit_fen)}上限，"
+            "这笔需要人脸和短信验证后才能继续"
+        )
     return _decision("red", "R08_transfer_red_single", "TRANSFER_SINGLE_RED", text, ctx, ("face", "sms"))
 
 
@@ -290,7 +308,14 @@ RULES: Final[tuple[Rule, ...]] = (
         "TRANSFER_DAILY_RED",
         # spent_today_fen > 0 是守卫：否则「单笔刚过线」的请求会被误判成日累计超限，
         # 与 docs/05 5.1 边界表里 1000.01 -> R08 的要求冲突
-        lambda action, ctx: _is_spend(action) and ctx.spent_today_fen > 0 and _over_daily(action, ctx),
+        # schedule_transfer 不吃这条：日线归出账那天判（创建期只看今天花了多少，
+        # 那不是这笔钱要走的那个额度），否则「今天花过 900 再排一笔 500」会被误伤成红灯。
+        lambda action, ctx: (
+            _is_spend(action)
+            and action.tool not in _DAILY_RULE_EXEMPT_TOOLS
+            and ctx.spent_today_fen > 0
+            and _over_daily(action, ctx)
+        ),
         _emit_red_daily,
     ),
     _rule(

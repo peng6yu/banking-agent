@@ -39,6 +39,7 @@ EVENT_TYPES: Final[frozenset[str]] = frozenset(
         "scheduled.created",
         "scheduled.cancelled",
         "scheduled.executed",
+        "scheduled.deferred",
         "tool.executed",
         "injection.detected",
         "breaker.open",

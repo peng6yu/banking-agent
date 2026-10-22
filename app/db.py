@@ -255,6 +255,11 @@ CREATE TABLE IF NOT EXISTS scheduled_transfers (
   status          TEXT NOT NULL CHECK (status IN ('scheduled','executed','cancelled','failed')),
   created_ms      INTEGER NOT NULL,
   executed_ms     INTEGER,
+  -- 创建期验过人脸+短信的时刻：0 = 没验过。到点执行凭它放行日累计线，
+  -- 否则「预约一笔大额」会在到点那天被额度线拦死，用户以为产品坏了。
+  factor_verified_ms INTEGER NOT NULL DEFAULT 0,
+  -- 撞了当日额度被顺延的次数：顺延有上限，超过上限就明确失败，不无限期挂着。
+  defer_count        INTEGER NOT NULL DEFAULT 0,
   idempotency_key TEXT NOT NULL UNIQUE
 );
 CREATE INDEX IF NOT EXISTS idx_sched_due ON scheduled_transfers(status, due_ms);
@@ -310,6 +315,8 @@ _ADDED_COLUMNS: Final[tuple[tuple[str, str, str], ...]] = (
     ("payees", "phone", "TEXT"),
     ("transactions", "reversal_of", "TEXT"),
     ("transactions", "reversed_by", "TEXT"),
+    ("scheduled_transfers", "factor_verified_ms", "INTEGER NOT NULL DEFAULT 0"),
+    ("scheduled_transfers", "defer_count", "INTEGER NOT NULL DEFAULT 0"),
 )
 
 
@@ -321,6 +328,15 @@ def _ensure_columns(conn: sqlite3.Connection) -> None:
             continue
         if column not in {str(row["name"]) for row in rows}:
             conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {ddl}")
+
+
+def ensure_columns(conn: sqlite3.Connection) -> None:
+    """只补后加的列，不动已有表结构。
+
+    老库（演示库里那份 data/bank.db 就是）第一次被这个版本碰到时用它补列，
+    不用重建库、也不用手工迁移；补完列的库与新建的库完全一样。
+    """
+    _ensure_columns(conn)
 
 
 def init_db(conn: sqlite3.Connection) -> None:
@@ -367,6 +383,7 @@ __all__ = [
     "SCHEMA_SQL",
     "TABLE_NAMES",
     "connect",
+    "ensure_columns",
     "init_db",
     "sweep_expired_holds",
     "table_names",
