@@ -17,13 +17,21 @@ from typing import Any, Final
 # 模块级导入（不用 from 包 import 模块）：tests/test_imports.py 用 ast 按模块名登记依赖，
 # 包级导入会被它漏掉，允许依赖表就会与代码现状对不上。
 import app.funds as funds  # noqa: PLR0402
-from app.clock import BankError, HoldExpired, InsufficientFunds, ValidationError, now_ms
+from app.clock import (
+    BankError,
+    HoldExpired,
+    InsufficientFunds,
+    PolicyDenied,
+    ValidationError,
+    now_ms,
+)
 from app.models import ToolResult
 from app.money import fen_to_yuan_str
 from app.security import token as token_mod
 from app.tools.base import (
     ToolContext,
     build_action,
+    daily_cap_fen,
     ensure_system_payee,
     fail_result,
     ok_result,
@@ -46,6 +54,7 @@ MERCHANT_WHITELIST: Final[dict[str, str]] = {
 HELD_TEXT: Final[str] = "钱已经锁定，还没有扣款。"
 COMMITTED_TEXT: Final[str] = "钱已经转出去了。"
 UNSETTLED_TEXT: Final[str] = "钱已经锁定，但扣款没成功，稍后我会重试。"
+DAILY_LIMIT_TEXT: Final[str] = "今天已经花过日限额了，这笔没转出去。"
 NOT_OWNED_TEXT: Final[str] = "通讯录里没有属于你的这个收款人。"
 
 
@@ -100,10 +109,13 @@ def transfer(
             "idempotent": bool(hold.reused),
             "message": HELD_TEXT,
         },
+        token,
     )
 
 
-def _settle_transfer(ctx: ToolContext, data: dict[str, Any]) -> ToolResult:
+def _settle_transfer(
+    ctx: ToolContext, data: dict[str, Any], token: str | None = None
+) -> ToolResult:
     """第二阶段：立刻 commit，让 transfer 一次调用就把两阶段资金走完。
 
     不可逆的 commit 必须留在工具层：planner 只消费返回值，不 import app.funds。
@@ -111,7 +123,15 @@ def _settle_transfer(ctx: ToolContext, data: dict[str, Any]) -> ToolResult:
     """
     hold_id = str(data["hold_id"])
     try:
-        outcome = funds.commit(ctx.conn, hold_id)
+        outcome = funds.commit(
+            ctx.conn, hold_id, daily_limit_fen=daily_cap_fen(token, ctx.secret)
+        )
+    except PolicyDenied as exc:
+        # 日累计硬线：这笔是**被拒**了（钱没扣、hold 还在），要说清楚为什么。
+        log.warning("transfer.daily_limit_exceeded hold=%s code=%s", hold_id, exc.code)
+        data["settle_error"] = exc.code
+        data["message"] = DAILY_LIMIT_TEXT
+        return fail_result(exc.code, DAILY_LIMIT_TEXT, data)
     except BankError as exc:
         log.warning("transfer.commit_failed hold=%s code=%s", hold_id, exc.code)
         data["settle_error"] = exc.code
@@ -190,7 +210,7 @@ def pay_merchant(
         )
     except InsufficientFunds as exc:
         return _insufficient(exc)
-    return _commit(ctx, hold.hold_id, params)
+    return _commit(ctx, hold.hold_id, params, token)
 
 
 def reverse_transfer(ctx: ToolContext, params: dict[str, Any], token: str | None = None) -> ToolResult:
@@ -273,14 +293,24 @@ def _commit_existing(
     if hold is None or str(hold.account_id) != account_id:
         return fail_result("HOLD_NOT_FOUND", f"找不到这笔预授权（{hold_id}）。")
     token_mod.verify(ctx.conn, str(token), action, secret=ctx.secret)
-    return _commit(ctx, hold_id, params)
+    return _commit(ctx, hold_id, params, token)
 
 
-def _commit(ctx: ToolContext, hold_id: str, params: dict[str, Any]) -> ToolResult:
+def _commit(
+    ctx: ToolContext,
+    hold_id: str,
+    params: dict[str, Any],
+    token: str | None = None,
+) -> ToolResult:
     try:
-        outcome = funds.commit(ctx.conn, hold_id)
+        outcome = funds.commit(
+            ctx.conn, hold_id, daily_limit_fen=daily_cap_fen(token, ctx.secret)
+        )
     except HoldExpired as exc:
         return fail_result("HOLD_EXPIRED", exc.user_text, {"hold_id": hold_id})
+    except BankError as exc:
+        # 别的拒绝（例如日累计硬线）：钱没扣、hold 还在，如实报错，别让异常逃出去。
+        return fail_result(exc.code, exc.user_text, {"hold_id": hold_id})
     amount_fen = int(outcome.amount_fen)
     return ok_result(
         {

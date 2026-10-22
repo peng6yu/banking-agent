@@ -20,6 +20,7 @@ from app.money import fen_to_yuan_str
 from app.tools.base import (
     ToolContext,
     build_action,
+    daily_cap_fen,
     fail_result,
     ok_result,
     primary_account,
@@ -82,7 +83,7 @@ def split_transfer(
             "INSUFFICIENT_FUNDS",
             f"余额不够：要转 {fen_to_yuan_str(exc.amount_fen)} 元，卡里只有 {fen_to_yuan_str(exc.balance_fen)} 元。",
         )
-    return _settle(ctx, payee_ids, shares, holds)
+    return _settle(ctx, payee_ids, shares, holds, token)
 
 
 def _settle(
@@ -90,6 +91,7 @@ def _settle(
     payee_ids: list[str],
     shares: list[int],
     holds: list[Any],
+    token: str | None = None,
 ) -> ToolResult:
     """逐份 commit；某一份失败就把剩下的 hold 释放，不留半截账。"""
     done: list[dict[str, Any]] = []
@@ -97,7 +99,9 @@ def _settle(
     committed: set[str] = set()
     for payee_id, amount, hold in zip(payee_ids, shares, holds, strict=True):
         try:
-            outcome = funds.commit(ctx.conn, hold.hold_id)
+            outcome = funds.commit(
+                ctx.conn, hold.hold_id, daily_limit_fen=daily_cap_fen(token, ctx.secret)
+            )
         except BankError as exc:
             problems.append({"payee_id": payee_id, "code": exc.code})
             continue

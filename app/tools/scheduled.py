@@ -29,6 +29,7 @@ from app.security import token as token_mod
 from app.tools.base import (
     ToolContext,
     build_action,
+    daily_cap_fen,
     fail_result,
     ok_result,
     payee_exists,
@@ -211,7 +212,9 @@ def _execute_one(
         hold = funds.initiate(
             conn, action, session_id=session_id, node_id="due", token=tok, payee_id=payee_id, secret=secret
         )
-        outcome = funds.commit(conn, hold.hold_id)
+        outcome = funds.commit(
+            conn, hold.hold_id, daily_limit_fen=daily_cap_fen(tok, secret)
+        )
         with _tx(conn):
             conn.execute(
                 "UPDATE scheduled_transfers SET status = ?, executed_ms = ? WHERE id = ?",

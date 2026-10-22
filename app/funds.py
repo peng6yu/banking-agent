@@ -13,7 +13,13 @@ from dataclasses import dataclass
 from typing import Final
 
 from app import audit
-from app.clock import HoldExpired, InsufficientFunds, ValidationError, now_ms
+from app.clock import (
+    HoldExpired,
+    InsufficientFunds,
+    PolicyDenied,
+    ValidationError,
+    now_ms,
+)
 from app.db import tx
 from app.ids import new_id
 from app.log import log
@@ -184,11 +190,22 @@ def initiate_split(
     return outcomes
 
 
-def commit(conn: sqlite3.Connection, hold_id: str, *, counterparty: str | None = None) -> CommitOutcome:
+def commit(
+    conn: sqlite3.Connection,
+    hold_id: str,
+    *,
+    counterparty: str | None = None,
+    daily_limit_fen: int | None = None,
+) -> CommitOutcome:
     """第 2 阶段：真正扣钱。重复 commit 幂等；已释放或已过期一律 HoldExpired。
 
     counterparty 只给「钱付给谁不是收款人」的场景用（理财申购付给基金）；
     不给就按 hold 的收款人取名字，和转账表现一致。
+
+    daily_limit_fen 是**扣钱这一刻**要守的日累计硬线（分）。给了就在同一个事务里
+    条件 upsert：超线则整笔回滚——余额不动、hold 仍留在 held 等过期释放，
+    钱既不会凭空少也不会凭空多。给 None 表示这笔出账不占用日消费额度
+    （入账、冲正、理财申购这类）。
     """
     hold = fetch_hold(conn, hold_id)
     if hold is None:
@@ -200,7 +217,22 @@ def commit(conn: sqlite3.Connection, hold_id: str, *, counterparty: str | None =
     if hold.expires_ms < now_ms():
         _expire(conn, hold)
         raise HoldExpired(reason="HOLD_EXPIRED", hold_id=hold_id)
-    return _settle(conn, hold, counterparty)
+    try:
+        return _settle(conn, hold, counterparty, daily_limit_fen=daily_limit_fen)
+    except PolicyDenied as exc:
+        # 拒绝也要留痕：事务已回滚（钱没扣、hold 还在），这条补在事务外。
+        audit.append(
+            conn,
+            "transfer.initiated",
+            {
+                "hold_id": hold.id,
+                "amount_fen": hold.amount_fen,
+                "rejected": True,
+                "reason": exc.code,
+            },
+            session_id=hold.session_id,
+        )
+        raise
 
 
 def refund(
@@ -414,7 +446,13 @@ def redeem(conn: sqlite3.Connection, hold_id: str, *, counterparty: str) -> int:
     return balance_after_fen
 
 
-def _settle(conn: sqlite3.Connection, hold: Hold, counterparty: str | None = None) -> CommitOutcome:
+def _settle(
+    conn: sqlite3.Connection,
+    hold: Hold,
+    counterparty: str | None = None,
+    *,
+    daily_limit_fen: int | None = None,
+) -> CommitOutcome:
     """扣余额、写流水、改 hold、更新日累计、写审计：五件事一个事务，任一步失败整体回滚。"""
     stamp_ms = now_ms()
     with tx(conn):
@@ -427,7 +465,7 @@ def _settle(conn: sqlite3.Connection, hold: Hold, counterparty: str | None = Non
             "UPDATE holds SET status = 'committed', settled_ms = ? WHERE id = ? AND status = 'held'",
             (stamp_ms, hold.id),
         )
-        _bump_daily_limit(conn, hold.account_id, hold.amount_fen, stamp_ms)
+        _bump_daily_limit(conn, hold.account_id, hold.amount_fen, stamp_ms, limit_fen=daily_limit_fen)
         audit.append(
             conn,
             "transfer.committed",
@@ -487,13 +525,54 @@ def _counterparty(conn: sqlite3.Connection, payee_id: str | None) -> str:
     return str(row["name"]) if row else payee_id
 
 
-def _bump_daily_limit(conn: sqlite3.Connection, account_id: str, amount_fen: int, stamp_ms: int) -> None:
-    conn.execute(
+def _bump_daily_limit(
+    conn: sqlite3.Connection,
+    account_id: str,
+    amount_fen: int,
+    stamp_ms: int,
+    *,
+    limit_fen: int | None = None,
+) -> None:
+    """记今天花了多少；给了 limit_fen 就顺手守住这条线。
+
+    为什么守卫必须长在这里：策略层判「今天已花多少」是**先读后判**，
+    两个会话并发时会同时读到同一个旧值，于是两笔都放行——日线形同虚设
+    （t4 的 test_concurrent_daily_limit_blocks_the_second_transfer 复现的就是这个洞）。
+    钱真正动的这一层才有与扣款同一个事务的原子视图：条件 upsert 的
+    WHERE spent_fen + excluded.spent_fen <= ? 让超线的那笔 rowcount 为 0（没写进去），
+    调用方在同一事务里回滚——余额不动、hold 仍留在 held 等过期释放。
+    """
+    if limit_fen is None:
+        conn.execute(
+            "INSERT INTO daily_limits (account_id, day, spent_fen, tx_count) VALUES (?, ?, ?, 1)"
+            " ON CONFLICT(account_id, day) DO UPDATE SET"
+            " spent_fen = spent_fen + excluded.spent_fen, tx_count = tx_count + 1",
+            (account_id, day_of(stamp_ms), amount_fen),
+        )
+        return
+    if amount_fen > limit_fen:
+        raise PolicyDenied(
+            "DAILY_LIMIT_EXCEEDED",
+            account_id=account_id,
+            amount_fen=amount_fen,
+            limit_fen=limit_fen,
+            spent_fen=spent_today_fen(conn, account_id, at_ms=stamp_ms),
+        )
+    cursor = conn.execute(
         "INSERT INTO daily_limits (account_id, day, spent_fen, tx_count) VALUES (?, ?, ?, 1)"
         " ON CONFLICT(account_id, day) DO UPDATE SET"
-        " spent_fen = spent_fen + excluded.spent_fen, tx_count = tx_count + 1",
-        (account_id, day_of(stamp_ms), amount_fen),
+        " spent_fen = spent_fen + excluded.spent_fen, tx_count = tx_count + 1"
+        " WHERE spent_fen + excluded.spent_fen <= ?",
+        (account_id, day_of(stamp_ms), amount_fen, limit_fen),
     )
+    if cursor.rowcount != 1:
+        raise PolicyDenied(
+            "DAILY_LIMIT_EXCEEDED",
+            account_id=account_id,
+            amount_fen=amount_fen,
+            limit_fen=limit_fen,
+            spent_fen=spent_today_fen(conn, account_id, at_ms=stamp_ms),
+        )
 
 
 def _committed_outcome(conn: sqlite3.Connection, hold: Hold, *, idempotent: bool) -> CommitOutcome:

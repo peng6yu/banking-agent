@@ -243,6 +243,8 @@ ALLOWED: dict[str, frozenset[str]] = {
         "app.clock",
         "app.funds",
         "app.models",
+        "app.policy.rules",
+        "app.security",
     }),
     "app.tools.bill": frozenset({
         "app.clock",
