@@ -64,6 +64,7 @@ LAYERS: dict[str, int] = {
     "app.planner.subscription": 4,
     "app.planner.due": 4,
     "app.planner.split_plan": 4,
+    "app.planner.ticker": 4,
     "app.api.routes": 5,
     "app.api.schemas": 5,
     "app.main": 5,
@@ -124,6 +125,7 @@ ALLOWED: dict[str, frozenset[str]] = {
         "app.api",
         "app.clock",
         "app.llm",
+        "app.planner",
     }),
     "app.models": frozenset(),
     "app.money": frozenset({
@@ -132,6 +134,7 @@ ALLOWED: dict[str, frozenset[str]] = {
     "app.planner": frozenset(),
     "app.planner.due": frozenset({"app.clock"}),
     "app.planner.split_plan": frozenset({"app.clock", "app.ids", "app.models"}),
+    "app.planner.ticker": frozenset({"app.tools"}),
     "app.planner.dag": frozenset({
         "app.ids",
         "app.models",

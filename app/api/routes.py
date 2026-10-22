@@ -29,7 +29,7 @@ from app.ids import new_id
 from app.llm import LLMError, build_adapter
 from app.models import ChatRequest, ConfirmRequest
 from app.planner import dag as planner_dag
-from app.planner import executor, intent
+from app.planner import executor, intent, ticker
 from app.tools.registry import TOOL_NAMES, tool_schemas
 
 log = logging.getLogger(__name__)
@@ -196,6 +196,13 @@ async def audit_verify() -> dict[str, Any]:
             "head": audit.chain_head(conn),
             "count": audit.count_events(conn),
         }
+
+
+@router.post("/api/scheduled/run")
+async def run_scheduled() -> dict[str, Any]:
+    """立刻执行一次到点的定时转账；评审现场想马上看到效果时用。"""
+    done = await asyncio.to_thread(ticker.run_due_once)
+    return {"ok": True, "executed": len(done), "items": done[:5]}
 
 
 @router.post("/api/demo/reset")

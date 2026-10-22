@@ -8,6 +8,8 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
@@ -17,6 +19,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from app.api import routes
 from app.clock import BankError
 from app.llm import LLMError
+from app.planner import ticker
 
 log = logging.getLogger(__name__)
 
@@ -31,7 +34,18 @@ VALIDATION_TEXT = "请求参数不对，我没法理解你发的内容。"
 HTTP_CODE = "HTTP_ERROR"
 HTTP_TEXT = "这个请求我没找到对应的处理方式。"
 
-app = FastAPI(title=API_TITLE, version=API_VERSION)
+@asynccontextmanager
+async def _lifespan(_app: FastAPI) -> AsyncIterator[None]:
+    """启动时起到点执行节拍，关闭时收掉；SCHEDULED_TICK_MS=0 可关。"""
+    task = ticker.start()
+    log.info("app.startup ticker=%s", "on" if task is not None else "off")
+    try:
+        yield
+    finally:
+        await ticker.stop(task)
+
+
+app = FastAPI(title=API_TITLE, version=API_VERSION, lifespan=_lifespan)
 app.include_router(routes.router)
 
 
