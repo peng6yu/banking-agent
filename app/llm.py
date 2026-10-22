@@ -9,6 +9,12 @@ from dataclasses import dataclass, field
 from typing import Any, Iterator
 
 from .config import Settings, get_settings
+from app.script_mode import (
+    EMIT_INTENT_NAME,
+    script_first_tool_name,
+    script_intent_args,
+    script_user_text,
+)
 
 # M2.1 会把思维链塞进 content，M3.1 不会。适配器无条件剥离，上层永远看不到。
 THINK_RE = re.compile(r"<think>(.*?)</think>", re.S)
@@ -260,6 +266,59 @@ class MockAdapter:
         yield {"type": "done", "content": self.plan_text, "reasoning": "", "tool_calls": [], "finish_reason": "stop"}
 
 
+class ScriptAdapter:
+    """协作回放桩：MOCK_MODE=script 时的离线替身（规则在 app/script_mode.py）。
+
+    与 MockAdapter 正好相反：MockAdapter 是「恶意模型」，用来演示模型被劫持时动不了钱；
+    这个是「正常办事」，断网时顶上，让查余额与转账两条主链路照样跑通。
+    纯规则、确定性、零网络：同一句话跑两次结果完全一样。
+    """
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def chat(self, messages, tools=None, model=None, temperature=None, max_tokens=1024) -> LLMResponse:
+        self.calls += 1
+        return self._reply(messages, tools)
+
+    def chat_stream(self, messages, tools=None, model=None, temperature=None, max_tokens=1024):
+        self.calls += 1
+        response = self._reply(messages, tools)
+        if response.content:
+            yield {"type": "delta", "text": response.content}
+        yield {
+            "type": "done",
+            "content": response.content,
+            "reasoning": response.reasoning,
+            "tool_calls": response.tool_calls,
+            "finish_reason": response.finish_reason,
+        }
+
+    def _reply(self, messages, tools) -> LLMResponse:
+        if script_first_tool_name(tools) == EMIT_INTENT_NAME:
+            args = script_intent_args(script_user_text(messages))
+            return LLMResponse(
+                content="",
+                reasoning="script 离线回放",
+                tool_calls=[ToolCall(id="script-1", name=EMIT_INTENT_NAME,
+                                     arguments=json.dumps(args, ensure_ascii=False))],
+                finish_reason="tool_calls",
+                model="mock-script",
+            )
+        # 别的调用（例如注入的 L2 分类）只要一句话：确定性，且不含「是/yes」，宁可判没命中
+        return LLMResponse(
+            content="离线回放桩不回答自然语言问题。",
+            reasoning="",
+            tool_calls=[],
+            finish_reason="stop",
+            model="mock-script",
+        )
+
+
 def build_adapter(settings: Settings | None = None):
     s = settings or get_settings()
-    return MockAdapter() if s.mock else LLMAdapter(s)
+    if s.mock:
+        return MockAdapter()
+    if s.mock_script:
+        return ScriptAdapter()
+    return LLMAdapter(s)

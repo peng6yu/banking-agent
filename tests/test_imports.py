@@ -32,6 +32,8 @@ LAYERS: dict[str, int] = {
     "app.log": 0,
     "app.models": 0,
     "app.money": 0,
+    # 协作回放桩（MOCK_MODE=script）：模型层的离线替身，和 app.llm 一样在最底层
+    "app.script_mode": 0,
     "app.security.envelope": 0,
     "app.security.breaker": 1,
     "app.security.injection": 1,
@@ -107,7 +109,9 @@ ALLOWED: dict[str, frozenset[str]] = {
     "app.ids": frozenset({
         "app.clock",
     }),
-    "app.llm": frozenset(),
+    "app.llm": frozenset({
+        "app.script_mode",
+    }),
     "app.log": frozenset({
         "app.clock",
     }),
@@ -189,6 +193,9 @@ ALLOWED: dict[str, frozenset[str]] = {
     }),
     "app.policy.rules": frozenset({
         "app.models",
+        "app.money",
+    }),
+    "app.script_mode": frozenset({
         "app.money",
     }),
     "app.security": frozenset(),

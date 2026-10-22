@@ -8,6 +8,8 @@ from typing import Final
 
 _ENV_LINE = re.compile(r"^\s*([A-Z0-9_]+)\s*=\s*(.*)$")
 _TRUTHY: Final[frozenset[str]] = frozenset({"1", "true", "yes", "on"})
+# MOCK_MODE 的另一个取值：协作回放桩（离线但正常办事），与上面的对抗演示桩不是一回事
+MOCK_SCRIPT: Final[str] = "script"
 
 
 def load_env(path: Path) -> None:
@@ -38,6 +40,9 @@ class Settings:
     temperature: float = float(os.getenv("LLM_TEMPERATURE", "0") or "0")
     timeout: int = int(os.getenv("LLM_TIMEOUT", "60") or "60")
     mock: bool = os.getenv("MOCK_MODE", "false").strip().lower() in _TRUTHY
+    # MOCK_MODE=script：协作回放桩。纯规则、确定性、零网络，断网也能演主链路；
+    # 上面那个 mock 是对抗演示专用（恶意模型），两者行为完全不同，别混用。
+    mock_script: bool = os.getenv("MOCK_MODE", "false").strip().lower() == MOCK_SCRIPT
 
     @property
     def endpoint(self) -> str:
