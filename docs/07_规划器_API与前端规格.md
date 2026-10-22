@@ -34,56 +34,50 @@ def parse(text: str, history: list) -> IntentResult
 ### `emit_intent` 工具 schema
 
 ```python
-{
-  'name': 'emit_intent',
-  'description': '把用户这句话解析成结构化意图。必须调用我，不要直接回答。'
-                 'missing 只填真正缺失、必须问用户才能补的槽位；'
-                 'card_tail / note / merchant 都是可选槽位，不要填进 missing。'
-                 '用户说的是「先留出一笔钱、之后再买或订」这类跨场景安排时，intent 选 birthday_plan。',
-  'parameters': {
-    'type': 'object',
-    'properties': {
-      'intent': {'type': 'string',
-                 'enum': ['query_balance', 'transfer', 'bill_analysis',
-                          'subscription', 'birthday_plan', 'invest', 'unknown'],
-                 'description': '用户这句话属于哪一类，从下面七项里选一个：'
-                                'query_balance=查余额、流水、额度、卡里还剩多少钱；'
-                                'transfer=给某人转钱、付款、还款；'
-                                'bill_analysis=分析某月账单、找出异常消费；'
-                                'subscription=查订阅、看自动扣款；'
-                                '用户明确要取消或关掉某条订阅时也选它，并把订阅名填进 sub_name（例如「爱奇艺会员」）；'
-                                'birthday_plan=送礼安排：先预留一笔钱，等某个日子再付给商户，'
-                                '例如「下周三我妈生日，提前留出300块给她订束花送过去」；'
-                                'invest=基金理财的申购或赎回；'
-                                'unknown=以上都不是、实在判断不出来。'},
-      'payee_name': {'type': 'string'},
-      'amount_fen': {'type': 'integer'},
-      'note': {'type': 'string'},
-      'merchant': {'type': 'string',
-                   'description': '商户代码：花店填 flower_shop、蛋糕店填 cake_shop'},
-      'card_tail': {'type': 'string',
-                    'description': '仅当用户明确说到某张卡尾号时才填；转账、申购、账单都不需要'},
-      'sub_name': {'type': 'string',
-                   'description': '订阅名称：用户说「爱奇艺会员」就填「爱奇艺会员」；'
-                                  '只在用户明确要取消某条订阅时填，查订阅时不要填'},
-      'period': {'type': 'string', 'enum': ['month', 'year']},
-      'month': {'type': 'integer'},
-      'action': {'type': 'string', 'enum': ['buy', 'redeem', 'query'],
-                 'description': '理财动作：buy=申购、redeem=赎回、query=看在售产品'},
-      'product_code': {'type': 'string',
-                       'description': '基金产品代码：F00001 现金添利货币A／F00002 稳盈债券A／'
-                                      'F00003 均衡配置混合A／F00004 沪深精选指数A／F00005 全球科技QDII；'
-                                      '用户报产品名时必须换成代码'},
-      'purpose': {'type': 'string', 'description': '这笔钱的用途，例如「生日礼物」'},
-      'gift': {'type': 'string', 'description': '要送的东西，例如「花束」「蛋糕」'},
-      'date_hint': {'type': 'string', 'description': '用户说的时间，原样保留，例如「下周三」「月底」'},
-      'missing': {'type': 'array', 'items': {'type': 'string'}},
-      'confidence': {'type': 'number'}
-    },
-    'required': ['intent', 'missing', 'confidence'],
-    'additionalProperties': False
-  }
-}
+{'name': 'emit_intent',
+ 'description': '把用户这句话解析成结构化意图。必须调用我，不要直接回答。missing 只填真正缺失、必须问用户才能补的槽位；card_tail / note / '
+                'merchant 都是可选槽位，不要填进 missing。用户说的是「先留出一笔钱、之后再买或订」这类跨场景安排时，intent 选 '
+                'birthday_plan。',
+ 'parameters': {'type': 'object',
+                'properties': {'intent': {'type': 'string',
+                                          'enum': ['query_balance',
+                                                   'transfer',
+                                                   'bill_analysis',
+                                                   'subscription',
+                                                   'birthday_plan',
+                                                   'invest',
+                                                   'card_manage',
+                                                   'unknown'],
+                                          'description': '用户这句话属于哪一类，从下面八项里选一个：query_balance=查余额、流水、额度、卡里还剩多少钱；transfer=给某人转钱、付款、还款；bill_analysis=分析某月账单、找出异常消费；subscription=查订阅、看自动扣款；用户明确要取消或关掉某条订阅时也选它，并把订阅名填进 '
+                                                         'sub_name（例如「爱奇艺会员」）；birthday_plan=送礼安排：先预留一笔钱，等某个日子再付给商户，例如「下周三我妈生日，提前留出300块给她订束花送过去」；invest=基金理财的申购或赎回；card_manage=银行卡本身的操作：看有几张卡、申请虚拟卡、冻结或解冻某张卡、挂失某张卡、调整某张卡的单笔限额（例如「把我的卡冻结了」「尾号1234的卡挂失」）；unknown=以上都不是、实在判断不出来。'},
+                               'payee_name': {'type': 'string'},
+                               'amount_fen': {'type': 'integer'},
+                               'note': {'type': 'string'},
+                               'merchant': {'type': 'string',
+                                            'description': '商户代码：花店填 flower_shop、蛋糕店填 '
+                                                           'cake_shop'},
+                               'card_tail': {'type': 'string',
+                                             'description': '仅当用户明确说到某张卡尾号时才填；转账、申购、账单都不需要'},
+                               'sub_name': {'type': 'string',
+                                            'description': '订阅名称：用户说「爱奇艺会员」就填「爱奇艺会员」；只在用户明确要取消某条订阅时填，查订阅时不要填'},
+                               'period': {'type': 'string', 'enum': ['month', 'year']},
+                               'month': {'type': 'integer'},
+                               'action': {'type': 'string',
+                                          'enum': ['buy', 'redeem', 'query'],
+                                          'description': '理财动作：buy=申购、redeem=赎回、query=看在售产品'},
+                               'product_code': {'type': 'string',
+                                                'description': '基金产品代码：F00001 现金添利货币A／F00002 '
+                                                               '稳盈债券A／F00003 均衡配置混合A／F00004 '
+                                                               '沪深精选指数A／F00005 '
+                                                               '全球科技QDII；用户报产品名时必须换成代码'},
+                               'purpose': {'type': 'string', 'description': '这笔钱的用途，例如「生日礼物」'},
+                               'gift': {'type': 'string', 'description': '要送的东西，例如「花束」「蛋糕」'},
+                               'date_hint': {'type': 'string',
+                                             'description': '用户说的时间，原样保留，例如「下周三」「月底」'},
+                               'missing': {'type': 'array', 'items': {'type': 'string'}},
+                               'confidence': {'type': 'number'}},
+                'required': ['intent', 'missing', 'confidence'],
+                'additionalProperties': False}}
 ```
 
 ### 意图取值说明（`INTENT_GUIDE`）
@@ -171,8 +165,23 @@ def topo_sort(dag: Dag) -> list[DAGNode]
 | `invest`（`action=buy`） | `n1 buy_fund` |
 | `invest`（`action=redeem`） | `n1 redeem_fund` |
 | `invest`（`action=query`；认不出 `action` 时也走这一路） | `n1 list_products` |
+| `card_manage`（查卡：原话里没有写操作动词） | `n1 list_cards` |
+| `card_manage`（申请虚拟卡） | `n1 apply_virtual_card` |
+| `card_manage`（调限额） | `n1 set_card_limit` |
+| `card_manage`（冻结 / 解冻 / 挂失） | `n1 freeze_card` / `n1 unfreeze_card` / `n1 report_card_loss` |
 | 模板不在册（模型编的意图） | `n1 unsupported_request` → 策略层 `R03_unknown_tool` 红灯 + `confirm.rejected`，**不回退成默认意图** |
 | `unknown` | 不建 DAG，直接反问 |
+
+### 卡片管理的动作只认用户原话
+
+`card_manage` 的动作**不取自模型**：`app/planner/card_actions.py` 按用户原话里的动词重算
+（挂失 → 解冻 → 冻结 → 调限额 → 申请，这个顺序不能换，「解冻」里含「冻」）。
+模型就算填了 `card_action` 也会被覆盖：冻结/挂失/调限额都是动账户安全的写操作，
+模型顺手填一个 `loss` 就把一次查询变成挂失，这是这套系统最不该犯的错。
+动作落在 `card_action` 槽位，同 `CANCEL_SLOT` 的先例，**不进 `SLOT_KEYS`**。
+
+要动某一张卡却没说是哪张时（冻结/解冻/调限额/挂失）反问一次
+「要操作哪张卡？请告诉我卡号后四位。」，绝不按主账户随便挑一张；调限额缺金额同样反问。
 
 ### 生日送礼的槽位落点
 

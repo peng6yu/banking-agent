@@ -37,25 +37,42 @@ _STATUS_ZH = {"active": "正常", "frozen": "已冻结", "lost": "已挂失"}
 
 
 def list_cards(ctx: ToolContext, params: dict[str, Any], token: str | None = None) -> ToolResult:
-    """列卡：传了尾号只回那一张对应的卡，查不到就是 ACCOUNT_NOT_FOUND。"""
+    """列卡：不传尾号就列出名下**所有**卡；传了尾号只回那个账户的卡。
+
+    曾经这里默认只看主账户（储蓄卡），于是用户问「我有几张卡」得到「1 张」，
+    而他名下还有一张信用卡——回答本身没错，但不是用户问的那件事。
+    """
     tail = params.get("account_tail")
     account = primary_account(ctx.conn, ctx.account_id)
     if tail is not None:
         account = find_account_by_tail(ctx.conn, str(tail), ctx.account_id)
         if account is None:
             return fail_result("ACCOUNT_NOT_FOUND", f"没找到尾号 {tail} 的账户。")
-    rows = ctx.conn.execute(
-        "SELECT c.*, a.tail AS account_tail FROM cards c"
-        " JOIN accounts a ON a.id = c.account_id WHERE c.account_id = ? ORDER BY c.id",
-        (account["id"],),
-    ).fetchall()
+        rows = ctx.conn.execute(
+            "SELECT c.*, a.tail AS account_tail FROM cards c"
+            " JOIN accounts a ON a.id = c.account_id WHERE c.account_id = ? ORDER BY c.id",
+            (account["id"],),
+        ).fetchall()
+    else:
+        rows = ctx.conn.execute(
+            "SELECT c.*, a.tail AS account_tail FROM cards c"
+            " JOIN accounts a ON a.id = c.account_id"
+            " WHERE a.user_id = (SELECT user_id FROM accounts WHERE id = ?)"
+            " ORDER BY c.id",
+            (account["id"],),
+        ).fetchall()
     cards = [_card_view(row) for row in rows]
+    summary = (
+        f"名下共 {len(cards)} 张卡。"
+        if tail is None
+        else f"共 {len(cards)} 张卡，账户尾号 {account['tail']}。"
+    )
     return ok_result(
         {
             "cards": cards,
             "count": len(cards),
             "account_tail": str(account["tail"]),
-            "summary": f"共 {len(cards)} 张卡，账户尾号 {account['tail']}。",
+            "summary": summary,
         }
     )
 
@@ -65,7 +82,7 @@ def apply_virtual_card(
 ) -> ToolResult:
     """申请一张虚拟卡：立刻可用，初始状态 active，默认单笔限额 5000 元。"""
     require_token("apply_virtual_card", params, token)
-    account, error = _resolve_account(ctx, params)
+    account, _error = _resolve_account(ctx, params)
     if account is None:
         return fail_result("ACCOUNT_NOT_FOUND", f"没找到尾号 {params.get('account_tail')} 的账户。")
     card_tail = _next_virtual_tail(ctx.conn, str(account["id"]))

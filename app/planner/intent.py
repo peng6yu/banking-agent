@@ -15,6 +15,12 @@ from dataclasses import dataclass, field
 from typing import Any, Final, Protocol
 
 from app.money import UNKNOWN_AMOUNT_FEN, parse_amount
+from app.planner.card_actions import (
+    CARD_ACTION_SLOT,
+    CARD_INTENT,
+    CARD_TAIL_REQUIRED,
+    card_action,
+)
 from app.planner.intent_schema import (
     CANCEL_SLOT,
     EMIT_INTENT_NAME,
@@ -83,6 +89,10 @@ INTENT_MISSING_LABELS: Final[dict[str, dict[str, str]]] = {
     "birthday_plan": {
         "payee_name": "这份礼物是给谁过生日？",
     },
+    "card_manage": {
+        "card_tail": "要操作哪张卡？请告诉我卡号后四位。",
+        "amount_fen": "限额设成多少？",
+    },
 }
 # 意图的中文说法：低置信度要反问确认时，念的是这句话，不是内部枚举名（query_balance）。
 INTENT_LABELS: Final[dict[str, str]] = {
@@ -92,6 +102,7 @@ INTENT_LABELS: Final[dict[str, str]] = {
     "subscription": "查订阅或取消自动扣款",
     "birthday_plan": "送礼安排（先预留资金再付款）",
     "invest": "基金申购或赎回",
+    "card_manage": "银行卡操作（查卡、开卡、调限额、冻结解冻、挂失）",
 }
 NEED_SLOTS: Final[frozenset[str]] = frozenset({"transfer", "birthday_plan"})
 ALL_KEYWORDS: Final[tuple[str, ...]] = ("全部", "全额", "所有钱", "剩下的钱")
@@ -306,6 +317,8 @@ def _slots(args: dict[str, Any], text: str, intent: str) -> dict[str, Any]:
                 slots.pop(key)
     if intent == "subscription":
         slots = subscription_slots(slots, text)
+    if intent == CARD_INTENT:
+        slots = card_action(slots, text)
     return slots
 
 
@@ -361,6 +374,12 @@ def _missing(intent: str, slots: dict[str, Any], reported: Any) -> list[str]:
         if not slots.get("payee_name"):
             missing.append("payee_name")
         if not slots.get("amount_fen") and not slots.get("amount_all"):
+            missing.append("amount_fen")
+    if intent == CARD_INTENT:
+        action = str(slots.get(CARD_ACTION_SLOT) or "")
+        if action in CARD_TAIL_REQUIRED and not slots.get("card_tail"):
+            missing.append("card_tail")
+        if action == "set_limit" and not slots.get("amount_fen"):
             missing.append("amount_fen")
     ordered: list[str] = []
     for item in missing:

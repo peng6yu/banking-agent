@@ -355,10 +355,16 @@ def test_list_subs_only_active_by_default(ctx: ToolContext) -> None:
 
 
 def test_list_cards_by_account_and_missing_tail(ctx: ToolContext) -> None:
-    """按账户过滤；尾号不存在是 ACCOUNT_NOT_FOUND。"""
+    """不传尾号列名下所有卡；传了按账户过滤；尾号不存在是 ACCOUNT_NOT_FOUND。
+
+    曾经不传尾号只看主账户（储蓄卡），用户问「我有几张卡」得到「1 张」而名下还有
+    一张信用卡——回答本身没错，但不是用户问的那件事。
+    """
     all_cards = registry.execute("list_cards", {}, ctx=ctx)
     assert all_cards.ok is True
-    assert [card["kind"] for card in all_cards.data["cards"]] == ["physical"]
+    assert [card["kind"] for card in all_cards.data["cards"]] == ["physical", "virtual"]
+    assert [card["account_tail"] for card in all_cards.data["cards"]] == ["1234", "5678"]
+    assert all_cards.data["count"] == 2
     credit = registry.execute("list_cards", {"account_tail": "5678"}, ctx=ctx)
     assert credit.data["cards"][0]["kind"] == "virtual"
     assert credit.data["cards"][0]["per_tx_limit_fen"] == 200_000

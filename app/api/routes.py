@@ -82,7 +82,7 @@ async def health() -> dict[str, Any]:
 
 @router.get("/api/tools")
 async def list_tools() -> dict[str, Any]:
-    """十个工具的 JSON Schema，前端用它渲染参数表单。"""
+    """在册工具的 JSON Schema，前端用它渲染参数表单。"""
     return {"count": len(TOOL_NAMES), "tools": tool_schemas()}
 
 

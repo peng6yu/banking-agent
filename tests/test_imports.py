@@ -58,6 +58,7 @@ LAYERS: dict[str, int] = {
     "app.planner.intent_schema": 4,
     "app.planner.runner": 4,
     "app.planner.state": 4,
+    "app.planner.card_actions": 4,
     "app.planner.subscription": 4,
     "app.api.routes": 5,
     "app.api.schemas": 5,
@@ -128,6 +129,7 @@ ALLOWED: dict[str, frozenset[str]] = {
     "app.planner.dag": frozenset({
         "app.ids",
         "app.models",
+        "app.planner.card_actions",
         "app.planner.intent",
         "app.planner.subscription",
         "app.tools.base",
@@ -154,6 +156,7 @@ ALLOWED: dict[str, frozenset[str]] = {
     "app.planner.intent": frozenset({
         "app.llm",
         "app.money",
+        "app.planner.card_actions",
         "app.planner.intent_schema",
         "app.security",
     }),
@@ -176,6 +179,9 @@ ALLOWED: dict[str, frozenset[str]] = {
         "app.money",
         "app.security",
         "app.tools",
+    }),
+    "app.planner.card_actions": frozenset({
+        "app.clock",
     }),
     "app.planner.subscription": frozenset({
         "app.clock",

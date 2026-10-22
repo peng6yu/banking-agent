@@ -15,6 +15,7 @@ from app import clock
 from app.ids import new_id
 from app.models import Dag, DAGNode
 from app.planner.intent import ACCOUNT_OWNER_SLOT
+from app.planner.card_actions import CARD_TOOLS, card_params, card_template
 from app.planner.subscription import cancel_params, resolve_match, subscription_template
 from app.tools.base import ValidationError
 
@@ -46,6 +47,8 @@ INTENT_TEMPLATES: Final[dict[str, tuple[tuple[str, str], ...]]] = {
         ("n4", "pay_merchant"),
     ),
     "invest": INVEST_TEMPLATES["query"],
+    # 卡片管理的默认一路（只查卡）；另外五路见 app/planner/card_actions.py
+    "card_manage": (("n1", "list_cards"),),
 }
 # 会读账户信息的工具：意图层判出 account_owner=other 就原样带进参数，策略层据此判红。
 OWNER_AWARE_TOOLS: Final[tuple[str, ...]] = ("query_balance", "list_subs", "analyze_bill")
@@ -147,6 +150,8 @@ def _template(name: str, slots: dict[str, Any]) -> tuple[tuple[str, str], ...] |
     """取这个意图要走哪张模板：理财按 action 分三路，订阅按要不要取消分两路，其余一张表走到底。"""
     if name == "subscription":
         return subscription_template(slots)
+    if name == "card_manage":
+        return card_template(slots)
     if name == "invest":
         action = str(slots.get("action") or "").strip().lower()
         return INVEST_TEMPLATES.get(action, INVEST_TEMPLATES[INVEST_DEFAULT_ACTION])
@@ -201,6 +206,8 @@ def _tool_params(tool: str, slots: dict[str, Any], ids: dict[str, str]) -> dict[
         return _invest_params(slots)
     if tool == "list_products":
         return _product_params(slots)
+    if tool in CARD_TOOLS:
+        return card_params(tool, slots)
     raise ValidationError("模板里出现未登记的工具", reason="DAG_UNKNOWN_TOOL", tool=tool)
 
 

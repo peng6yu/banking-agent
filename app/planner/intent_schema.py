@@ -22,13 +22,16 @@ INTENT_NAMES: Final[tuple[str, ...]] = (
     "birthday_plan",
     # 理财：申购/赎回共用一个意图，动作靠 action 槽位区分（工具侧落 buy_fund / redeem_fund）
     "invest",
+    # 卡片管理（场景四）：申请虚拟卡、查额度、调限额、冻结、解冻、挂失共用一个意图，
+    # 动作由解析器按用户原话的动词算（见 app/planner/card_actions.py）
+    "card_manage",
     "unknown",
 )
 
 # 每个意图什么时候用。缺了这段说明模型只能猜：实测 birthday_plan 没有说明时，
 # 「下周三我妈生日，帮我提前留出300块给她订束花」会被解析成 unknown 再反问（场景 6 走不通）。
 INTENT_GUIDE: Final[str] = (
-    "用户这句话属于哪一类，从下面七项里选一个："
+    "用户这句话属于哪一类，从下面八项里选一个："
     "query_balance=查余额、流水、额度、卡里还剩多少钱；"
     "transfer=给某人转钱、付款、还款；"
     "bill_analysis=分析某月账单、找出异常消费；"
@@ -37,6 +40,8 @@ INTENT_GUIDE: Final[str] = (
     "birthday_plan=送礼安排：先预留一笔钱，等某个日子再付给商户，"
     "例如「下周三我妈生日，提前留出300块给她订束花送过去」；"
     "invest=基金理财的申购或赎回；"
+    "card_manage=银行卡本身的操作：看有几张卡、申请虚拟卡、冻结或解冻某张卡、"
+    "挂失某张卡、调整某张卡的单笔限额（例如「把我的卡冻结了」「尾号1234的卡挂失」）；"
     "unknown=以上都不是、实在判断不出来。"
 )
 

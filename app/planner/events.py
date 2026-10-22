@@ -44,7 +44,19 @@ def summarize(tool: str, data: dict[str, Any]) -> str:
         return f"名下卡片 {data.get('count', 0)} 张"
     if tool == "resolve_payee":
         return f"找到收款人 {data.get('query', '')}"
+    if tool in CARD_WRITE_TOOLS:
+        # 卡片五件套各自带一句人话（含幂等与挂失终态的差别），直接用工具的话
+        return str(data.get("summary") or f"{tool} 执行完成")
     return f"{tool} 执行完成"
+
+
+CARD_WRITE_TOOLS = frozenset({
+    "apply_virtual_card",
+    "set_card_limit",
+    "freeze_card",
+    "unfreeze_card",
+    "report_card_loss",
+})
 
 
 def _first_account(data: dict[str, Any]) -> dict[str, Any]:
