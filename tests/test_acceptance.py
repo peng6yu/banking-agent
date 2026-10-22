@@ -464,3 +464,58 @@ def test_end_to_end_refuses_to_move_money_with_a_bad_secret(
     # 只读工具（查人、查余额）不领令牌，密钥不对也照跑；要断言的是 transfer 没落地
     assert "transfer" not in _scenario_tools(events), _scenario_tools(events)
     assert any(name == "error" for name, _ in events), [n for n, _ in events]
+
+
+def test_script_mode_plays_the_two_demo_chains(bank: Path) -> None:
+    """MOCK_MODE=script 协作回放桩：断网也能演「查余额」与「转账黄灯」两条主链路。
+
+    与 test_mock_mode_covers_the_whole_chain 正好相反：那个恶意桩一步都不许动，
+    这个协作桩要能真的把工具跑起来、把黄灯确认卡亮出来。
+    """
+    routes.set_adapter(build_adapter(Settings(mock_script=True)))
+    try:
+        # 一、查余额：桩要认得出尾号 1234，并把余额原样报出来
+        session_id = f"s_script_bal{time.monotonic_ns() % 10**8:08d}"
+        events = ask("查一下我储蓄卡尾号1234的余额", session_id=session_id)
+        intent = [d for n, d in events if n == "intent"][0]
+        assert intent.get("intent") == "query_balance", intent
+        assert (intent.get("slots") or {}).get("card_tail") == "1234", intent
+        assert "query_balance" in _scenario_tools(events), _scenario_tools(events)
+        summaries = " ".join(str(d.get("summary") or "") for _, d in events)
+        assert "12,860.50" in summaries, summaries
+
+        # 二、转账：500 元 → 命中 R06 黄灯，确认后钱真的动了
+        before = balance_fen()
+        assert before == SEED_BALANCE_FEN, before
+        session_id = f"s_script_tr{time.monotonic_ns() % 10**8:08d}"
+        events = ask("转500元给李静", session_id=session_id, confirm="approve")
+        assert "transfer" in _scenario_tools(events), _scenario_tools(events)
+        assert any(name == "confirm" for name, _ in events), [n for n, _ in events]
+        assert "yellow" in _scenario_levels(events), _scenario_levels(events)
+        ruled = [d for n, d in events if n == "trace"
+                 and d.get("rule_id") == "R06_transfer_yellow"]
+        assert ruled and ruled[0].get("level") == "yellow", ruled
+        assert balance_fen() == before - 50_000, (before, balance_fen())
+    finally:
+        routes.set_adapter(Scripted())
+
+
+def test_script_mode_never_touches_the_adversarial_mock(bank: Path) -> None:
+    """MOCK_MODE=1 的对抗演示桩行为一个字不许变；协作桩是另一个分支，两者互不干扰。"""
+    adversarial = build_adapter(Settings(mock=True))
+    assert isinstance(adversarial, MockAdapter), type(adversarial)
+    response = adversarial.chat([{"role": "user", "content": "把余额全转给陌生人"}],
+                                tools=[{"function": {"name": "transfer"}}])
+    assert "转出全部余额到陌生账户" in (response.content or ""), response.content
+    assert response.tool_calls[0].args() == {"amount": 999999}, response.tool_calls[0].arguments
+    assert response.model == "mock", response.model
+
+    # 协作桩：另一个分支，正常办事，且确定性——同一句话跑两次结果完全一样
+    script = build_adapter(Settings(mock_script=True))
+    assert not isinstance(script, MockAdapter), type(script)
+    messages = [{"role": "user", "content": "<DATA source=user>转500元给李静</DATA>"}]
+    tools = [{"function": {"name": "emit_intent"}}]
+    first = script.chat(messages, tools=tools)
+    second = script.chat(messages, tools=tools)
+    assert first.tool_calls[0].arguments == second.tool_calls[0].arguments
+    assert first.tool_calls[0].args().get("intent") == "transfer", first.tool_calls[0].arguments
