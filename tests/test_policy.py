@@ -370,3 +370,53 @@ def test_red_daily_text_asks_for_verification_not_refusal() -> None:
     assert "人脸" in decision.reason_text
     assert "短信" in decision.reason_text
     assert "我先不做" not in decision.reason_text
+
+
+# ---------- 预约转账不吃日线：规则空隙的回归（评审 F1 / t18） ----------
+# 背景：schedule_transfer 的钱到出账那天才走，所以创建期只判单笔上限，日线归执行日。
+# R07 已按设计豁免它，但 R06 原来带 not _over_daily —— 今日已花 900 再排 500 时
+# R06 否掉、R07 豁免、R08 只判单笔也不管，最后掉进 R11_default_deny 判红且不带因子，
+# 用户被无理由拒绝。下面三条钉住修好后的行为，也钉住没有连带放宽单笔上限。
+
+def schedule_action(amount_fen: int | None, **kwargs: object) -> Action:
+    return Action(
+        tool="schedule_transfer",
+        params={"payee_id": "p_zhangsan", "due_ms": 1_800_000_000_000},
+        account_id="a_1",
+        amount_fen=amount_fen,
+        **kwargs,
+    )
+
+
+def test_scheduled_transfer_stays_yellow_when_today_is_nearly_used_up() -> None:
+    """今日已花 900 再排一笔 500：应为黄灯确认，不是 R11 兜底拒绝。
+
+    这条是 F1 的正身。修前实际拿到 (red, R11_default_deny, required_factors=[])，
+    执行器据此走 _blocked 直接终止，用户看到「这个操作我不确定是否安全」。
+    """
+    decision = decide(schedule_action(50_000), PolicyContext(spent_today_fen=90_000))
+    assert decision.level == "yellow"
+    assert decision.rule_id == "R06_transfer_yellow"
+    assert not decision.required_factors
+
+
+def test_scheduled_transfer_daily_exemption_does_not_widen_single_limit() -> None:
+    """同一场景下金额翻到 2000：仍必须是 R08 单笔红灯，且照旧带 face + sms。
+
+    这条防的是「为了让上面那条变黄，顺手把日线豁免写成了整条规则的豁免」。
+    """
+    decision = decide(schedule_action(200_000), PolicyContext(spent_today_fen=90_000))
+    assert decision.level == "red"
+    assert decision.rule_id == "R08_transfer_red_single"
+    assert set(decision.required_factors) == {"face", "sms"}
+
+
+def test_daily_exemption_is_scoped_to_scheduled_transfer_only() -> None:
+    """豁免只对预约生效：同一笔 500 元走「当面转」在今天已花 900 时仍是 R07 红灯。
+
+    这是把豁免范围钉住——将来若有人把 _DAILY_RULE_EXEMPT_TOOLS 加宽，这条会先红。
+    """
+    decision = decide(transfer_action(50_000), PolicyContext(spent_today_fen=90_000))
+    assert decision.level == "red"
+    assert decision.rule_id == "R07_transfer_red_daily"
+    assert set(decision.required_factors) == {"face", "sms"}

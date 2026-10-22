@@ -297,9 +297,13 @@ RULES: Final[tuple[Rule, ...]] = (
         "R06_transfer_yellow",
         "yellow",
         "TRANSFER_YELLOW",
+        # schedule_transfer 也要绕开日线这一项：它的钱到出账那天才走，创建期只看单笔。
+        # 少了这半个条件，今日已花 900 再排一笔 500 会先被 R06 否掉、R07 又已豁免它，
+        # 最后掉进 R11_default_deny 判红且不带因子 —— 已知工具被兜底拒绝，用户还看不
+        # 出真实原因（评审 F1）。豁免的只是日线，单笔上限仍由上面的条件与 R08 管。
         lambda action, ctx: _is_spend(action)
         and 0 < _amount(action) <= ctx.single_limit_fen
-        and not _over_daily(action, ctx),
+        and (action.tool in _DAILY_RULE_EXEMPT_TOOLS or not _over_daily(action, ctx)),
         _emit_yellow_transfer,
     ),
     _rule(
