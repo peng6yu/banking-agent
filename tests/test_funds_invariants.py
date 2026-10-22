@@ -17,6 +17,7 @@
 
 from __future__ import annotations
 
+import json
 import sqlite3
 import threading
 from collections.abc import Callable
@@ -68,6 +69,18 @@ def _txn_rows(conn: sqlite3.Connection) -> list[sqlite3.Row]:
 
 def _hold_statuses(conn: sqlite3.Connection) -> list[str]:
     return [str(row["status"]) for row in conn.execute("SELECT status FROM holds").fetchall()]
+
+
+def _rejected_audits(conn: sqlite3.Connection) -> list[dict[str, object]]:
+    """审计里所有「被拒绝」的记录：拒绝也要留痕，这是操作审计的要求。"""
+    rejected: list[dict[str, object]] = []
+    for row in conn.execute(
+        "SELECT seq, event_type, payload_json FROM audit_log ORDER BY seq"
+    ).fetchall():
+        payload = json.loads(row["payload_json"])
+        if payload.get("rejected"):
+            rejected.append({"seq": row["seq"], "event_type": row["event_type"], **payload})
+    return rejected
 
 
 def _run_concurrently(workers: list[Callable[[threading.Barrier], object]]) -> list[object]:
@@ -311,6 +324,12 @@ def test_daily_limit_guard_rejects_commit_over_the_line(bank) -> None:
     assert funds.fetch_hold(bank, second.hold_id).status == "held"
     assert funds.spent_today_fen(bank, DEBIT_ID) == 90_000
 
+    # 拒绝也要留痕：审计里有一条 reason=DAILY_LIMIT_EXCEEDED
+    rejected = _rejected_audits(bank)
+    assert len(rejected) == 1
+    assert rejected[0]["reason"] == "DAILY_LIMIT_EXCEEDED"
+    assert rejected[0]["amount_fen"] == 90_000
+
 
 def test_daily_limit_guard_rejects_single_amount_over_the_line(bank) -> None:
     """一笔就超过硬线的，也不许动钱。"""
@@ -358,7 +377,20 @@ def test_concurrent_daily_limit_blocks_the_second_transfer(bank) -> None:
     committed = [r for r in results if r.ok and r.data.get("status") == "committed"]
     assert len(committed) == 1, "两笔 900 元都放行了，日累计硬线形同虚设"
 
-    # 账上只有一笔出账，日累计只记了一笔
+    # 被拦下的那笔要明确失败，不能悄悄装作成功
+    blocked = [r for r in results if r is not committed[0]]
+    assert len(blocked) == 1
+    assert blocked[0].ok is False
+    assert blocked[0].error_code == "DAILY_LIMIT_EXCEEDED"
+    assert blocked[0].data.get("settle_error") == "DAILY_LIMIT_EXCEEDED"
+
+    # 账上只有一笔出账，日累计只记了一笔，余额只被扣了一次
     assert len([row for row in _txn_rows(bank) if row["direction"] == "out"]) == 1
     assert funds.spent_today_fen(bank, DEBIT_ID) == 90_000
     assert _balance(bank) == DEBIT_BALANCE - 90_000
+    assert _balance(bank) >= 0
+
+    # 拒绝也要留痕
+    rejected = _rejected_audits(bank)
+    assert len(rejected) == 1
+    assert rejected[0]["reason"] == "DAILY_LIMIT_EXCEEDED"
