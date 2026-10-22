@@ -146,7 +146,7 @@ curl -s http://127.0.0.1:8000/api/audit/verify
 ### 单元与集成测试（实测全绿，用例数持续增补）
 
 ```bash
-python3.12 -m pytest -q tests/            # 689 passed, 4 skipped（2026-10-23 实测；用例会随增补变化，复跑以实测为准）
+python3.12 -m pytest -q tests/            # 692 passed, 4 skipped（2026-10-23 实测；用例会随增补变化，复跑以实测为准）
 ```
 
 ### 前端合规自检（实测 62 项全过）
@@ -214,7 +214,7 @@ python3.12 -m app.smoke                    # 实测 4/4 PASS，主脑延迟约 1
 | `app/tools/` | 26 个工具：查人、查余额、账单、卡片、订阅、转账、资金冻结等 |
 | `app/api/` | 10 个 HTTP 端点 + 根页面 |
 | `web/index.html` | 单文件前端（原生 JS，无框架、无 CDN、零外链） |
-| `tests/` | pytest 用例集（689 passed / 4 skipped，2026-10-23 实测）+ 43 条红队 YAML |
+| `tests/` | pytest 用例集（692 passed / 4 skipped，2026-10-23 实测）+ 43 条红队 YAML |
 | `scripts/` | 种子脚本、前端合规检查器 |
 | `docs/` | 交接规格书 00—10（写代码前必读）+ 答辩与演示交付件 |
 | `规划/` | 前期选型与模型实测记录 |
@@ -227,7 +227,7 @@ python3.12 -m app.smoke                    # 实测 4/4 PASS，主脑延迟约 1
 |---|---|---|
 | `make run` | 启动服务（--reload） | ✅ |
 | `make seed` | 建库 + 种子（幂等） | ✅ |
-| `make test` | pytest 全跑 | ✅ 全绿（689 passed / 4 skipped，2026-10-23 实测） |
+| `make test` | pytest 全跑 | ✅ 全绿（692 passed / 4 skipped，2026-10-23 实测） |
 | `make smoke` | 模型连通性自检 | ✅ 4/4 |
 | `make cov` | 覆盖率（未装 pytest-cov 时自动退回纯跑） | ✅ |
 | `make reset` | `POST /api/demo/reset` 演示前清场 | ✅ |
