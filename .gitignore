@@ -6,6 +6,7 @@ data/*.db
 data/*.db-wal
 data/*.db-shm
 data/token_secret*
+data/api_token*
 data/audit_fallback.log
 tmp/
 
