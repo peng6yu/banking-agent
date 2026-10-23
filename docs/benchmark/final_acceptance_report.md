@@ -1,7 +1,7 @@
 # 最终验收报告（阶段 7）
 
 > 生成时间：2026-10-23 22:30（Asia/Shanghai），第二轮审查收口后更新。
-> 仓库：`banking-agent/`，分支 `main`；上一公开提交 `cccfb8f`（PR #1 合并后第一轮收口），
+> 仓库：`banking-agent/`，分支 `main`；上一轮公开提交 `cccfb8f`（PR #1 合并后第一轮收口），
 > 本轮收口改动已 commit 并 push GitHub（最终提交号见 `git log -1 --oneline` / 远程 `main`）。
 > 本报告里的每个数字都来自本次实际执行，不引用 README 里的历史数字；命令与输出见 §3。
 > **模型配额限制**：MiniMax Token Plan 在 2026-10-23 22:10 后耗尽（HTTP 429），依赖真实模型的
@@ -189,7 +189,7 @@ make test                                   # 1131 passed / 4 skipped
 python3.12 scripts/check_frontend.py        # 66/66
 python3.12 -m scripts.redteam               # 43/43
 python3.12 -m scripts.e2e                   # 13/13（会删库重建，跑完 make reseed）
-python3.12 scripts/browser_smoke.py         # 真浏览器 PASS + 三张截图
+python3.12 scripts/browser_smoke.py         # 真浏览器（需可用模型；配额耗尽时失败），通过则落三张截图
 RUN_BROWSER_SMOKE=1 python3.12 -m pytest tests/test_browser_smoke.py -q   # 4 passed
 python3.12 -m tests.eval.run_eval --cases tests/eval/intent_cases.yaml --out tests/eval/results --group both
 ```
