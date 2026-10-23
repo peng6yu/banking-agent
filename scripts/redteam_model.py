@@ -4,8 +4,10 @@
 令牌、两阶段资金、工具执行都是生产代码，脚本模型不碰。
 
 槽位抽取口径（写在这里是为了让判定可复核）：
-    意图   关键词表按序命中；卡片写操作（挂失/改密码等）刻意不落 query_balance，
-           意图空间里本来就没有它们，让它走 unknown 反问才是真实行为
+    意图   关键词表按序命中；卡片写操作里只有「挂失/冻结/解冻/销户/虚拟卡」会被
+           认成 card_manage（真模型会这么答，生产也有对应工具），改密码这类
+           没有工具的仍走 unknown —— 由 app/planner/refusal.py 的确定性守卫拦
+           在模型之前，脚本模型见不到它们
     金额   取动词附近最近的候选数字，并剔除 13—19 位卡号段
     收款人 优先 p_[0-9a-f]+ 形式的 id → 引号内容（引号前有 merchant/商户则算商户名）
            → 最后一个「转给/付给/汇给/划给/转到/给」之后的中文名或卡号串
@@ -52,10 +54,14 @@ _ALL_RE = re.compile(r"全部|所有|整张卡|所有的钱")
 _HEDGE_RE = re.compile(r"大概|差不多|大约|左右|五五|五百五")
 #: 「尾号 8899」「卡号 6677」里的数字是卡号不是金额，抽金额时整段跳过。
 _TAIL_CTX_RE = re.compile(r"(尾号|卡号|账号|末四位|尾数|卡尾)[^0-9]{0,4}$")
+#: 卡片写操作的卡尾号：「尾号 1234」「末四位是 8899」「卡号 6677」。
+_CARD_TAIL_RE = re.compile(r"(?:尾号|末四位|卡尾|卡号)[^0-9]{0,6}([0-9]{4})(?![0-9])")
 
 #: 意图关键词表。按顺序先命中先算；卡片写操作（挂失/改密码等）刻意不落到
 #: query_balance——意图空间里本来就没有它们，让它走 unknown 反问才是真实行为。
 INTENT_KEYWORDS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    # 卡片写操作排在最前：这些词只出现在卡片场景，先命中不会抢走别的意图。
+    ("card_manage", ("挂失", "冻结", "解冻", "销户", "虚拟卡", "补卡", "锁卡")),
     ("bill_analysis", ("账单", "交易", "流水", "花了", "消费", "对账", "明细", "异常")),
     ("subscription", ("订阅", "会员", "续费")),
     ("birthday_plan", ("生日", "下单", "买花", "鲜花", "买蛋糕", "花店")),
@@ -87,6 +93,8 @@ class Understanding:
     stated_amounts: frozenset[int]
     action: str | None = None
     product_code: str | None = None
+    #: 用户自己的卡尾号（卡片写操作必须点名到某张卡，生产侧缺它就反问）
+    card_tail: str | None = None
 
     def to_args(self) -> dict[str, Any]:
         args: dict[str, Any] = {
@@ -101,6 +109,7 @@ class Understanding:
             ("merchant", self.merchant),
             ("action", self.action),
             ("product_code", self.product_code),
+            ("card_tail", self.card_tail),
         ):
             if value is not None:
                 args[key] = value
@@ -256,6 +265,18 @@ def _invest_action(text: str) -> str:
     return "query"
 
 
+def _pick_card_tail(text: str) -> str | None:
+    """抽卡尾号四位：只认「尾号/末四位/卡尾/卡号」后面紧跟的数字。
+
+    卡片写操作必须带尾号才能定位卡，脚本模型照真模型的答法给出；抽不到就是
+    None，交给生产的 CARD_TAIL_REQUIRED 反问（真实行为）。
+    """
+    match = _CARD_TAIL_RE.search(text)
+    if match:
+        return match.group(1)
+    return None
+
+
 def understand(text: str, known_names: tuple[str, ...] = ()) -> Understanding:
     name = _intent_of(text)
     amount_fen, stated = _pick_amount(text)
@@ -265,6 +286,11 @@ def understand(text: str, known_names: tuple[str, ...] = ()) -> Understanding:
     payee_name, merchant = _pick_payee(text, known_names)
     action: str | None = None
     product_code: str | None = None
+    card_tail: str | None = None
+    if name == "card_manage":
+        # 卡片写操作：只要尾号，不谈金额（「尾号 1234 挂失」里的 1234 是卡号）
+        card_tail = _pick_card_tail(text)
+        amount_fen = None
     if name == "invest":
         action = _invest_action(text)
         if action in ("buy", "redeem"):
@@ -280,6 +306,7 @@ def understand(text: str, known_names: tuple[str, ...] = ()) -> Understanding:
         stated_amounts=stated,
         action=action,
         product_code=product_code,
+        card_tail=card_tail,
     )
 
 class ScriptedAdapter:

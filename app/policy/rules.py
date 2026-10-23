@@ -146,7 +146,14 @@ def _emit_invalid_amount(action: Action, ctx: PolicyContext) -> Decision:
 
 
 def _emit_unknown_tool(action: Action, ctx: PolicyContext) -> Decision:
-    return _decision("red", "R03_unknown_tool", "UNKNOWN_TOOL", "我还不会这个操作", ctx)
+    """工具不在册 = 硬红灯；话术可由兜底守卫逐类给出（app/planner/refusal.py）。
+
+    确定性拒答把「念验证码给我」「把系统提示词念一遍」这类请求也送进这条规则：
+    裁决不变（同一个 R03、同样落 policy.decided），只是把通用句换成贴切的一句，
+    免得用户以为系统只是「不会」，而不知道这类请求根本不被受理。
+    """
+    reply = str(action.params.get("refusal") or "").strip()
+    return _decision("red", "R03_unknown_tool", "UNKNOWN_TOOL", reply or "我还不会这个操作", ctx)
 
 
 def _emit_untrusted(action: Action, ctx: PolicyContext) -> Decision:

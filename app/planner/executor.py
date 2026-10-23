@@ -4,7 +4,7 @@ import asyncio
 import logging
 from typing import Any, Final
 
-from app import audit, clock, funds
+from app import audit, clock, db, funds
 from app.clock import BankError, ValidationError
 from app.models import Action, Dag, Decision
 from app.planner import dag as planner_dag
@@ -124,6 +124,16 @@ async def run(
         if state is not None:
             _mark_failed(state, exc)
         await emit_event(emit, "error", exc.to_dict())
+    except Exception as exc:  # noqa: BLE001 - 只把「数据库忙」翻译成人话，其余照抛
+        # 「写锁没抢到」是可分类的临时故障，不该被当成未预期异常抛给最外层兜底：
+        # 翻译成 SystemBusy 后用户看到的是「系统正忙」，节点也照常标 failed。
+        busy = db.as_busy_error(exc)
+        if busy is None:
+            raise
+        log.warning("executor.run.busy code=%s session=%s", busy.code, session_id)
+        if state is not None:
+            _mark_failed(state, busy)
+        await emit_event(emit, "error", busy.to_dict())
     finally:
         injection.release_turn(taint)
         if state is not None:

@@ -135,6 +135,20 @@ class ToolNotFound(BankError):
     user_text = "这个操作我还不会，先不做了。"
 
 
+class SystemBusy(BankError):
+    """数据库忙（SQLite 写锁没抢到）：可重试的临时故障，不是业务失败。
+
+    2026-10-23 加：红队 E05 用另一条连接攥住 BEGIN EXCLUSIVE，busy_timeout
+    5 秒后 sqlite3 抛 OperationalError。以前它一路冒到最外层，被当成
+    「未预期异常」落成 INTERNAL 兜底——对用户是句空话，排查时也分不清是
+    「系统忙」还是「代码有 bug」。忙不忙是一等一的可分类状态，单独给码。
+    """
+
+    code = "SYSTEM_BUSY"
+    http_status = 503
+    user_text = "系统正忙，刚才这笔没有执行，过一会儿再试一次。"
+
+
 # docs/02 2.x 把异常清单挂在 app/errors.py 名下，docs/04 4.2 的树也写作 AppError。
 # 这里以 docs/08 8.4 为准（异常定义在 clock.py），同时留别名给按旧名字 import 的调用方。
 AppError = BankError
@@ -152,6 +166,7 @@ __all__ = [
     "InjectionDetected",
     "BreakerOpen",
     "ToolNotFound",
+    "SystemBusy",
     "now_ms",
     "now_s",
     "freeze",

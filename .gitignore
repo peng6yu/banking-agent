@@ -6,6 +6,7 @@ data/*.db
 data/*.db-wal
 data/*.db-shm
 data/token_secret*
+data/audit_fallback.log
 tmp/
 
 # Python
