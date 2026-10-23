@@ -165,21 +165,25 @@ git checkout main && git merge --no-ff feat/m3-policy && git push
 
 ## 9.9 环境变量（`.env` 键名固定）
 
-| 键 | 说明 | 示例 |
-|---|---|---|
-| `MINIMAX_API_KEY` | 运行时模型密钥，由 `setup_env.sh` 从 `~/.dsh/.env` 抽取（或 `--prompt` 交互粘贴） | `sk-cp-...` |
-| `MINIMAX_API_HOST` | 固定 | `https://api.minimaxi.com` |
-| `MODEL_BRAIN` | 主脑 | `MiniMax-M3.1-Flash-Preview` |
-| `MODEL_FAST` | 快速分类 | `MiniMax-M2.5-highspeed` |
-| `MODEL_BACKUP` | 备脑，**只给 `python3.12 -m app.smoke` 的思维链剥离自检用，生产链路不读、也不做自动降级** | `MiniMax-M2.5` |
-| `LLM_TEMPERATURE` | 固定 0 | `0` |
-| `LLM_TIMEOUT` | 单次调用超时（秒） | `60` |
-| `SCHEDULED_TICK_MS` | 定时转账后台节拍间隔（毫秒），`0` 关闭后台节拍 | `30000` |
-| `MOCK_MODE` | 真值（`1`/`true`/`yes`/`on`）= 全 mock 不起网络 | `false` |
-| `CAPABILITY_SECRET` | 能力令牌 HMAC 密钥，**缺失时黄灯/红灯全链路 fail closed**；`setup_env.sh` 会自动生成 | `token_hex(32)` |
+| 键 | 说明 | 示例 | 旧名（仍生效） |
+|---|---|---|---|
+| `LLM_API_KEY` | 运行时模型密钥，由 `setup_env.sh` 从 `~/.dsh/.env` 抽取（或 `--prompt` 交互粘贴） | `sk-...` | `MINIMAX_API_KEY` |
+| `LLM_BASE_URL` | OpenAI 兼容网关 base url（末尾带 `/v1`、`/v4` 时只补 `/chat/completions`，否则补 `/v1/chat/completions`） | `https://api.minimaxi.com` | `MINIMAX_API_HOST` |
+| `LLM_ENDPOINT` | 直接指定完整 chat/completions URL，覆盖 base 拼接规则（可选） | `https://open.bigmodel.cn/api/paas/v4/chat/completions` | — |
+| `LLM_MODEL` | 主脑 | `MiniMax-M3.1-Flash-Preview` | `MODEL_BRAIN` |
+| `LLM_MODEL_FAST` | 快速分类 | `MiniMax-M2.5-highspeed` | `MODEL_FAST` |
+| `LLM_MODEL_BACKUP` | 备脑，**只给 `python3.12 -m app.smoke` 的思维链剥离自检用，生产链路不读、也不做自动降级** | `MiniMax-M2.5` | `MODEL_BACKUP` |
+| `LLM_TEMPERATURE` | 固定 0 | `0` | — |
+| `LLM_TIMEOUT` | 单次调用超时（秒） | `60` | `LLM_TIMEOUT_S` |
+| `SCHEDULED_TICK_MS` | 定时转账后台节拍间隔（毫秒），`0` 关闭后台节拍 | `30000` | — |
+| `MOCK_MODE` | 真值（`1`/`true`/`yes`/`on`）= 对抗恶意桩；`script` = 离线协作桩；`false` = 真模型 | `false` | — |
+| `CAPABILITY_SECRET` | 能力令牌 HMAC 密钥，**缺失时黄灯/红灯全链路 fail closed**；`setup_env.sh` 会自动生成 | `token_hex(32)` | — |
 
 > 数据库路径**不是**环境变量：固定为 `data/bank.db`（`app/db.py:21 DEFAULT_DB_PATH`）；测试用 `monkeypatch.setattr(db, "DEFAULT_DB_PATH", ...)` 换库。
-> 以上键名与 `app/config.py:33-40`、`app/security/token.py:32` 逐字对齐（2026-10-21 在线联调时核对，此前文档里 `MINIMAX_CN_API_KEY`/`LLM_MODEL_*`/`LLM_TIMEOUT_S`/`DB_PATH`/`TOKEN_SECRET` 均为错名，照抄会全部不生效）。
+> 以上键名与 `app/config.py` 的 `Settings` 字段、`app/security/token.py:32` 逐字对齐。
+> **新名优先、旧名兜底**：`LLM_*` 是通用名（任意 OpenAI 兼容厂商），旧的 `MINIMAX_*/MODEL_*` 仍生效，老 `.env` 不用重写。
+> 此前文档里的错名 `MINIMAX_CN_API_KEY`/`DB_PATH`/`TOKEN_SECRET` 依旧不生效（照抄会不工作）。
+> **换厂商怎么配、各家填法、报错速查**：见 [模型配置说明](模型配置说明.md)。
 
 ## 9.10 工作区卫生
 

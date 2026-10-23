@@ -122,3 +122,18 @@
 - 同步：docs/02 目录表、docs/06 定时六步第 5 行、docs/07 端点表、docs/09 环境变量表、docs/技术文档与提交物对照表里「无常驻调度器」的旧说法。
 - 复验：pytest **662 passed**、redteam PASS 29 / FAIL 14（未退化）、e2e 13/13、check_frontend 62/62、seed 18 张表全绿、PPT 已重生成（13 页）。
 - 遗留：没有跨进程分布式锁，多实例部署需外部串行化；`execute_due` 失败的行由它自己置 failed 并写审计。
+## v1.5.0 模型配置去厂商化 + 换厂商配置文档  2026-10-23
+
+- [x] **先说事实：仓库公开但不含任何密钥。** 审计确认 `.env` 未入库（`.gitignore` 第 2 行）、跟踪文件里查不到任何 key 形态字符串（`git grep -nE 'sk-[A-Za-z0-9_-]{8,}'` 无命中）；key 缺失时按设计 fail closed，不降级放行。所以问题不在「漏传 key」，而在「没写清楚怎么配」。
+- [x] **配置变量去厂商化**（`app/config.py`）：通用名 `LLM_API_KEY` / `LLM_BASE_URL` / `LLM_ENDPOINT` / `LLM_MODEL` / `LLM_MODEL_FAST` / `LLM_MODEL_BACKUP`；旧的 `MINIMAX_API_KEY` / `MINIMAX_API_HOST` / `MODEL_BRAIN` / `MODEL_FAST` / `MODEL_BACKUP` **仍然生效**，新名优先，老 `.env` 不用重写。
+- [x] **endpoint 拼接规则**（`build_endpoint`）：`LLM_ENDPOINT` 优先 > base 已含 `/chat/completions` > base 以 `/v1`、`/v4` 结尾只补 `/chat/completions` > 其余补 `/v1/chat/completions`。覆盖 OpenAI / DeepSeek / 智谱 / DashScope / Moonshot / Ollama / vLLM。
+- [x] `Settings` 字段改用 `default_factory`：每次实例化读环境变量，改 `.env` 或 monkeypatch 立即生效，不用重启进程；新增 `Settings.provider` 粗判厂商（只用于自检输出与文档提示，不参与任何路由决策）；保留 `settings.host` 旧字段别名。
+- [x] `setup_env.sh` 重写：从 `~/.dsh/.env` 按厂商常见变量名自动抽取（`LLM_API_KEY`/`MINIMAX_CN_API_KEY`/`DEEPSEEK_API_KEY`/`OPENAI_API_KEY`/`DASHSCOPE_API_KEY`/`MOONSHOT_API_KEY`/`ZHIPU_API_KEY`），按 key 名套用对应厂商的 base url 与默认模型；`--prompt` 交互粘贴任意厂商的 key 并顺带问 base url 与模型名；生成的 `.env` 改用通用键名。
+- [x] `.env.example` 重写：逐项注释 + 旧名兼容说明 + `MOCK_MODE` 三态说明（false 真模型 / true 对抗恶意桩 / script 离线协作桩）。
+- [x] **新增 `docs/模型配置说明.md`**：三十秒版、为什么仓库里没有 key、配置读取优先级、环境变量总表、endpoint 拼接规则、各家填法表、换厂商三条硬要求（支持 `tool_calls` / 接受 `tool_choice: "auto"` / 支持 SSE 流式）、配好后怎么验（smoke 输出解读 + 三套回归）、报错速查表、换模型后必跑的回归清单、密钥安全铁律、常见问答。
+- [x] README 新增「模型配置（仓库不含密钥，换厂商只改三行）」一节（环境变量表 + 各家 base url/模型名表 + 三条硬要求 + 指向配置文档）；「已知限制 7」与「技术选型」同步注明**只实测过 MiniMax 一家**，本仓库不替其他厂商背书。
+- [x] 同步：`docs/09` §9.9 环境变量表（新键名 + 旧名兼容关系）、`docs/技术文档.md`、`docs/提交物对照表.md`、`docs/交付/交付说明.md`、`docs/答辩PPT大纲.md` 的实测条数 **731 passed / 4 skipped**；答辩 PPT 重生成（13 页）。
+- [x] 新增 `tests/test_config_model_provider.py`（30 条）：endpoint 拼接 10 组、通用名/旧名/优先级、旧 `host` 别名、`LLM_TIMEOUT_S` 兜底、默认值、厂商粗判 8 组、缺 key fail closed 且报错可操作、Bearer 头、两种 mock 模式。
+- 复验：`pytest -q tests/` = **731 passed / 4 skipped**（11.3s）；`scripts.redteam` = PASS 29 / FAIL 14（未退化）；`check_frontend` 62/62；`app.smoke` 真模型 4/4（旧名路径与通用名路径各跑一遍，均通，MiniMax 端点与模型名解析正确）。
+- 遗留：**只实测过 MiniMax 一家**，其余厂商的兼容性由使用者按 `docs/模型配置说明.md` 自验；未做多厂商自动降级（`LLM_MODEL_BACKUP` 只给 smoke 自检用，生产链路不读）。
+
