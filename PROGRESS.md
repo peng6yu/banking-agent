@@ -278,14 +278,14 @@
 > 起因：赛题要求「银行领域知识真正参与决策」和「主动财务管理」，外部审查又指出多收款人/一句多笔的 P0 规划缺口。本版把三件事一起收口：知识层、主动财务闭环、原话层确定性付款 guard。
 
 ### 一、代码
-- [x] `app/knowledge/`：`models`（frozen dataclass）/`loader`（结构错误 fail-closed、内容问题 warning、`version=sha256 前 16 位`）/`parsers`/`normalize`（只做字面别名替换）/`retrieve`（结构化+关键词+场景，无向量库）。数据 `knowledge/{terms,ontology,intent_rules,workflows,sources}.yaml`：40 术语 / 25 实体 / 22 关系 / 11 意图规则 / 10 工作流 / 34 来源，加载时 7 条 warning（1 superseded + 6 unverified）。
+- [x] `app/knowledge/`：`models`（frozen dataclass）/`loader`（结构错误 fail-closed、内容问题 warning、`version=sha256 前 16 位`）/`parsers`/`normalize`（只做字面别名替换）/`retrieve`（结构化+关键词+场景，无向量库）。数据 `knowledge/{terms,ontology,intent_rules,workflows,sources}.yaml`：40 术语 / 25 实体 / 22 关系 / 11 意图规则 / 10 工作流 / 34 来源，加载时 7 条 warning（1 superseded + 6 unverified；本轮补核验后为 1 superseded + 4 unverified）。
 - [x] `app/planner/kb_bridge.py`：确定性后处理，**不把知识塞进模型上下文**（SYSTEM_PROMPT 与 messages 被测试逐字钉死，且不可信文本不应影响授权）；`KNOWLEDGE_ENABLED` 开关；只影响问不问 / 槽位补全 / 跨场景识别 / 解释依据。
 - [x] `app/proactive.py` + `app/tools/proactive.py` + 4 张新表（18→22）：储蓄目标、监测规则、主动提醒、监测运行记录；金额全用整数分，计算在确定性代码里；7 个工具与 6 个 HTTP 端点。监测**只能手动/脚本触发**，不是后台定时服务。
 - [x] `app/planner/payment_guard.py`：只看用户原话，独立于模型与知识开关；多收款人、一句多笔、AA 分摊命中即强制澄清，不生成可执行写 DAG；`intent.py` 与 `routes._events` 双层接线，审计 payload 增 `guard`。
 - [x] 入口令牌从查询参数改到 URL fragment：`bootstrap_url()` 返回 `#token=`，`_presented_token` 拒收查询参数，前端从 `location.hash` 读一次存 sessionStorage 并抹掉；`?token=` 会进访问/代理日志，不再接受。
 
 ### 二、测试与评估（本轮实测）
-- [x] `python3.12 -m pytest -q tests/` → **1112 passed / 4 skipped**（新增 guard 26 条、评估/知识/主动服务测试；原 1080 条全部保留）。
+- [x] `python3.12 -m pytest -q tests/` → **1131 passed / 4 skipped**（新增 guard 44 条、评估/知识/主动服务测试；原 1080 条全部保留；第二轮审查补强后为 1131）。
 - [x] `python3.12 scripts/check_frontend.py` → **66/66**；`tests/eval/test_eval_harness.py` → 5 passed。
 - [x] A/B 评估（80 例、同模型同参数）共 5 轮，结果与逐例归因写 `tests/eval/evaluation_report.md`；最终轮（`20261023T210056`，含 guard）B 组未追问即列写工具 **0**、A 组 **4**；并发 2 历史轮曾出现 2 例（C039/C044），报告不宣称已稳定归零。
 

@@ -126,8 +126,13 @@ def test_unknown_intent_still_uses_unknown_question() -> None:
 
 
 def test_missing_slot_fallback_never_speaks_slot_identifier() -> None:
-    """兜底反问也不能把内部槽位名念给用户。"""
-    result = parse("帮我看看", Scripted([{"intent": "query_balance", "missing": ["merchant"], "confidence": 0.9}]))
+    """兜底反问也不能把内部槽位名念给用户。
+
+    用 reversal/txn_ref 是因为它是该意图的白名单槽位、又没有专用话术，
+    会真正走到「请补充一下相关的信息」这条兜底分支；query_balance 的 merchant
+    已按意图白名单丢弃（模型顺手报的无关槽位不再多问）。
+    """
+    result = parse("帮我看看", Scripted([{"intent": "reversal", "missing": ["txn_ref"], "confidence": 0.9}]))
     assert result.question is not None
-    assert "merchant" not in result.question
+    assert "txn_ref" not in result.question
     assert "_" not in result.question

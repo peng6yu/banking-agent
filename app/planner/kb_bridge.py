@@ -80,6 +80,49 @@ FUTURE_MARKERS: Final[tuple[str, ...]] = (
 REDEEM_TERM: Final[str] = "赎回"
 BUY_TERM: Final[str] = "申购"
 
+#: 订阅/代扣的取消说法。只在「取消动作 + 订阅对象」同时出现时纠正意图，
+#: 避免把「取消转账」误判成退订。
+SUBSCRIPTION_TERMS: Final[tuple[str, ...]] = (
+    "订阅",
+    "自动续费",
+    "连续包月",
+    "包月",
+    "包年",
+    "会员",
+    "代扣",
+    "代扣协议",
+    "自动扣款",
+    "免密支付",
+)
+CANCEL_VERBS: Final[tuple[str, ...]] = (
+    "取消",
+    "关掉",
+    "关闭",
+    "停掉",
+    "停用",
+    "退订",
+    "解绑",
+    "解除",
+    "解约",
+    "别再",
+    "不再",
+    "不用续",
+    "不要续",
+    "别续",
+    "不要续费",
+    "别扣",
+    "不要扣",
+)
+#: 「解约 + 转账」一句话里两个写操作：模板一次只做一件，必须让用户分开说。
+_PAYMENT_ACTION_RE: Final[re.Pattern[str]] = re.compile(
+    r"(?:转账|汇款|打钱|打款|转给|汇给|转\s*[0-9零一二两三四五六七八九十百千万]"
+    r"|付\s*[0-9零一二两三四五六七八九十百千万])"
+)
+CANCEL_PLUS_PAY_QUESTION: Final[str] = (
+    "这句话里既有解约/取消订阅，又有转账。请分两次说：先说要办哪一件，"
+    "我一次只处理一件，不会把两件事混在一起执行。"
+)
+
 #: 赎回的口语说法。「卖了/卖掉/变现」不进术语别名（那是词表的活），
 #: 但跨场景判定不能只认术语：用户说「把货币基金卖了转 3000」时，少判一步就等于
 #: 把赎回这一步丢掉、直接按转账执行。
@@ -310,6 +353,17 @@ def _payee_question(name: str) -> str:
     return PAYEE_AMBIGUOUS_QUESTION.format(payee=name)
 
 
+def _cancel_subscription_cue(text: str) -> bool:
+    """原话是不是在取消订阅/代扣：取消动作与订阅对象必须同时出现。
+
+    只看到「取消」不能纠正——「取消转账」是撤销，不是退订；
+    只看到「会员」也不能纠正——「查一下我的会员」是查询。
+    """
+    if not any(term in text for term in SUBSCRIPTION_TERMS):
+        return False
+    return any(verb in text for verb in CANCEL_VERBS)
+
+
 def _redeem_cue(names: set[str], text: str, current: dict[str, object]) -> bool:
     """这一轮是不是「先动理财」：命中术语、口语说法，或模型已给出 action=redeem。
 
@@ -399,6 +453,13 @@ def advise(
     cross: str | None = None
     extra: tuple[str, ...] = ()
     ask = ""
+    if _cancel_subscription_cue(text):
+        # 模型常把「自动续费/连续包月」判成 card_manage 或 invest，只留一个空槽位；
+        # 这里按原话把意图纠正回 subscription，再由意图层的取消分支问「哪一条」。
+        corrected = "subscription"
+        eff_intent = "subscription"
+        if _PAYMENT_ACTION_RE.search(text):
+            ask = CANCEL_PLUS_PAY_QUESTION
     if eff_intent == "transfer" and redeem:
         # 用户一句「把基金赎回来转给我妈」：赎回受理→资金到账→收款人确认→转账授权，
         # 这四步有先后依赖，不能压成两个可并行调用（workflows.yaml 有对应条目）。

@@ -69,8 +69,16 @@ _PAST_RE: Final[re.Pattern[str]] = re.compile(
 
 #: 明确否定：这不是一笔新付款，别拿它去拦「取消转给李静和她老公」。
 NEGATION_RE: Final[re.Pattern[str]] = re.compile(
-    r"(?:不要|别|不用|无需|取消|撤销|停止|不想)\s*(?:再|去|给我)?\s*"
-    r"(?:转|汇|付|打钱|支付)"
+    r"(?:不要|不需要|没必要|(?<![分特告级类性个])别(?!人|的)|不用|无需|取消|撤销|停止|不想|没有|没|不是)"
+    r"[^，,。；;！!？?\n]{0,10}?(?:转|汇|付|打钱|支付)"
+)
+
+#: 被否定的那一小句。只抹掉这一句，不抹掉整句话：
+#: 「别转给张三，转给李四」里第二句仍是有效指令；
+#: 「转500给张三，再转500给李四，不要转给王五」里前两笔仍必须拦。
+_NEGATED_CLAUSE_RE: Final[re.Pattern[str]] = re.compile(
+    r"[^，,。；;！!？?\n]*(?:不要|不需要|没必要|(?<![分特告级类性个])别(?!人|的)|不用|无需|取消|撤销|停止|不想|没有|没|不是)"
+    r"[^，,。；;！!？?\n]{0,10}?(?:转|汇|付|打钱|支付)[^，,。；;！!？?\n]*"
 )
 
 #: 收款人候选里明显不是人的词：命中就说明这次匹配是句式噪声，不能拿它拦用户。
@@ -175,8 +183,9 @@ def inspect(text: str) -> Finding:
         return Finding()
 
     spoken = _instruction_text(_strip_quotes(text))
-    if NEGATION_RE.search(spoken):
-        return Finding()
+    # 只删被否定的那一句，不能因为句子里有一个「别转」就把整句放行：
+    # 「别转给张三，转给李四」的第二句仍是有效指令。
+    spoken = _NEGATED_CLAUSE_RE.sub(" ", spoken)
     if not _payment_clauses(spoken):
         return Finding()
 

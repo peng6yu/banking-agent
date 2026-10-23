@@ -294,7 +294,7 @@ cat <<EOF
 
 下一步：
   ${B}make run${N}          # 起服务（启动日志会打印带令牌的地址）
-  ${B}make test${N}         # 904 条单测（不依赖模型）
+  ${B}make test${N}         # 1131 条单测（不依赖模型）
   ${B}make redteam${N}      # 43 条红队用例
   ${B}make smoke${N}        # 模型连通性 4 项自检
 

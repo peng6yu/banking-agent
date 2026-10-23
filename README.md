@@ -198,7 +198,7 @@ curl -s http://127.0.0.1:8000/api/audit/verify
 ### 单元与集成测试（实测全绿，用例数持续增补）
 
 ```bash
-python3.12 -m pytest -q tests/            # 1112 passed, 4 skipped（2026-10-23 实测；用例会随增补变化，复跑以实测为准）
+python3.12 -m pytest -q tests/            # 1131 passed, 4 skipped（2026-10-23 实测；用例会随增补变化，复跑以实测为准）
 ```
 
 ### 前端合规自检（实测 66 项全过）
@@ -210,6 +210,8 @@ python3.12 scripts/check_frontend.py      # 实测「前端检查通过：66/66 
 ### 浏览器级冒烟（真 Chromium，实测 PASS + 3 张截图）
 
 `scripts/check_frontend.py` 用正则扫 HTML 源码，一行 JavaScript 都没执行过；`scripts/browser_smoke.py` 用 Playwright 驱动真实 Chromium 打开页面、真的往输入框敲一句话，再对渲染后的 DOM 断言。
+
+> 注意：`scripts/browser_smoke.py` 会调用真实模型，需要可用配额；`tests/test_browser_smoke.py` 用固定模型，无网络也能跑。2026-10-23 22:10 后 MiniMax Token Plan 配额耗尽（429），最终代码只复跑了后者（4 passed）。
 
 ```bash
 export PATH=$PATH:/home/peng/.local/bin
@@ -268,7 +270,7 @@ python3.12 -m app.smoke                    # 实测 4/4 PASS，主脑延迟约 1
 | `app/tools/` | 33 个工具：查人、查余额、账单、卡片、订阅、转账、资金冻结 + 7 个主动财务（只读/需确认，无动钱语义） |
 | `app/api/` | 17 个 HTTP 端点 + 根页面（新增 7 个储蓄目标/主动提醒/模拟流水端点） |
 | `web/index.html` | 单文件前端（原生 JS，无框架、无 CDN、零外链） |
-| `tests/` | pytest 用例集（1112 passed / 4 skipped，2026-10-23 实测）+ 43 条红队 YAML + `tests/eval/` 80 例 A/B 评估集 |
+| `tests/` | pytest 用例集（1131 passed / 4 skipped，2026-10-23 实测）+ 43 条红队 YAML + `tests/eval/` 80 例 A/B 评估集 |
 | `scripts/` | 种子脚本、前端合规检查器 |
 | `docs/` | 交接规格书 00—10（改造前基线，写代码前必读）+ 11—15 改造设计与验收 + 答辩与演示交付件 |
 | `规划/` | 前期选型与模型实测记录 |
@@ -282,7 +284,7 @@ python3.12 -m app.smoke                    # 实测 4/4 PASS，主脑延迟约 1
 | `make setup` | 一键配置新电脑（.venv + 依赖 + .env + 选模型 + 建库 + 自检） | ✅ 幂等；`ARGS="--dry-run"` 可预演 |
 | `make run` | 启动服务（--reload） | ✅ |
 | `make seed` | 建库 + 种子（幂等） | ✅ |
-| `make test` | pytest 全跑 | ✅ 全绿（1112 passed / 4 skipped，2026-10-23 实测） |
+| `make test` | pytest 全跑 | ✅ 全绿（1131 passed / 4 skipped，2026-10-23 实测） |
 | `make smoke` | 模型连通性自检 | ✅ 4/4 |
 | `make cov` | 覆盖率（未装 pytest-cov 时自动退回纯跑） | ✅ |
 | `make reset` | `POST /api/demo/reset` 演示前清场 | ✅ |
@@ -345,7 +347,7 @@ python3.12 -m app.smoke                    # 实测 4/4 PASS，主脑延迟约 1
 docs/00_总纲.md                  ← 十条铁律 + 里程碑 DoD
 docs/01_架构与数据流.md           ← 三段论与不变量
 docs/02_目录结构与文件职责.md     ← 每个文件干什么
-docs/03_数据库与种子数据.md       ← 18 张表 DDL（改造前基线；新增 4 张见 docs/12_主动财务管理设计.md）
+docs/03_数据库与种子数据.md       ← 22 张表 DDL（改造前 18 + 主动财务 4，见 docs/12）
 docs/04_核心模块实现规格.md       ← 逐函数分支表
 docs/05_安全层实现规格.md         ← 12 条规则 R01–R12 + 令牌七步 ★最重要
 docs/06_工具层与场景实现规格.md   ← 19 工具 + 6 场景分支

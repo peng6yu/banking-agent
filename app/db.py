@@ -26,7 +26,7 @@ PRAGMAS: Final[tuple[str, ...]] = (
     "PRAGMA busy_timeout=5000;",
 )
 
-# 18 张表，顺序即依赖顺序（被引用的先建）
+# 22 张表（改造前 18 + 主动财务 4），顺序即依赖顺序（被引用的先建）
 TABLE_NAMES: Final[tuple[str, ...]] = (
     "users",
     "accounts",

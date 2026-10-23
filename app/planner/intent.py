@@ -112,6 +112,26 @@ INTENT_LABELS: Final[dict[str, str]] = {
     "reversal": "冲正一笔已转出的钱",
 }
 NEED_SLOTS: Final[frozenset[str]] = frozenset({"transfer", "birthday_plan", "schedule_transfer"})
+#: 模型自己报的 missing 只有落在该意图的业务槽位里才允许反问。
+#: 模型经常顺手报一个「格式上合法、业务上无关」的槽位（账单报 month、分析账单报 card_tail），
+#: 照单全收会把本来能直接执行的请求卡在多问一句上。这里按意图收口，缺什么仍由
+#: 下面的确定性必填校验兜底——白名单只约束「模型报的」，不放松「代码要求的」。
+REPORTED_MISSING_ALLOWED: Final[dict[str, frozenset[str]]] = {
+    "query_balance": frozenset({"card_tail"}),
+    "transfer": frozenset({"payee_name", "amount_fen", "payee_card_tail", "payee_phone"}),
+    "bill_analysis": frozenset(),
+    "subscription": frozenset({"sub_name"}),
+    "birthday_plan": frozenset({"payee_name", "amount_fen", "date_hint", "gift", "merchant"}),
+    "invest": frozenset({"product_code", "amount_fen", "action"}),
+    "card_manage": frozenset({"card_tail", "amount_fen", "action"}),
+    "schedule_transfer": frozenset({"payee_name", "amount_fen", "due_ms", "recurrence"}),
+    "split_bill": frozenset({"payee_names", "amount_fen"}),
+    "reversal": frozenset({"txn_ref"}),
+    "unknown": frozenset(),
+}
+#: 周期性转账口语标记。工具只支持 once/monthly；「每周/每年」不在这里，
+#: 不能被静默当成一次性转账，也不能假装支持。
+MONTHLY_MARKERS: Final[tuple[str, ...]] = ("每月", "每个月", "月月", "按月", "每月1号", "每月一号")
 ALL_KEYWORDS: Final[tuple[str, ...]] = ("全部", "全额", "所有钱", "剩下的钱")
 # 亲属称谓 → 交给 resolve_payee 的查询词。真模型把「我妈」当关系词、payee_name 留空，
 # 于是多问一轮「这份礼物是给谁过生日？」（README 已知限制 4）。这里按原话兜底：
@@ -561,6 +581,16 @@ def _slots(args: dict[str, Any], text: str, intent: str) -> dict[str, Any]:
         slots = subscription_slots(slots, text)
     if intent == CARD_INTENT:
         slots = card_action(slots, text)
+    if intent == "schedule_transfer":
+        recurrence = str(slots.get("recurrence") or "").strip().lower()
+        if recurrence in ("monthly", "每月", "月"):
+            slots["recurrence"] = "monthly"
+        elif recurrence in ("once", "一次"):
+            slots["recurrence"] = "once"
+        elif any(mark in text for mark in MONTHLY_MARKERS):
+            # 「每个月1号给房东转3000」：模型经常只给日期、不给重复方式，
+            # 结果变成只转一次。这里按原话补 monthly，让 schedule_transfer 真的按月排。
+            slots["recurrence"] = "monthly"
     return slots
 
 
@@ -620,9 +650,10 @@ def _missing(intent: str, slots: dict[str, Any], reported: Any) -> list[str]:
     用户答了也进不了任何工具参数。模型报了某个槽位但自己又填了值的，以值为准，不反问。
     """
     missing: list[str] = []
+    allowed = REPORTED_MISSING_ALLOWED.get(intent, frozenset())
     for item in reported or []:
         key = MISSING_ALIASES.get(str(item).strip(), str(item).strip())
-        if key and key in SLOT_KEYS and key not in slots:
+        if key and key in SLOT_KEYS and key in allowed and key not in slots:
             missing.append(key)
     if intent in NEED_SLOTS:
         if not slots.get("payee_name"):

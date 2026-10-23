@@ -122,6 +122,43 @@ def test_negation_wins_even_with_two_names() -> None:
     assert payment_guard.inspect("别转给张三和李四").ambiguous is False
 
 
+@pytest.mark.parametrize(
+    "text",
+    [
+        # 口语变体：没有「给某人转」的标准句式，但仍是多笔/多人。
+        "转500给张三，再转500给李四，不要转给王五",
+        "给张三转500，给李四转500",
+        "分别给张三和李四转500",
+        "转500给张三、李四",
+        "转500给张三和他老婆",
+        "转500给张三，也转500给张三他老婆",
+    ],
+)
+def test_colloquial_multi_payment_variants_are_flagged(text: str) -> None:
+    finding = payment_guard.inspect(text)
+    assert finding.ambiguous is True, text
+    assert finding.question
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        # 否定只抹掉被否定的那一小句，不能把同一句里的有效指令一起放行。
+        "别转500给张三，转500给李四",
+        "没有转给张三和李四",
+        "不是转给张三和李四",
+        "不需要转给张三和李四",
+        "没必要给张三和李四转钱",
+        "我不想给张三转500，但愿意给李四转500",
+        # 一个收款人短语，或金额模糊，都不该被当成多笔。
+        "转500给张三他老婆",
+        "转几千块给张三",
+    ],
+)
+def test_negation_or_single_payee_variants_are_not_flagged(text: str) -> None:
+    assert payment_guard.inspect(text).ambiguous is False, text
+
+
 # ------------------------------------------------------------ 意图层接线
 
 

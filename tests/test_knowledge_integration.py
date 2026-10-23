@@ -433,3 +433,77 @@ def test_colloquial_redeem_without_product_asks_which_product() -> None:
     assert result.ok is False
     assert "哪只产品" in result.question
 
+
+def test_model_reported_irrelevant_missing_is_dropped() -> None:
+    """模型顺手报的无关槽位不能变成多问一句（C024/C065 的账单过度追问）。
+
+    账单分析的业务槽位只有月份/异常范围；模型报 card_tail 是格式上的合法键、
+    业务上的噪声。白名单只过滤「模型报的」，代码自己的必填校验不受影响。
+    """
+    result = parse(
+        "分析一下我的账单",
+        Scripted([{"intent": "bill_analysis", "missing": ["month", "card_tail"], "confidence": 0.9}]),
+    )
+    assert result.intent == "bill_analysis"
+    assert result.missing == []
+    assert result.question is None
+    assert result.ok is True
+
+
+def test_model_reported_transfer_missing_is_still_honoured() -> None:
+    """白名单不能把真正的缺参也吞掉：转账缺金额仍要追问。"""
+    result = parse(
+        "转500给张三",
+        Scripted([{"intent": "transfer", "payee_name": "张三", "missing": ["amount_fen"], "confidence": 0.9}]),
+    )
+    assert "amount_fen" in result.missing
+    assert result.question == "转多少？"
+    assert result.ok is False
+
+
+def test_cancel_subscription_is_corrected_even_when_model_says_card_manage() -> None:
+    """C006/C007/C021：模型把「连续包月关掉」判成卡片操作，知识层要纠回订阅。"""
+    result = parse(
+        "把尾号8888卡上的连续包月关掉",
+        Scripted([{"intent": "card_manage", "card_tail": "8888", "confidence": 0.9}]),
+    )
+    assert result.intent == "subscription"
+    assert result.slots.get("cancel_subs") is True
+    assert result.question == intent.SUBSCRIPTION_NAME_QUESTION
+    assert result.ok is False
+
+
+def test_cancel_subscription_plus_transfer_asks_to_split_requests() -> None:
+    """一句话里「解约 + 转账」是两个写操作，不能混成一个计划执行。"""
+    result = parse(
+        "把代扣协议解约，然后把钱转给我自己另一张卡",
+        Scripted([{"intent": "subscription", "cancel_subs": True, "confidence": 0.9}]),
+    )
+    assert result.intent == "subscription"
+    assert result.question == kb_bridge.CANCEL_PLUS_PAY_QUESTION
+    assert result.ok is False
+
+
+def test_monthly_transfer_phrase_sets_monthly_recurrence() -> None:
+    """「每个月1号」不能退化成只转一次：槽位与 DAG 参数都要带 monthly。"""
+    parsed = parse(
+        "每个月1号给房东转3000",
+        Scripted(
+            [
+                {
+                    "intent": "schedule_transfer",
+                    "payee_name": "房东",
+                    "amount_fen": 300000,
+                    "due_ms": 1900000000000,
+                    "confidence": 0.9,
+                }
+            ]
+        ),
+    )
+    assert parsed.intent == "schedule_transfer"
+    assert parsed.slots.get("recurrence") == "monthly"
+    assert parsed.ok is True
+    built = planner_dag.build_or_single({"intent": parsed.intent, "slots": parsed.slots})
+    assert [node.tool for node in built.nodes] == ["resolve_payee", "schedule_transfer"]
+    assert built.nodes[-1].params.get("recurrence") == "monthly"
+

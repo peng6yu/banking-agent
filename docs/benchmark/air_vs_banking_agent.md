@@ -2,7 +2,7 @@
 
 > **用途**：2026 深圳国际金融科技大赛「人工智能赛道 · 银行 AI 智能体」阶段 0.3 / 0.4 交付物。把 Revolut AIR 的公开能力逐维度拆成可执行的改造项，回答三件事：差在哪、值不值得补、补完怎么验收。
 > **对标对象**：Revolut AIR（AI by Revolut），证据全部复用 `docs/benchmark/revolut_air_research.md` 的台账编号（A1–A17 / B1–B15 / F1–F7）与四档证据状态，**不新增来源、不升级证据等级**。
-> **本项目证据口径**：代码路径 + 测试。基线数字来自 `docs/改造实施基线.md`（改造前基线：**904 passed / 4 skipped**）；本文写作时（2026-10-23）一度处于并行改造中间态（916/935 passed），**已收口**。最终交付状态：**1112 passed / 4 skipped**（`.venv/bin/python -m pytest -q`，19.94s）、前端静态检查 **66/66**、红队 **PASS 43 / FAIL 0**、A/B 评估 **80 例**（详见 `docs/benchmark/final_acceptance_report.md`）。中间态数字只作过程记录，不作交付依据。
+> **本项目证据口径**：代码路径 + 测试。基线数字来自 `docs/改造实施基线.md`（改造前基线：**904 passed / 4 skipped**）；本文写作时（2026-10-23）一度处于并行改造中间态（916/935 passed），**已收口**。最终交付状态：**1131 passed / 4 skipped**（`.venv/bin/python -m pytest -q`，19.94s）、前端静态检查 **66/66**、红队 **PASS 43 / FAIL 0**、A/B 评估 **80 例**（详见 `docs/benchmark/final_acceptance_report.md`）。中间态数字只作过程记录，不作交付依据。
 > **硬约束**：本矩阵不改代码；所有"本项目"结论都能回指真实文件；拿不准的一律写「待核实」，不用常识补齐。
 
 ---
@@ -26,21 +26,23 @@
 |---|---|---|
 | 已实现 | 生产链路可调用 + 有测试 | 转账、账单、卡片、订阅、理财申赎 |
 | 部分实现 | 主路径可用，边界或形态缺失 | 多轮（仅收款人歧义续答）、订阅（仅查询/取消，无识别/提醒） |
-| 进行中（收口中） | 代码存在但生产未调用，或加载/测试未通过 | `app/knowledge/`（5 个 YAML 已齐，集成测试 7 条失败待收口） |
-| 未实现 | 无代码、无表、无工具 | 主动监测、适当性问卷、来源引用、评测集 |
-| 待核实 | 有线索但未跑通/未复跑 | 43 条红队本轮未复跑（沿用基线 43/43） |
+| 部分实现（边界缺失） | 主路径可用，但缺后台调度/个性化推荐/延迟执行等形态 | 主动监测（仅手动触发）、理财（无推荐/横向比较）、跨场景（无持久化/延迟） |
+| 未实现 | 无代码、无表、无工具 | 适当性问卷、真实银行连接、后台常驻调度 |
+| 待核实 | 有线索但未跑通/未复跑 | 真实模型多话术对抗（红队 43/43 为规则级） |
 
 ### 0.3 缺口编号与优先级
 
 - **缺口编号 G01–G17**：本文定义，`implementation_priorities.md` 直接引用。
 - **优先级**：P0=核心业务可靠/参数校验/安全边界/执行结果核验/审计/赛题核心场景；P1=领域知识增强、主动财务管理、上下文理解、可解释提醒、能形成演示闭环的跨场景规划；P2=需大量新基础设施/外部服务/额外模型。
 
-### 0.4 先修正三处口径冲突（否则矩阵会写错）
+### 0.4 调研时的三处口径冲突（历史快照）
+
+> 本节记录调研当时的判断，工具数当时为 26；最终交付为 33 个工具（见 `app/tools/tool_specs.py` 与 `/api/health`）。
 
 | # | 流传说法 | 代码实际 | 处置 |
 |---|---|---|---|
 | 1 | README 称"AA 拆分未实现" | `app/planner/split_plan.py:42 build_split` + `app/tools/registry.py` 的 `split_transfer` + `tests/test_split.py`（8 条）**已实现** | 以代码为准，矩阵按"已实现"写；README 待改 |
-| 2 | README/旧架构图称 14 个工具 | `registry.TOOLS` 实测 **26**；`/api/health` 返回 `len(TOOL_NAMES)`（`app/api/routes.py:119`） | 以 26 为准 |
+| 2 | README/旧架构图称 14 个工具 | 调研时 `registry.TOOLS` 实测 **26**；最终交付为 **33**（新增知识层与主动财务工具） | 历史快照 26；当前以 33 为准 |
 | 3 | `docs/提交物对照表` 称"多轮上下文缺失" | `app/planner/clarify.py` 有 Pending/remember/augment，但只服务收款人歧义续答，**不是通用多轮** | 写成"局部多轮"，缺口仍成立（G09） |
 
 ### 0.5 摘要矩阵（扫读用）
@@ -48,13 +50,13 @@
 | 维度 | 缺口 | AIR 证据强度 | 本项目状态 | 优先级 | 估工（人日） |
 |---|---|---|---|---|---|
 | D01 产品定位与交互 | G01 | 官方证实 | 部分（PC 网页 5 面板 + SSE） | P1 | 2–3 |
-| D02 个人财务洞察 | G02 G03 | 能力官方证实；可视化未核实 | 部分（账单分析已实现；储蓄测算/预算偏离在 app/proactive.py 已写，未注册为工具） | P1 | 5–7 |
-| D03 转账与工具调用 | G16 G17 | 动作清单官方证实；工具协议未核实 | 已实现（26 工具 / 9 模板 / 动态 AA） | P2（G16/G17） | 6–10 |
+| D02 个人财务洞察 | G02 G03 | 能力官方证实；可视化未核实 | 已实现（账单分析 + 储蓄测算/预算偏离，3 个只读工具 + 前端面板） | P1 | 5–7 |
+| D03 转账与工具调用 | G16 G17 | 动作清单官方证实；工具协议未核实 | 已实现（33 工具 / 9 模板 / 动态 AA / 原话层付款 guard） | P2（G16/G17） | 6–10 |
 | D04 卡片管理 | G04 | 官方证实 | 已实现（7 工具） | P1（G04） | 2–3 |
 | D05 订阅代扣 | G05 | 查询/管理官方证实；识别/一键取消未核实 | 部分（查询+取消，无识别/提醒） | P0 | 5–7 |
 | D06 理财与适当性 | G06 | 官方证实（读写边界） | 部分（申赎+风险提示，无适当性） | P0 | 4–6 |
 | D07 跨场景规划 | G07 | 官方证实 + B1 | 部分（生日模板 + 知识层跨场景链路，非通用组合） | P0 | 6–8 |
-| D08 主动服务 | G08 | **尚未核实（倾向否定）** | 部分（模块与 4 张表已写，工具未注册；ticker 仍只跑定时） | P1 | 8–12 |
+| D08 主动服务 | G08 | **尚未核实（倾向否定）** | 部分（4 表 + 7 工具 + 前端闭环已注册；仅手动触发，无后台常驻调度） | P1 | 8–12 |
 | D09 上下文与多轮 | G09 | B1（原页未打开）；窗口未核实 | 部分（4–6 轮 + 局部澄清） | P1 | 4–6 |
 | D10 安全确认 | G10 | 官方证实（分级表未核实） | 已实现（R01–R12 + 令牌七步） | P0（已有） | 8–12（P2 部分） |
 | D11 隐私与数据最小化 | G11 | 官方证实（三条承诺） | 已实现（信封 + 审计不落原文） | P1 | 1–2 |
@@ -180,11 +182,11 @@
 |---|---|
 | ① AIR 公开能力 | **没有**公开证据表明 AIR 会主动推送提醒或做财务监测；A9 的"tailored ads"是广告定向，不是财务顾问服务 |
 | ② AIR 依据与证据状态 | A1、A3、A4、A5、A9——均无主动服务表述，**尚未核实，倾向否定**（研究文档 C.3-6）；不得把"主动"写成 AIR 对标能力 |
-| ③ 本项目真实实现状态 | 未实现：`app/planner/ticker.py` 每 `SCHEDULED_TICK_MS`（默认 30s）只调 `scheduled.execute_due`，没有任何监测规则；`app/audit.py` 已预留 `proactive.*` 事件类型，但**无表、无工具**（**复核补记**：应用层已新增 app/proactive.py 约 1400 行，db.py 已建 savings_goals / monitor_rules / proactive_alerts / monitor_runs 四表，储蓄测算与提醒逻辑已写，**但未注册进 registry.TOOLS，仍 26 个工具**）（grep 无 `proactive_alerts`/`savings_goals`） |
-| ④ 代码位置与测试证据 | `app/planner/ticker.py`（仅定时执行）；`app/audit.py` 事件类型清单；无对应测试（缺口本身） |
-| ⑤ 能力缺口 | **G08**：无规则化监测（大额支出、订阅涨价、余额低于目标、续费临近）、无提醒生命周期（产生/去重/已读/忽略）、无"手动触发一次扫描"的入口 |
+| ③ 本项目真实实现状态 | **部分实现**：`app/proactive.py`（确定性 int 分计算 + 仓储 + 两段事务的 `run_monitor`）、`app/tools/proactive.py`（7 工具）、`app/db.py` 四表（savings_goals / monitor_rules / proactive_alerts / monitor_runs）、`app/api/routes.py` 六端点 + 模拟支出端点、`web/index.html` 面板。**监测仅手动/脚本触发**，`app/planner/ticker.py` 仍只跑预约转账，不是后台常驻服务。 |
+| ④ 代码位置与测试证据 | `app/proactive.py`、`app/tools/proactive.py`、`app/db.py`、`app/api/routes.py`、`web/index.html`；`tests/test_proactive_calc.py`、`test_proactive_api.py`、`test_proactive_safety.py`、`test_security_proactive.py`（共 30+ 条），浏览器冒烟已走通建目标→模拟支出→监测→提醒→处理→重算 |
+| ⑤ 能力缺口 | **G08 收窄为**：无后台常驻调度与推送通道（仅页面/脚本手动触发）；其余规则化监测、提醒生命周期（产生/去重/忽略/已处理）、手动触发入口均已实现 |
 | ⑥ 可借鉴设计 | E14：定位为**自研增强**，对外话术只说"打开助手就能看到提醒"，不宣称 7×24 推送；设计上"手动可重复触发"优先于后台常驻（与基线建议一致） |
-| ⑦ 改造复杂度与风险 | 8–12 人日 / 约 800 行 + 4 张表（`savings_goals`、`monitor_rules`、`proactive_alerts`、`monitor_runs`）+ 5 个工具（2 只读 3 黄灯）；风险：误报、重复提醒、无推送通道（单机演示只能页面轮询）、审计事件闭集、R7 单用户 |
+| ⑦ 改造复杂度与风险 | 已落地 4 张表 + 7 工具（3 只读、4 黄灯确认）+ 六端点；风险：误报、重复提醒、无推送通道（单机演示只能页面轮询）、审计事件闭集、R7 单用户 |
 | ⑧ 对应赛题要求 | 无直接场景；支撑场景 5"续费提醒"与场景 2"异常识别"的主动化表达 |
 | ⑨ 验收方法 | 规则命中生成 alert 且幂等（同 rule+周期只一条）；`resolve` 后不再出现；每次扫描写 `proactive.monitor_run` 审计；前端徽标数 = 未解决数；连续两次扫描不产生重复条目 |
 | ⑩ 优先级 | **P1**（G05 的最小提醒可先复用其表，但完整主动服务不阻塞六场景） |
@@ -255,7 +257,7 @@
 |---|---|
 | ① AIR 公开能力 | 官方未公开评测方法；B1 称有多 Agent 平台、guardrails、evals、monitoring、标注与 QA/QC 流程、集中式 AI 网关 |
 | ② AIR 依据与证据状态 | B1（**可信公开技术资料证实，原页未打开**）；具体指标/阈值/数据集规模**尚未核实** |
-| ③ 本项目真实实现状态 | **已补强**：`tests/eval/` 80 例中文评估集 + 可复现脚本 + A/B 报告（真模型，6 项指标：intent/slot/clarify/dag/knowledge_citation/unauthorized）；全量 **1112 passed / 4 skipped**（2026-10-23 终测）、60 个测试文件、43 条红队 **PASS 43 / FAIL 0**、前端 66 项、哈希链审计可验证。**仍无**延迟/token/成本指标与人工质量抽样 |
+| ③ 本项目真实实现状态 | **已补强**：`tests/eval/` 80 例中文评估集 + 可复现脚本 + A/B 报告（真模型，6 项指标：intent/slot/clarify/dag/knowledge_citation/unauthorized）；全量 **1131 passed / 4 skipped**（2026-10-23 终测）、60 个测试文件、43 条红队 **PASS 43 / FAIL 0**、前端 66 项、哈希链审计可验证。**仍无**延迟/token/成本指标与人工质量抽样 |
 | ④ 代码位置与测试证据 | `tests/`、`tests/eval/{intent_cases.yaml,run_eval.py,evaluation_report.md,test_eval_harness.py}`、`scripts/redteam.py`、`scripts/check_frontend.py`、`app/api/routes.py /api/audit/verify` |
 | ⑤ 能力缺口 | **G13**：40% 完成率需要"可量化的意图理解准确率"，当前只有"测试全绿"这一间接证据 |
 | ⑥ 可借鉴设计 | E7：小步引入 evals + 标注集，不建平台；指标只做三项（意图准确率、工具成功率、P95 延迟） |
@@ -270,7 +272,7 @@
 |---|---|
 | ① AIR 公开能力 | 直连内部知识库与产品生态，能回答产品/条款类问题；未见术语表或法规知识库的公开细节 |
 | ② AIR 依据与证据状态 | B1（**可信公开技术资料证实，原页未打开**）；A6（AI 透明度）——**官方资料明确证实**；知识库结构**尚未核实** |
-| ③ 本项目真实实现状态 | **已完成**：`app/knowledge/` 6 个模块 + 5 个 YAML（terms 40 / entities 25 / relations 22 / intents 11 / workflows 10 / sources 34），`app/planner/kb_bridge.py` 接入 intent + dag + routes，`knowledge.retrieved` 审计落库；知识集成测试 7 条失败已收口，全量 1112 passed；加载失败降级为「空知识 + warning + 追问」并有专门测试 |
+| ③ 本项目真实实现状态 | **已完成**：`app/knowledge/` 6 个模块 + 5 个 YAML（terms 40 / entities 25 / relations 22 / intents 11 / workflows 10 / sources 34），`app/planner/kb_bridge.py` 接入 intent + dag + routes，`knowledge.retrieved` 审计落库；知识集成测试 7 条失败已收口，全量 1131 passed；加载失败降级为「空知识 + warning + 追问」并有专门测试 |
 | ④ 代码位置与测试证据 | `app/knowledge/loader.py`、`retrieve.py`（docstring 明确"不引入向量检索"）、`app/planner/kb_bridge.py`、`app/api/routes.py:_audit_knowledge`；测试 `tests/test_knowledge_{loader,normalize,retrieve,integration}.py`、`tests/test_security_knowledge.py`；43 条红队已复跑 PASS 43 / FAIL 0 |
 | ⑤ 能力缺口 | **G14 已关闭**（原缺口：缺 4 个数据文件、缺接线、缺审计与降级策略）；残余：知识仅参与「问不问/填什么/怎么解释」，不进模型上下文（受 SYSTEM_PROMPT 逐字测试约束），语义泛化仍靠别名表 |
 | ⑥ 可借鉴设计 | E5 知识库+产品生态直连；知识是**数据不是指令**（基线原则），冲突时降级并审计；检索用结构化/关键词即可，**不上向量库** |
