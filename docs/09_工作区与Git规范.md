@@ -167,7 +167,7 @@ git checkout main && git merge --no-ff feat/m3-policy && git push
 
 | 键 | 说明 | 示例 |
 |---|---|---|
-| `MINIMAX_API_KEY` | 运行时模型密钥，从 `/home/peng/.dsh/.env` 取 | `sk-cp-...` |
+| `MINIMAX_API_KEY` | 运行时模型密钥，由 `setup_env.sh` 从 `~/.dsh/.env` 抽取（或 `--prompt` 交互粘贴） | `sk-cp-...` |
 | `MINIMAX_API_HOST` | 固定 | `https://api.minimaxi.com` |
 | `MODEL_BRAIN` | 主脑 | `MiniMax-M3.1-Flash-Preview` |
 | `MODEL_FAST` | 快速分类 | `MiniMax-M2.5-highspeed` |
