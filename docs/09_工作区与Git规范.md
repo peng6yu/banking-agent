@@ -203,11 +203,12 @@ git checkout main && git merge --no-ff feat/m3-policy && git push
 | 本机 /usr/bin/python3 是 3.14 | 不能用 |
 | 本机 python3.11 无第三方包 | 不做首选 |
 | 本机 python3.12（/home/peng/.local/bin/python3.12）已有 fastapi 0.136.3、pydantic 2.13.4、httpx 0.28.1、pyyaml、pytest 9.0.3 | 项目统一用它 |
-| pypi.org 与镜像在本机 DNS 解析不稳定，pip install 会失败 | 不建 venv，直接用系统 3.12 |
+| 真正原因是本机 pip.conf 里的 `extra-index-url=https://pypi.ngc.nvidia.com` 解析不了；`make setup` / `make venv` 用 `PIP_CONFIG_FILE=/dev/null` + `pip --isolated` 绕开即可建 venv | 两条路都留：venv（`make setup`）或系统 3.12 |
 | pytest-asyncio、pytest-cov 装不上 | 异步测试用 asyncio.run() 包一层；覆盖率改用本文 10 章的分支清单自证 |
 
 | 约定 | 命令 |
 |---|---|
+| 一键配置 | bash scripts/setup.sh（或 make setup；`--dry-run` 预演，`--ollama`/`--mock` 点名模型来源） |
 | 跑测试 | python3.12 -m pytest -q tests/ |
 | 起服务 | python3.12 -m uvicorn app.main:app --reload --port 8000 |
 | 种子 | python3.12 -m scripts.seed（已有数据会跳过；恢复初始态用 --force 删库重建，等价 make reseed） |
