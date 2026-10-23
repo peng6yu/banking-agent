@@ -35,6 +35,7 @@ LAYERS: dict[str, int] = {
     # 协作回放桩（MOCK_MODE=script）：模型层的离线替身，和 app.llm 一样在最底层
     "app.script_mode": 0,
     "app.security.envelope": 0,
+    "app.security.api_auth": 1,
     "app.security.breaker": 1,
     "app.security.injection": 1,
     "app.security.token": 1,
@@ -91,12 +92,14 @@ ALLOWED: dict[str, frozenset[str]] = {
     "app.api": frozenset(),
     "app.api.routes": frozenset({
         "app.api.schemas",
+        "app.clock",
         "app.config",
         "app.ids",
         "app.llm",
         "app.models",
         "app.planner",
         "app.planner.clarify",
+        "app.security",
         "app.tools.registry",
     }),
     "app.api.schemas": frozenset(),
@@ -133,6 +136,7 @@ ALLOWED: dict[str, frozenset[str]] = {
         "app.clock",
         "app.llm",
         "app.planner",
+        "app.security",
     }),
     "app.models": frozenset(),
     "app.money": frozenset({
@@ -238,6 +242,7 @@ ALLOWED: dict[str, frozenset[str]] = {
     "app.security.envelope": frozenset({
         "app.clock",
     }),
+    "app.security.api_auth": frozenset(),
     "app.security.injection": frozenset({
         "app.log",
         "app.models",
