@@ -11,14 +11,16 @@
 ```bash
 git clone https://github.com/peng6yu/banking-agent.git && cd banking-agent
 make setup   # 没装 make 就 bash scripts/setup.sh
-make run     # 打开 http://127.0.0.1:8000
+make run     # 启动日志会打印一条带 ?token= 的地址，打开那一条
 ```
 
 `make setup` 依次做：找解释器（3.12 优先）→ 建 `.venv` → 装依赖（自动绕开本机 pip.conf 里解析不了的索引）→ 生成 `.env`（权限 600，不入库）→ 定模型来源 → 建库 + 种子 → 真模型时再跑一遍协议自检。模型来源它自己判断：环境或 `.env` 里已有 key 就用云端，本机 Ollama 在跑就用 Ollama，都没有才退回离线协作桩（`MOCK_MODE=script`，零网络也能演查余额与转账）。可以点名：`make setup ARGS="--ollama"` / `ARGS="--mock"` / `ARGS="--dry-run"`（只打印计划不动文件）。**仓库里没有任何人的 API key**，换厂商只改 `.env` 三行，见下面「模型配置」。
 
-不想建 venv 也行：系统 `python3.12` 装好依赖后，`python3.12 -m scripts.seed && python3.12 -m uvicorn app.main:app --port 8000` 一样能跑；能力令牌密钥首次运行会自动生成并落盘（`data/token_secret`，0600）。
+不想建 venv 也行：系统 `python3.12` 装好依赖后，`python3.12 -m scripts.seed && python3.12 -m uvicorn app.main:app --port 8000` 一样能跑。
 
-然后浏览器打开 <http://127.0.0.1:8000>，在左栏输入框里打一句：
+两把钥匙都是**首次运行自动生成、不写进仓库**：能力令牌密钥落 `data/token_secret`（0600），HTTP 访问令牌落 `data/api_token`（0600）。后者是「谁能调这个端口」的闸：启动日志会打印 `http://127.0.0.1:8000/?token=…`，**浏览器打开这一条**，前端读一次存进 sessionStorage 再从地址栏抹掉；之后手敲 <http://127.0.0.1:8000> 也行（同一浏览器同一标签页内有效）。命令行调用带一行头即可：`curl -H "Authorization: Bearer $(cat data/api_token)" http://127.0.0.1:8000/api/tools`。
+
+然后浏览器打开上面那条带令牌的地址，在左栏输入框里打一句：
 
 > 给王强转 500 元
 
@@ -37,7 +39,7 @@ make run     # 打开 http://127.0.0.1:8000
 | 步骤 | 命令 | 实测结果 |
 |---|---|---|
 | 0. 一键配置 | `make setup`（等价 `bash scripts/setup.sh`） | 建 `.venv`、装依赖、生成 `.env`、选模型、建库、自检；幂等可重跑，`--dry-run` 只打印计划 |
-| 1. 起服务 | `make run`（等价 `python3.12 -m uvicorn app.main:app --port 8000`） | 打开 <http://127.0.0.1:8000> |
+| 1. 起服务 | `make run`（等价 `python3.12 -m uvicorn app.main:app --port 8000`） | 启动日志打印 `http://127.0.0.1:8000/?token=…`；打开这条（令牌存 sessionStorage，之后同标签页可裸访问） |
 | 2. 自检 | `curl -s http://127.0.0.1:8000/api/health` | `{"ok":true,"status":"ok","model":"MiniMax-M3.1-Flash-Preview","tools":14,"db":true,...}` |
 | 3. 不配模型也要演 | `make setup ARGS="--mock"` | `MOCK_MODE=script` 离线协作桩：查余额、转账两种业务照演，其余照实反问 |
 | 4. 演示跑脏了复原 | `make reseed`（等价 `python3.12 -m scripts.seed --force`） | 删库重建初始态，末行 `seed.ok random_seed=20261018 tables=18 window_days=180` |
@@ -163,9 +165,23 @@ python3.12 -m app.smoke               # 自检：4/4 PASS 才算配好（会打�
 
 任何一步不过都写一条 `token.rejected` 审计再抛错；没有令牌直接调用动钱工具，记 `TOKEN_MISSING` 并拒绝。
 
-**签名密钥不是配置项，是硬前置。** 签发密钥只从环境变量 `CAPABILITY_SECRET` 读取（`app/security/token.py` 的 `load_secret()`），代码里没有内置默认密钥、`.env` 不入库。缺失或不是 64 位十六进制时，系统**按设计 fail closed**：`raise MissingCapability(reason="CAPABILITY_SECRET_MISSING")`，黄灯/红灯在用户点确认后直接返回 `MISSING_CAPABILITY`，一条动钱指令都执行不了——缺了就整个链路停摆，而不是降级放行、绿灯兜底。绿灯的只读查询不依赖该密钥，仍然可用。
+**签名密钥首次运行自动生成，且从不进仓库。** `app/security/token.py` 的 `load_secret()` 按三段取值：显式传入 → 环境变量 `CAPABILITY_SECRET`（一旦设了就必须是 64 位十六进制，空串也算「设了」且非法）→ 文件 `CAPABILITY_SECRET_FILE`（默认 `data/token_secret`，0600，首次用 `secrets.token_hex(32)` 生成）。代码里**没有内置默认密钥**，绝不会悄悄回落硬编码值；文件读不了/写不了时按设计 fail closed（`CAPABILITY_SECRET_FILE_UNREADABLE` / `..._UNWRITABLE`），黄灯/红灯在用户点确认后返回 `MISSING_CAPABILITY`——密钥这条链断了，动钱指令就全停，而不是降级放行、绿灯兜底。绿灯的只读查询不依赖该密钥，仍然可用。
 
 > 评委追问点：密钥不在代码里、不进 git、缺失即全链路停摆。这是刻意的 fail-closed 设计，不是可以「先临时配一个」的开关。
+
+### 入口访问令牌（`/api/*` 的第一道门）
+
+路由层原先没有任何身份校验——`session_id` 由客户端随便传，谁能连上端口谁就能发起转账、读审计、代点确认。现在所有 `/api/*`（除 `/`、`/api/health`、`/favicon.ico`）都要求一枚**本机访问令牌**：
+
+| 项 | 规则 |
+|---|---|
+| 令牌从哪来 | `API_TOKEN` 环境变量（非空即以其为准）→ 文件 `API_TOKEN_FILE`（默认 `data/api_token`，0600，首次启动用 `secrets.token_urlsafe(32)` 生成）→ 都没有则**一律 401**（fail closed） |
+| 怎么带 | `Authorization: Bearer <token>`、`X-API-Token: <token>`、`?token=<token>` 三种都认；后一种是给浏览器首次打开用的，前端读一次存进 sessionStorage 再从地址栏抹掉 |
+| 怎么比 | `hmac.compare_digest` 常数时间比较；没配、没带、带错一律 False |
+| 拒绝长什么样 | `401` + `{"code":"UNAUTHORIZED","user_text":"这个请求没有带访问令牌，未执行。…"}`，仍然只有 code 与一句人话 |
+| 排障口 | `API_AUTH_DISABLED=1`（也认 true/yes/on）关掉这层，启动日志会打警告；它**不影响**下面的能力令牌校验 |
+
+> 它解决的是「谁能调这个端口」，不是「你是谁」：`session_id` 仍由客户端传入，没有多用户隔离与 RBAC（见「已知限制」第 5 条）。回归用例在 `tests/test_api_auth.py`。
 
 ### 审计哈希链
 
@@ -182,13 +198,13 @@ curl -s http://127.0.0.1:8000/api/audit/verify
 ### 单元与集成测试（实测全绿，用例数持续增补）
 
 ```bash
-python3.12 -m pytest -q tests/            # 870 passed, 4 skipped（2026-10-23 实测；用例会随增补变化，复跑以实测为准）
+python3.12 -m pytest -q tests/            # 904 passed, 4 skipped（2026-10-23 实测；用例会随增补变化，复跑以实测为准）
 ```
 
-### 前端合规自检（实测 62 项全过）
+### 前端合规自检（实测 66 项全过）
 
 ```bash
-python3.12 scripts/check_frontend.py      # 实测「前端检查通过：62/62 项全部达标」
+python3.12 scripts/check_frontend.py      # 实测「前端检查通过：66/66 项全部达标」
 ```
 
 ### 浏览器级冒烟（真 Chromium，实测 PASS + 3 张截图）
@@ -248,11 +264,11 @@ python3.12 -m app.smoke                    # 实测 4/4 PASS，主脑延迟约 1
 |---|---|
 | `app/planner/` | 意图识别、DAG 规划、事件定义、执行器（只认令牌） |
 | `app/policy/` | 裁决引擎与 12 条规则 R01–R12（纯函数，无网络无模型） |
-| `app/security/` | 能力令牌、签名信封、注入扫描、熔断器 |
+| `app/security/` | 入口访问令牌、能力令牌、签名信封、注入扫描、熔断器 |
 | `app/tools/` | 26 个工具：查人、查余额、账单、卡片、订阅、转账、资金冻结等 |
 | `app/api/` | 10 个 HTTP 端点 + 根页面 |
 | `web/index.html` | 单文件前端（原生 JS，无框架、无 CDN、零外链） |
-| `tests/` | pytest 用例集（870 passed / 4 skipped，2026-10-23 实测）+ 43 条红队 YAML |
+| `tests/` | pytest 用例集（904 passed / 4 skipped，2026-10-23 实测）+ 43 条红队 YAML |
 | `scripts/` | 种子脚本、前端合规检查器 |
 | `docs/` | 交接规格书 00—10（写代码前必读）+ 答辩与演示交付件 |
 | `规划/` | 前期选型与模型实测记录 |
@@ -266,7 +282,7 @@ python3.12 -m app.smoke                    # 实测 4/4 PASS，主脑延迟约 1
 | `make setup` | 一键配置新电脑（.venv + 依赖 + .env + 选模型 + 建库 + 自检） | ✅ 幂等；`ARGS="--dry-run"` 可预演 |
 | `make run` | 启动服务（--reload） | ✅ |
 | `make seed` | 建库 + 种子（幂等） | ✅ |
-| `make test` | pytest 全跑 | ✅ 全绿（870 passed / 4 skipped，2026-10-23 实测） |
+| `make test` | pytest 全跑 | ✅ 全绿（904 passed / 4 skipped，2026-10-23 实测） |
 | `make smoke` | 模型连通性自检 | ✅ 4/4 |
 | `make cov` | 覆盖率（未装 pytest-cov 时自动退回纯跑） | ✅ |
 | `make reset` | `POST /api/demo/reset` 演示前清场 | ✅ |
@@ -281,7 +297,7 @@ python3.12 -m app.smoke                    # 实测 4/4 PASS，主脑延迟约 1
 2. **自动降级只在「失败」时发生。** 401/403/404/408/429/5xx/超时切下一个目标，400/422 直接抛（请求体错了，换谁都一样）。不做语义级路由（例如「这类任务交给更便宜的模型」），也不做延迟加权选目标。
 3. **本地小模型有准确率上限。** `qwen2.5:0.5b` 证明的是协议通、降级通、离线可演；复杂多轮意图会退化。演示请用云端主模型，Ollama 只作降级与断网备份。
 4. **场景覆盖有边界。** 转账支持口语金额、同名按卡尾号收敛、日累计与多因子升色；季付定时与 AA 拆分未实现。账单异常识别三类（拆单、凌晨境外、订阅涨价），不做全量对账。
-5. **单用户单账户，没有登录体系与 RBAC。** 这是比赛原型：所有银行数据由本地种子生成，是虚构数据，不连接任何真实银行系统，不发起真实支付。
+5. **单用户单账户，没有登录体系与 RBAC。** 已补一层本机 HTTP 访问令牌（`API_TOKEN` 或首次启动自动生成的 `data/api_token`，启动日志打印带 token 的地址）：它挡住「同机其他用户」「误把端口暴露到局域网」这一类，但它不是身份认证——`session_id` 仍由客户端传入，拿到令牌的人可以用任意会话操作，也没有多用户隔离与角色权限。这是比赛原型：所有银行数据由本地种子生成，是虚构数据，不连接任何真实银行系统，不发起真实支付。
 6. **多因子是本地确定性 mock。** 人脸、动态口令、短信验证码都在本地校验（桩），不接真实生物识别或运营商网关；协议位在 `app/tools/` 与策略层里留着，接真渠道要替换实现。
 7. **SSE 长连接对纯 CLI 不友好。** 确认结果顺着同一条流回传，命令行客户端得另开请求 POST `/api/confirm`——这是 SSE 的语义，不是缺陷。
 
@@ -342,7 +358,7 @@ docs/10_测试与验收清单.md         ← 43 条红队 + 里程碑验收
 
 ## 安全声明
 
-本项目为比赛演示原型：**所有银行数据均为本地种子生成的虚构数据，不连接任何真实银行系统，不发起真实支付**。模型密钥仅从本机环境变量读取，不入库不入仓；能力令牌密钥同理。
+本项目为比赛演示原型：**所有银行数据均为本地种子生成的虚构数据，不连接任何真实银行系统，不发起真实支付**。模型密钥仅从本机环境变量读取，不入库不入仓；能力令牌密钥与入口访问令牌都是首次运行本机生成（`data/token_secret`、`data/api_token`，0600），也不入库不入仓。
 
 ## 许可
 
