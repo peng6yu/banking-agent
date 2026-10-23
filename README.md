@@ -34,13 +34,46 @@ python3.12 -m uvicorn app.main:app --port 8000  # 起服务
 | 步骤 | 命令 | 实测结果 |
 |---|---|---|
 | 0. 装依赖 | `python3.12 -m pip install fastapi uvicorn pydantic httpx pyyaml` | 换机器时才需要；本机已装 |
-| 1. 配密钥 | `bash setup_env.sh` | 从本机已有配置抽 `.env`（权限 600，不入库），并生成能力令牌密钥 |
+| 1. 配密钥 | `bash setup_env.sh --prompt`（或 `cp .env.example .env` 手填） | 生成 `.env`（权限 600，不入库）+ 能力令牌密钥。**任意厂商都行，见「模型配置」一节** |
 | 1b. 补能力密钥 | `export CAPABILITY_SECRET=$(python3.12 -c "import secrets;print(secrets.token_hex(32))")` | **必须**，否则黄灯/红灯全部 fail closed |
 | 2. 建库 | `python3.12 -m scripts.seed` | 幂等；末行 `seed.ok random_seed=20261018 tables=17 window_days=180`。**演示跑过转账后余额已变，自检会报 `seed.stale` 并失败——这是设计，用 `python3.12 -m scripts.seed --force` 删库重建即可恢复初始态** |
 | 3. 起服务 | `python3.12 -m uvicorn app.main:app --port 8000` | 打开 <http://127.0.0.1:8000> |
 | 4. 自检 | `curl -s http://127.0.0.1:8000/api/health` | `{"ok":true,"status":"ok","model":"MiniMax-M3.1-Flash-Preview","tools":14,"db":true,...}` |
 
 `make run` / `make seed` / `make test` / `make smoke` 是上面几条的快捷方式，行为完全一致。
+
+## 模型配置（仓库不含密钥，换厂商只改三行）
+
+**这个仓库是公开的，里面没有任何人的 API key**，模型完全由你自己的 `.env` 或环境变量决定。
+默认厂商是 MiniMax，但代码只依赖 **OpenAI 兼容协议**（`POST {base}/chat/completions` + Bearer 鉴权 + `tool_calls`），
+换厂商**不用改一行代码**，只改 `.env` 三行：
+
+| 变量 | 填什么 | 默认 | 旧名（仍生效） |
+|---|---|---|---|
+| `LLM_API_KEY` | 你的 key | 空 | `MINIMAX_API_KEY` |
+| `LLM_BASE_URL` | 厂商 base url | `https://api.minimaxi.com` | `MINIMAX_API_HOST` |
+| `LLM_MODEL` | 模型名 | `MiniMax-M3.1-Flash-Preview` | `MODEL_BRAIN` |
+
+```bash
+bash setup_env.sh --prompt            # 交互粘贴 key，任意厂商
+python3.12 -m app.smoke               # 自检：4/4 PASS 才算配好（会打印当前厂商/端点/模型）
+```
+
+| 厂商 | `LLM_BASE_URL` | `LLM_MODEL` |
+|---|---|---|
+| MiniMax（默认，已实测） | `https://api.minimaxi.com` | `MiniMax-M3.1-Flash-Preview` |
+| DeepSeek | `https://api.deepseek.com` | `deepseek-chat` |
+| 智谱 GLM | `https://open.bigmodel.cn/api/paas/v4` | `glm-4-flash` |
+| 通义千问（兼容模式） | `https://dashscope.aliyuncs.com/compatible-mode/v1` | `qwen-plus` |
+| Kimi | `https://api.moonshot.cn/v1` | `moonshot-v1-8k` |
+| OpenAI | `https://api.openai.com/v1` | `gpt-4o-mini` |
+| Ollama（本地） | `http://localhost:11434/v1` | `qwen2.5:7b` |
+
+**换厂商有三条硬要求**（代码写死的调用方式）：① 支持 `tool_calls`；② 接受 `tool_choice: "auto"`；③ 支持 SSE 流式。
+各厂商填法、报错速查表、换模型后必跑的回归清单：**[docs/模型配置说明.md](docs/模型配置说明.md)**。
+
+> 没有 key 也能看演示：`MOCK_MODE=script` 是零网络的离线协作桩（只回放「查余额」与「转账」两种业务）。
+> `MOCK_MODE=true` 则是**对抗演示专用**的恶意模型桩，别混用（见「已知限制 7」）。
 
 ## 这是什么
 
@@ -146,7 +179,7 @@ curl -s http://127.0.0.1:8000/api/audit/verify
 ### 单元与集成测试（实测全绿，用例数持续增补）
 
 ```bash
-python3.12 -m pytest -q tests/            # 692 passed, 4 skipped（2026-10-23 实测；用例会随增补变化，复跑以实测为准）
+python3.12 -m pytest -q tests/            # 731 passed, 4 skipped（2026-10-23 实测；用例会随增补变化，复跑以实测为准）
 ```
 
 ### 前端合规自检（实测 62 项全过）
@@ -214,7 +247,7 @@ python3.12 -m app.smoke                    # 实测 4/4 PASS，主脑延迟约 1
 | `app/tools/` | 26 个工具：查人、查余额、账单、卡片、订阅、转账、资金冻结等 |
 | `app/api/` | 10 个 HTTP 端点 + 根页面 |
 | `web/index.html` | 单文件前端（原生 JS，无框架、无 CDN、零外链） |
-| `tests/` | pytest 用例集（692 passed / 4 skipped，2026-10-23 实测）+ 43 条红队 YAML |
+| `tests/` | pytest 用例集（731 passed / 4 skipped，2026-10-23 实测）+ 43 条红队 YAML |
 | `scripts/` | 种子脚本、前端合规检查器 |
 | `docs/` | 交接规格书 00—10（写代码前必读）+ 答辩与演示交付件 |
 | `规划/` | 前期选型与模型实测记录 |
@@ -227,7 +260,7 @@ python3.12 -m app.smoke                    # 实测 4/4 PASS，主脑延迟约 1
 |---|---|---|
 | `make run` | 启动服务（--reload） | ✅ |
 | `make seed` | 建库 + 种子（幂等） | ✅ |
-| `make test` | pytest 全跑 | ✅ 全绿（692 passed / 4 skipped，2026-10-23 实测） |
+| `make test` | pytest 全跑 | ✅ 全绿（731 passed / 4 skipped，2026-10-23 实测） |
 | `make smoke` | 模型连通性自检 | ✅ 4/4 |
 | `make cov` | 覆盖率（未装 pytest-cov 时自动退回纯跑） | ✅ |
 | `make reset` | `POST /api/demo/reset` 演示前清场 | ✅ |
@@ -242,7 +275,7 @@ python3.12 -m app.smoke                    # 实测 4/4 PASS，主脑延迟约 1
 4. **场景 6 已用真实模型跑通，但需要一轮澄清。** 2026-10-22 用真实 MiniMax 跑赛题原句「下周三我妈生日，帮我提前留出300块，到时候给她订束花送过去」：模型把「我妈」当关系词而不是姓名，首轮反问「这份礼物是给谁过生日？」，补一句「我妈」后四节点全走通（`resolve_payee → query_balance → reserve_funds → pay_merchant`，两次黄灯确认），余额 1286050 → 1256050。其余跨场景仍由 `scripts/e2e.py` 13 步演示覆盖（真实 FastAPI + 真实策略/工具/审计，只把 LLM 那一层换成脚本适配器）。
 5. SSE 流在等待用户确认期间保持打开（最长 120 秒）。这是有意的——确认结果顺着同一条流回传，代价是纯命令行客户端需要自己另开一个请求去 POST 确认。前端不受影响。120 秒内没人点头，确认卡自动作废、预授权全部释放（此前曾因毫秒当秒而失效，已修：commit `93f28f2`，回归测试 `tests/test_confirm_timeout.py`）。
 6. 依赖装在系统 `python3.12` 里，没有 venv。本机 pypi 直连不稳定，建 venv 再装容易失败，这是当时的取舍。
-7. 模型走云端 MiniMax（`MiniMax-M3.1-Flash-Preview`）。`MOCK_MODE=1`（等价 `true`）是**对抗演示专用**的离线固定桩：它把模型换成一个恶意的，固定吐「转出全部余额到陌生账户」的计划，只用来现场演示「模型被劫持也动不了一分钱」；**不能拿它演普通问答**——问什么都是「我听不懂」。断网要演正常链路请用 `MOCK_MODE=script`：协作回放桩，纯规则、确定性、零网络，只回放「查余额」与「转账」两种业务，其余话术照实反问，绝不瞎猜。
+7. 模型默认走云端 MiniMax（`MiniMax-M3.1-Flash-Preview`），但**只实测过 MiniMax 这一家**；代码只依赖 OpenAI 兼容协议，换厂商只改 `.env` 三行（`LLM_API_KEY` / `LLM_BASE_URL` / `LLM_MODEL`），各厂商填法与兼容性底线见 [docs/模型配置说明.md](docs/模型配置说明.md)，本仓库不替其他厂商背书，换完请以 `python3.12 -m app.smoke` 与回归测试的实测结果为准。`MOCK_MODE=1`（等价 `true`）是**对抗演示专用**的离线固定桩：它把模型换成一个恶意的，固定吐「转出全部余额到陌生账户」的计划，只用来现场演示「模型被劫持也动不了一分钱」；**不能拿它演普通问答**——问什么都是「我听不懂」。断网要演正常链路请用 `MOCK_MODE=script`：协作回放桩，纯规则、确定性、零网络，只回放「查余额」与「转账」两种业务，其余话术照实反问，绝不瞎猜。
 
 ## 演示与答辩材料
 
@@ -293,7 +326,7 @@ docs/10_测试与验收清单.md         ← 43 条红队 + 里程碑验收
 
 | 选择 | 理由 |
 |---|---|
-| 运行时模型 MiniMax-M3.1-Flash-Preview（云端） | 实测 1.56s、5/5 稳定、不吐思维链；本机 GPU 驱动异常不可用 |
+| 运行时模型 MiniMax-M3.1-Flash-Preview（云端，可换） | 实测 1.56s、5/5 稳定、不吐思维链；本机 GPU 驱动异常不可用。**厂商可换**：只依赖 OpenAI 兼容协议，配置见 [docs/模型配置说明.md](docs/模型配置说明.md) |
 | 不用 LangGraph / 多 Agent 框架 | 审计链要逐字段可控；金融场景要单点可追溯，多 Agent 会糊掉责任边界 |
 | 结构化输出只走 tool_calls | 实测 MiniMax 的 `response_format: json_object` 不被遵守 |
 | SQLite + 标准库 | 零运维，评审可一键复现；审计表用触发器禁改 |

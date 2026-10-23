@@ -251,7 +251,7 @@ MOCK_MODE=true python3.12 -m uvicorn app.main:app --port 8000
 
 | 指标 | 实测值 |
 |---|---|
-| 自动化测试 | `692 passed / 4 skipped`（2026-10-23 实测，commit 6b3b6c9） |
+| 自动化测试 | `731 passed / 4 skipped`（2026-10-23 实测） |
 | 前端合规检查 | `62/62 项全部达标`（零外链、零框架、零构建） |
 | 模型连通性 | `app.smoke` 4/4 PASS，主脑首 token 约 1.5s |
 | 决策延迟 | 一轮「查人+查余额+转账裁决」三次模型调用，实测约 1.5s/次 |
