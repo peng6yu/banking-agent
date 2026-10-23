@@ -355,6 +355,31 @@
   const API_AUDIT_VERIFY = '/api/audit/verify';
   const API_TOOLS = '/api/tools';
 
+  /* ------------------------------------------------------------------ 访问令牌
+     服务端除首页与 /api/health 外都要令牌。用启动日志里带 ?token= 的地址打开一次，
+     这里读进来存进 sessionStorage，再把 token 从地址栏抹掉（别留在历史/代理日志里）。 */
+  const TOKEN_KEY = 'banking_api_token';
+  const tokenStore = window.sessionStorage;
+
+  (function captureToken() {
+    const fromUrl = new URLSearchParams(location.search).get('token');
+    if (!fromUrl) { return; }
+    tokenStore.setItem(TOKEN_KEY, fromUrl);
+    const cleaned = new URL(location.href);
+    cleaned.searchParams.delete('token');
+    window.history.replaceState(null, '', cleaned.toString());
+  }());
+
+  const rawFetch = window.fetch.bind(window);
+  window.fetch = function (input, init) {
+    const options = Object.assign({}, init || {});
+    const headers = Object.assign({}, options.headers || {});
+    const token = tokenStore.getItem(TOKEN_KEY);
+    if (token) { headers.Authorization = 'Bearer ' + token; }
+    options.headers = headers;
+    return rawFetch(input, options);
+  };
+
   /* 颜色由后端的 decision.level 决定，前端只做「等级 → 样式类」映射，不自己判色 */
   const LEVEL_CLASS = { green: 'lv-green', yellow: 'lv-amber', red: 'lv-red' };
   const LEVEL_LABEL = { green: '绿灯：直接放行', yellow: '黄灯：需要你确认', red: '红灯：需要多因子' };

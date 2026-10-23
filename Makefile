@@ -46,6 +46,7 @@ venv:
 	@echo ✓ 已装好；用 $(VENV_PY) -m pytest -q tests/ 验证
 
 run:
+	@test -f data/api_token && printf '浏览器地址（带访问令牌）：http://127.0.0.1:8000/?token=%s\n' "$$(cat data/api_token)" || true
 	$(PY) -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
 
 seed:
@@ -74,7 +75,7 @@ fresh: clean seed test
 	@echo ✓ 从零到可演示完成（fresh 已含 clean，重建的是干净库），执行 make run 启动
 
 reset:
-	@curl -s -X POST http://127.0.0.1:8000/api/demo/reset || echo 服务未启动
+	@curl -s -X POST -H "Authorization: Bearer $$(cat data/api_token 2>/dev/null)" http://127.0.0.1:8000/api/demo/reset || echo 服务未启动
 
 clean:
 	rm -rf .pytest_cache .ruff_cache .coverage htmlcov

@@ -20,6 +20,7 @@ from app.api import routes
 from app.clock import BankError
 from app.llm import LLMError
 from app.planner import ticker
+from app.security import api_auth
 
 log = logging.getLogger(__name__)
 
@@ -34,11 +35,36 @@ VALIDATION_TEXT = "请求参数不对，我没法理解你发的内容。"
 HTTP_CODE = "HTTP_ERROR"
 HTTP_TEXT = "这个请求我没找到对应的处理方式。"
 
+
+def _announce_api_token() -> None:
+    """启动时把访问令牌打到日志：本机唯一一次「拿到令牌」的入口。
+
+    令牌整串出现在本机控制台是有意的——它要能被人复制去开浏览器；
+    日志采集不该收它，所以 mask() 留给审计/远端日志用。
+    """
+    if api_auth.auth_disabled():
+        log.warning("api_auth.disabled /api/* 不再校验令牌，仅在「端口只对本机可信进程开放」时使用")
+        return
+    try:
+        token = api_auth.ensure_token()
+    except OSError as exc:
+        log.error(
+            "api_auth.token_unwritable file=%s error=%s 受保护端点将一律 401；"
+            "请修好目录权限，或者显式设置 API_TOKEN",
+            api_auth.token_path(),
+            exc,
+        )
+        return
+    log.info("api_auth.ready file=%s token=%s", api_auth.token_path(), token)
+    log.info("api_auth.open_url %s", api_auth.bootstrap_url(token))
+
+
 @asynccontextmanager
 async def _lifespan(_app: FastAPI) -> AsyncIterator[None]:
     """启动时起到点执行节拍，关闭时收掉；SCHEDULED_TICK_MS=0 可关。"""
     task = ticker.start()
     log.info("app.startup ticker=%s", "on" if task is not None else "off")
+    _announce_api_token()
     try:
         yield
     finally:

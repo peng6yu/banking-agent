@@ -255,6 +255,16 @@ else
   fi
 fi
 
+# ---- 4.5 访问令牌 ----------------------------------------------------------
+step "准备 HTTP 访问令牌"
+if [ "$DRY_RUN" = 1 ]; then
+  printf '  [dry-run] %s -c "from app.security.api_auth import ensure_token; ensure_token()"\n' "$VENV_PY"
+elif token_out="$("$VENV_PY" -c 'from app.security.api_auth import ensure_token; print(ensure_token())' 2>/tmp/banking_api_token.log)"; then
+  ok "已就绪：data/api_token（0600）；/api/* 除探活外都要求它"
+else
+  warn "生成失败，服务仍会启动但 /api/* 会 401：$(tail -2 /tmp/banking_api_token.log | tr '\n' ' ')"
+fi
+
 # ---- 5. 协议自检 -----------------------------------------------------------
 MODEL_MODE="$(env_get MOCK_MODE)"
 if [ "$SKIP_CHECK" = 1 ]; then
@@ -283,10 +293,13 @@ fi
 cat <<EOF
 
 下一步：
-  ${B}make run${N}          # 起服务 -> 打开 http://127.0.0.1:8000
-  ${B}make test${N}         # 862 条单测（不依赖模型）
+  ${B}make run${N}          # 起服务（启动日志会打印带令牌的地址）
+  ${B}make test${N}         # 904 条单测（不依赖模型）
   ${B}make redteam${N}      # 43 条红队用例
   ${B}make smoke${N}        # 模型连通性 4 项自检
+
+浏览器地址（/api/* 要令牌，直接打开这一条即可）：
+  http://127.0.0.1:8000/?token=$(cat data/api_token 2>/dev/null || echo "启动后见 data/api_token")
 
 当前模型配置（.env）：
   LLM_BASE_URL=$(env_get LLM_BASE_URL)
