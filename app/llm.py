@@ -78,7 +78,10 @@ class LLMAdapter:
     # ---------- 内部 ----------
     def _headers(self) -> dict[str, str]:
         if not self.s.api_key:
-            raise LLMError("MINIMAX_API_KEY 为空，先复制 .env.example 为 .env")
+            raise LLMError(
+                "模型 API key 未配置：设置 LLM_API_KEY（兼容旧名 MINIMAX_API_KEY），"
+                "或复制 .env.example 为 .env 后填写；换厂商配置见 docs/模型配置说明.md"
+            )
         return {
             "Authorization": "Bearer " + self.s.api_key,
             "Content-Type": "application/json",

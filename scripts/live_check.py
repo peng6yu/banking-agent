@@ -139,7 +139,10 @@ def build_recorder(live: bool) -> ChatRecorder:
     if live:
         settings = Settings()
         if not settings.api_key:
-            raise SystemExit("--live 需要 .env 里的 MINIMAX_API_KEY，当前为空")
+            raise SystemExit(
+                "--live 需要模型 API key（LLM_API_KEY，兼容旧名 MINIMAX_API_KEY），当前为空；"
+                "详见 docs/模型配置说明.md"
+            )
         # 内层不自己重试：429 退避统一由 ChatRecorder 记账
         return ChatRecorder(LLMAdapter(settings, max_retries=0), tries=4, base_sleep=2.0)
     return ChatRecorder(ScriptAdapter(), tries=1)

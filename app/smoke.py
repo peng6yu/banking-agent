@@ -33,10 +33,13 @@ def check(name: str, ok: bool, detail: str = "") -> None:
 
 def main() -> int:
     s = get_settings()
-    print("端点:", s.endpoint)
+    print("厂商:", s.provider, " 端点:", s.endpoint)
     print("主脑:", s.model_brain, " 备脑:", s.model_backup, " mock:", s.mock)
     if not s.api_key:
-        print("缺少 MINIMAX_API_KEY，先执行 setup_env.sh")
+        print("缺少模型 API key（LLM_API_KEY，兼容旧名 MINIMAX_API_KEY）：")
+        print("  交互配置：bash setup_env.sh --prompt   （任意厂商都行）")
+        print("  手动配置：复制 .env.example 为 .env，填 LLM_API_KEY / LLM_BASE_URL / LLM_MODEL")
+        print("  详见：docs/模型配置说明.md")
         return 2
 
     adapter = LLMAdapter(s)
