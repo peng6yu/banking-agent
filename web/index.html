@@ -518,18 +518,22 @@
   const API_TOOLS = '/api/tools';
 
   /* ------------------------------------------------------------------ 访问令牌
-     服务端除首页与 /api/health 外都要令牌。用启动日志里带 ?token= 的地址打开一次，
-     这里读进来存进 sessionStorage，再把 token 从地址栏抹掉（别留在历史/代理日志里）。 */
+     服务端除首页与 /api/health 外都要令牌。用启动日志里带 #token= 的地址打开一次，
+     这里读进来存进 sessionStorage，再把 token 从地址栏抹掉。
+     令牌放 fragment 而不是 ?token=：fragment 不随 HTTP 请求发出，不会进
+     服务端访问日志或代理日志；服务端也只从请求头认令牌。 */
   const TOKEN_KEY = 'banking_api_token';
   const tokenStore = window.sessionStorage;
 
   (function captureToken() {
-    const fromUrl = new URLSearchParams(location.search).get('token');
+    let fromUrl = '';
+    if (location.hash.indexOf('#token=') === 0) {
+      fromUrl = location.hash.slice('#token='.length);
+      try { fromUrl = decodeURIComponent(fromUrl); } catch (err) { /* 保持原样 */ }
+    }
     if (!fromUrl) { return; }
     tokenStore.setItem(TOKEN_KEY, fromUrl);
-    const cleaned = new URL(location.href);
-    cleaned.searchParams.delete('token');
-    window.history.replaceState(null, '', cleaned.toString());
+    window.history.replaceState(null, '', location.pathname + location.search);
   }());
 
   const rawFetch = window.fetch.bind(window);
@@ -1491,7 +1495,7 @@
     }
     if (!reason) {
       if (response.status === 401) {
-        reason = '令牌不对或已失效，请用带 ?token= 的地址重新打开页面。';
+        reason = '令牌不对或已失效，请用带 #token= 的地址重新打开页面。';
       } else if (response.status === 404) {
         reason = '后端没有这个接口或这条记录。';
       } else if (response.status === 422) {

@@ -299,7 +299,7 @@ cat <<EOF
   ${B}make smoke${N}        # 模型连通性 4 项自检
 
 浏览器地址（/api/* 要令牌，直接打开这一条即可）：
-  http://127.0.0.1:8000/?token=$(cat data/api_token 2>/dev/null || echo "启动后见 data/api_token")
+  http://127.0.0.1:8000/#token=$(cat data/api_token 2>/dev/null || echo "启动后见 data/api_token")
 
 当前模型配置（.env）：
   LLM_BASE_URL=$(env_get LLM_BASE_URL)

@@ -16,8 +16,9 @@
 它们能改的只有 savings_goals/monitor_rules/proactive_alerts/monitor_runs，
 永远不碰 accounts/transactions/holds —— 本文件用余额与流水快照来证明这一点。
 
-P6 含一个**已知缺陷的失败测试**：audit 写失败时，run_monitor 的失败记录会被同一事务回滚，
-导致失败不可观测（任务书要求「失败被记录」）。保留失败断言，由 lead 决定修法。
+P6 覆盖的是**已修复**的实现：run_monitor 把「写 monitor_runs(status=failed)」与
+「写 audit」拆成两段独立事务，审计写失败只会少一条审计，不会把失败记录一起回滚；
+测试同时断言失败记录保留、ok=false 而不是假装成功。
 """
 
 from __future__ import annotations

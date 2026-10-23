@@ -3,8 +3,8 @@
 > **用途**：2026 深圳国际金融科技大赛「人工智能赛道 · 银行 AI 智能体」阶段 0.1 / 0.2 的行业对标研究。
 > **对标对象**：Revolut AIR（AI by Revolut），Revolut 推出的 App 内 AI 金融助手。
 > **核验方式**：① 用真实浏览器（ego，默认 space）逐页打开 `revolut.com` / `help.revolut.com` 官方页面并提取正文原文；② 用 `web_search` 补充检索官方工程材料、厂商案例与第三方分析，并按来源类型标注可信度。
-> **核验日期（任务书指定口径）**：2026-09-04
-> **本次实际抓取完成时间**：2026-10-23（UTC）
+> **核验日期**：2026-10-23（实际抓取并逐页核对正文的完成日）
+> **历史说明**：初稿曾把 2026-09-04 写成「任务书指定核验日期」，但任务书并未指定该日期，那是初稿自设的名义值；该错误已在本版更正，全文不再以 2026-09-04 作为证据时点。
 > **作者**：air-research（teammate，阶段 0.1 + 0.2 专项）
 
 ---
@@ -17,11 +17,11 @@
 
 ### 0.2 日期口径（重要，避免误用）
 
-任务书要求核验日期统一填 **2026-09-04**，本表照此填写。但本次实际抓取发生在 **2026-10-23**，因此部分来源的**发布日期晚于**名义核验日期（例：PRAGMA 生产化博客 2026-10-21、TNW 对 CEO 的访谈 2026-10-09、fintechmagazine 2026-09-22、AIR 欧洲上线的媒体报道 2026-09-01/02）。处理方式：
+本文件的核验日期统一为 **2026-10-23**，台账「核验日期」列按此填写；「发布日期」列仍如实标注每条来源自身的日期（例：PRAGMA 生产化博客 2026-10-21、TNW 对 CEO 的访谈 2026-10-09、AIR 欧洲上线媒体报道 2026-09-01/02）。
 
-1. 台账「发布日期」列如实标注每条来源自身的日期；
-2. 凡结论依赖「核验日之后」的来源，正文里明确写出「核验日之后发布」；
-3. **产品现状类结论优先采用 2026-09-04 之前可得的官方材料**（AIR 产品页 / 新闻稿 / 博客 / 帮助中心 / AI 透明度说明），晚于核验日的材料只用于补充「趋势与路线图」，不用于断言「当前已具备」。
+1. 每条来源的发布日期与核验日期分开记录，不把核验日倒填成来源日期；
+2. 产品现状类结论只采用核验日（2026-10-23）及之前可得的官方材料（AIR 产品页 / 新闻稿 / 博客 / 帮助中心 / AI 透明度说明）；
+3. 战略表述、路线图与第三方推断单独标注性质，不用来断言「当前已具备」。
 
 ### 0.3 证据状态四档
 
@@ -35,43 +35,43 @@
 
 | # | URL | 页面标题 | 发布/更新日期 | 核验日期 | 可访问性 | 来源类型 |
 |---|---|---|---|---|---|---|
-| A1 | https://www.revolut.com/air-ai-by-revolut/ | AIR \| AI by Revolut \| Revolut GB | 未标注 | 2026-09-04 | 200（浏览器，全文已提取） | 官方 · 产品页 |
-| A2 | https://www.revolut.com/en-NO/air-ai-by-revolut/ | AIR \| AI by Revolut \| Revolut NO | 未标注 | 2026-09-04 | 200（全文已提取） | 官方 · 产品页（挪威站，EEA 版） |
-| A3 | https://www.revolut.com/news/revolut_enters_new_era_of_money_intelligence_with_launch_of_ai_assistant/ | Revolut enters new era of money intelligence with launch of AI assistant | 2026-04-09 | 2026-09-04 | 200（全文已提取） | 官方 · 新闻稿 |
-| A4 | https://www.revolut.com/blog/post/air-ai-by-revolut/ | AIR - AI by Revolut \| Revolut United Kingdom | 2026-04-09（作者 Team Revolut） | 2026-09-04 | 200（全文已提取） | 官方 · 博客 |
-| A5 | https://help.revolut.com/help/profile-and-plan/getting-started-with-air/ | Getting started with AIR \| Revolut United Kingdom | 未标注 | 2026-09-04 | 200（全文已提取） | 官方 · 帮助中心（**站内仅此一篇 AIR 文章**） |
-| A6 | https://www.revolut.com/legal/rita-disclaimer/ | Revolut's AI Assistant \| Revolut United Kingdom | 页面未标注；其 PDF 版为 v1.0.2（文件名时间戳 ≈ 2026-06-16） | 2026-09-04 | 200（curl 403，浏览器成功，全文已提取） | 官方 · AI 透明度/法律说明 |
-| A7 | https://www.revolut.com/legal/assistant-business-disclaimer/ | Revolut's AI Assistants for Revolut Business | 未标注 | 2026-09-04 | 200（全文已提取） | 官方 · AI 透明度说明（Business 版） |
-| A8 | https://www.revolut.com/legal/privacy/ | Customer Privacy Notice \| Revolut United Kingdom | 生效日期 2026-03-17 | 2026-09-04 | 200（全文已提取） | 官方 · 隐私声明 |
-| A9 | https://www.revolut.com/legal/tailored-ads-privacy-notice/ | Tailored Lifestyle Ads and Notifications | 未标注 | 2026-09-04 | 200（全文已提取） | 官方 · 隐私声明（营销通知，非 AIR） |
-| A10 | https://www.revolut.com/legal/chat-privacy-notice/ | Revolut Messenger Privacy Notice | 生效 2023-03-01 | 2026-09-04 | 200（读到正文；**内容是 P2P/群聊，与 AI 无关**，故不作为 AIR 证据） | 官方 · 隐私声明 |
-| A11 | https://www.revolut.com/legal/ | Terms & Policies \| Revolut United Kingdom（索引） | 未标注 | 2026-09-04 | 200（用于发现 A7 等入口） | 官方 · 索引页 |
-| A12 | https://www.revolut.com/news/ | News and Media \| Revolut United Kingdom（索引，列最近 10 条） | 页面最新条目 2026-10-19 | 2026-09-04 | 200（用于发现 A13；**未收录 AIR 欧洲上线稿**） | 官方 · 索引页 |
-| A13 | https://www.revolut.com/news/revolut_announces_launch_of_dedicated_ai_research_division_revolut_research/ | Revolut Announces Launch of Dedicated AI Research Division: Revolut Research | 2026-08-25 | 2026-09-04 | 200（全文已提取） | 官方 · 新闻稿（AI 组织与 PRAGMA，含对 AIR 的定位） |
-| A14 | https://www.revolut.com/blog/post/fromresearchtorealtime/ | From Research to Real Time: Scaling a Foundation Model for Structured Data in Production | 2026-10-21（栏目 News，作者 Revolut Contributor） | 2026-09-04 | 200（全文已提取） | 官方 · 技术博客（**对象是 PRAGMA 风控栈，不是 AIR**） |
-| A15 | https://www.revolut.com/blog/ | Blog \| Revolut United Kingdom（索引，列 10 篇） | 最新文章 2026-10-16 | 2026-09-04 | 200（10 篇中仅 1 篇 AI 相关，即 A14） | 官方 · 索引页 |
-| A16 | https://www.revolut.com/en-IE/news/ | News and Media \| Revolut Ireland（索引） | 最新条目 2026-09-24 | 2026-09-04 | 200（最近 10 条中**无** AIR 欧洲上线稿） | 官方 · 索引页 |
-| A17 | https://cdn.revolut.com/terms_and_conditions/pdf/revolut_s_ai_assistant_c305e066_1.0.2_1781775214_en.pdf | Revolut AI Assistant 条款 PDF（v1.0.2） | 文件名时间戳 ≈ 2026-06-16 | 2026-09-04 | HTTP 200、63,399 bytes，**但正文提取失败（无 pdftotext/pypdf，自写 zlib 提取器输出为空）→ 内容未核实** | 官方 · PDF（A6 的下载版） |
+| A1 | https://www.revolut.com/air-ai-by-revolut/ | AIR \| AI by Revolut \| Revolut GB | 未标注 | 2026-10-23 | 200（浏览器，全文已提取） | 官方 · 产品页 |
+| A2 | https://www.revolut.com/en-NO/air-ai-by-revolut/ | AIR \| AI by Revolut \| Revolut NO | 未标注 | 2026-10-23 | 200（全文已提取） | 官方 · 产品页（挪威站，EEA 版） |
+| A3 | https://www.revolut.com/news/revolut_enters_new_era_of_money_intelligence_with_launch_of_ai_assistant/ | Revolut enters new era of money intelligence with launch of AI assistant | 2026-04-09 | 2026-10-23 | 200（全文已提取） | 官方 · 新闻稿 |
+| A4 | https://www.revolut.com/blog/post/air-ai-by-revolut/ | AIR - AI by Revolut \| Revolut United Kingdom | 2026-04-09（作者 Team Revolut） | 2026-10-23 | 200（全文已提取） | 官方 · 博客 |
+| A5 | https://help.revolut.com/help/profile-and-plan/getting-started-with-air/ | Getting started with AIR \| Revolut United Kingdom | 未标注 | 2026-10-23 | 200（全文已提取） | 官方 · 帮助中心（**站内仅此一篇 AIR 文章**） |
+| A6 | https://www.revolut.com/legal/rita-disclaimer/ | Revolut's AI Assistant \| Revolut United Kingdom | 页面未标注；其 PDF 版为 v1.0.2（文件名时间戳 ≈ 2026-06-16） | 2026-10-23 | 200（curl 403，浏览器成功，全文已提取） | 官方 · AI 透明度/法律说明 |
+| A7 | https://www.revolut.com/legal/assistant-business-disclaimer/ | Revolut's AI Assistants for Revolut Business | 未标注 | 2026-10-23 | 200（全文已提取） | 官方 · AI 透明度说明（Business 版） |
+| A8 | https://www.revolut.com/legal/privacy/ | Customer Privacy Notice \| Revolut United Kingdom | 生效日期 2026-03-17 | 2026-10-23 | 200（全文已提取） | 官方 · 隐私声明 |
+| A9 | https://www.revolut.com/legal/tailored-ads-privacy-notice/ | Tailored Lifestyle Ads and Notifications | 未标注 | 2026-10-23 | 200（全文已提取） | 官方 · 隐私声明（营销通知，非 AIR） |
+| A10 | https://www.revolut.com/legal/chat-privacy-notice/ | Revolut Messenger Privacy Notice | 生效 2023-03-01 | 2026-10-23 | 200（读到正文；**内容是 P2P/群聊，与 AI 无关**，故不作为 AIR 证据） | 官方 · 隐私声明 |
+| A11 | https://www.revolut.com/legal/ | Terms & Policies \| Revolut United Kingdom（索引） | 未标注 | 2026-10-23 | 200（用于发现 A7 等入口） | 官方 · 索引页 |
+| A12 | https://www.revolut.com/news/ | News and Media \| Revolut United Kingdom（索引，列最近 10 条） | 页面最新条目 2026-10-19 | 2026-10-23 | 200（用于发现 A13；**未收录 AIR 欧洲上线稿**） | 官方 · 索引页 |
+| A13 | https://www.revolut.com/news/revolut_announces_launch_of_dedicated_ai_research_division_revolut_research/ | Revolut Announces Launch of Dedicated AI Research Division: Revolut Research | 2026-08-25 | 2026-10-23 | 200（全文已提取） | 官方 · 新闻稿（AI 组织与 PRAGMA，含对 AIR 的定位） |
+| A14 | https://www.revolut.com/blog/post/fromresearchtorealtime/ | From Research to Real Time: Scaling a Foundation Model for Structured Data in Production | 2026-10-21（栏目 News，作者 Revolut Contributor） | 2026-10-23 | 200（全文已提取） | 官方 · 技术博客（**对象是 PRAGMA 风控栈，不是 AIR**） |
+| A15 | https://www.revolut.com/blog/ | Blog \| Revolut United Kingdom（索引，列 10 篇） | 最新文章 2026-10-16 | 2026-10-23 | 200（10 篇中仅 1 篇 AI 相关，即 A14） | 官方 · 索引页 |
+| A16 | https://www.revolut.com/en-IE/news/ | News and Media \| Revolut Ireland（索引） | 最新条目 2026-09-24 | 2026-10-23 | 200（最近 10 条中**无** AIR 欧洲上线稿） | 官方 · 索引页 |
+| A17 | https://cdn.revolut.com/terms_and_conditions/pdf/revolut_s_ai_assistant_c305e066_1.0.2_1781775214_en.pdf | Revolut AI Assistant 条款 PDF（v1.0.2） | 文件名时间戳 ≈ 2026-06-16 | 2026-10-23 | HTTP 200、63,399 bytes，**但正文提取失败（无 pdftotext/pypdf，自写 zlib 提取器输出为空）→ 内容未核实** | 官方 · PDF（A6 的下载版） |
 
 ### A.2 第三方与厂商材料（web_search 取得；须按来源类型标注可信度）
 
 | # | URL | 页面标题 | 发布/更新日期 | 核验日期 | 可访问性 | 来源类型与可信度 |
 |---|---|---|---|---|---|---|
-| B1 | https://www.linkedin.com/posts/nesterovpavel_this-is-air-activity-7448087433067397120-QtkX | This is AIR（Revolut AI 负责人 Pavel Nesterov 的公开帖） | 2026-04-10 | 2026-09-04 | **原页打开失败**（跳转 `linkedin.cn` 错误页，疑似地域/登录拦截）；内容来自搜索引擎抽取的摘要，**未经原页逐字核对** | 第一方高管公开陈述 · 可信度高但非产品文档 |
-| B2 | https://allai.events/event/structured-foundational-models-ft-revolut | Structured Foundational Models (ft. Revolut)（Pavel Nesterov = Executive Director and Head of AI and Data Science at Revolut 的头衔出处） | 活动 2026-07-13 | 2026-09-04 | 搜索摘要 | 第三方会议页 · 可信（用于确认 B1 作者身份与头衔） |
-| B3 | https://www.nvidia.com/es-es/case-studies/revolut/ | NVIDIA: Revolut crea un modelo básico de transacciones con la plataforma de computación acelerada de NVIDIA | 2026-06-08 | 2026-09-04 | 搜索摘要（未逐页打开） | 厂商官方案例 · 准官方（**对象是 PRAGMA 风控栈**） |
-| B4 | https://irishtechnews.ie/revolut-bank-launch-of-ai-assistant | Revolut Bank enters new era of money intelligence with launch of AI assistant | 2026-09-02 | 2026-09-04 | 搜索摘要（正文措辞像官方通稿） | 行业媒体转载官方口径 · 可信 |
-| B5 | https://www.europapress.es/economia/finanzas-00340/noticia-revolut-lanza-air-espana-nuevo-asistente-inteligencia-artificial-gestionar-finanzas-20260901105900.html | Revolut lanza AIR en España, su nuevo asistente de inteligencia artificial para gestionar las finanzas | 2026-09-01 | 2026-09-04 | 搜索摘要 | 官方通讯社 · 可信（AIR 西班牙/欧洲上线） |
-| B6 | https://www.eubiznews.com/article/revolut-launches-air-in-spain-to-bring-banking-and-travel-services-into-one-ai-conversation | Revolut launches AIR in Spain to bring banking and travel services into one AI conversation | 2026-09-02 | 2026-09-04 | 搜索摘要（web_fetch 因 provider 冲突报错，未取全文） | 行业媒体 · 可信 |
-| B7 | https://www.konsulteer.com/article/revolut-launches-ai-financial-assistant-air-in-france | Revolut Launches AI Financial Assistant AIR In France | 2026-09-02 | 2026-09-04 | 搜索摘要 | 一般媒体 · 数字需谨慎（200+ H100、1.2M 客服工单/月等均为公司自述转述） |
-| B8 | https://www.fintechweekly.com/news/revolut-air-ai-assistant-uk-customers-launch-2026 | Revolut Launches AIR, An In-App AI Assistant, to 13 Million UK Customers | 2026-04-11 | 2026-09-04 | 搜索摘要 | 一般科技媒体 · 可信（**关键句："Revolut has not disclosed which AI providers power the product"**） |
-| B9 | https://thenextweb.com/news/nik-storonsky-revolut-global-tech-company-europe-wave-by-vento | Nik Storonsky wants Revolut to be Europe's answer to Meta and Google | 2026-10-09 | 2026-09-04 | 搜索摘要 | 可信媒体 · CEO 访谈（**晚于核验日，属战略表述**） |
-| B10 | https://fintechmagazine.com/news/a-bank-with-zero-risk-nik-storonsky-on-revoluts-expansion | A Bank With Zero Risk: Nik Storonsky on Revolut's Expansion（Google Cloud 为「foundational technology partner」，Gemini 贯穿运营与反欺诈） | 2026-09-22 | 2026-09-04 | 搜索摘要 | 行业媒体 · 可信（**晚于核验日**） |
-| B11 | https://www.forestadmin.com/blog/what-revolut-air-signals-to-fintech-from-interface-to-infrastructure | What Revolut AIR signals to fintech: from interface to infrastructure | 未取得日期 | 2026-09-04 | 搜索摘要 | 第三方厂商技术博客 · 推断性质，非官方 |
-| B12 | https://ai2.work/blog/inside-revolut-s-pragma-the-bank-built-ai-scoring-70m-customers | Inside Revolut's PRAGMA: The Bank-Built AI Scoring 70M Customers | 2026-07-29 | 2026-09-04 | 搜索摘要 | 第三方技术分析 · 对象是 PRAGMA，**不是 AIR** |
-| B13 | https://ergomania.eu/revolut-air-ai-banking-assistant-ux | Revolut AIR：AI 银行助手 UX 分析（声称 AIR 为 **RAG 架构**、与 Google Cloud / Gemini 集成、200+ NVIDIA H100 on Nebius） | 未取得日期 | 2026-09-04 | 搜索摘要 | 个人/公司博客 · **低可信度，非官方，不得当作事实** |
-| B14 | https://www.studioglobal.ai/zh-cn/discover/answers/search-6a8e51b2ce023abfc3deb2a1 | Revolut 成立 AI 研究部门，押注自研银行基础模型 PRAGMA | 2026-08-26 | 2026-09-04 | 搜索摘要 | 中文聚合媒体 · 一般 |
-| B15 | https://www.fxajax.com/news/7257/Revolut-成立研究部门-携手-NVIDIA-打造金融基础模型-PRAGMA | Revolut 成立研究部门，携手 NVIDIA 打造金融基础模型 PRAGMA | 2026-08-25 | 2026-09-04 | 搜索摘要 | 中文媒体 · 一般 |
+| B1 | https://www.linkedin.com/posts/nesterovpavel_this-is-air-activity-7448087433067397120-QtkX | This is AIR（Revolut AI 负责人 Pavel Nesterov 的公开帖） | 2026-04-10 | 2026-10-23 | **原页打开失败**（跳转 `linkedin.cn` 错误页，疑似地域/登录拦截）；内容来自搜索引擎抽取的摘要，**未经原页逐字核对** | 第一方高管公开陈述 · 可信度高但非产品文档 |
+| B2 | https://allai.events/event/structured-foundational-models-ft-revolut | Structured Foundational Models (ft. Revolut)（Pavel Nesterov = Executive Director and Head of AI and Data Science at Revolut 的头衔出处） | 活动 2026-07-13 | 2026-10-23 | 搜索摘要 | 第三方会议页 · 可信（用于确认 B1 作者身份与头衔） |
+| B3 | https://www.nvidia.com/es-es/case-studies/revolut/ | NVIDIA: Revolut crea un modelo básico de transacciones con la plataforma de computación acelerada de NVIDIA | 2026-06-08 | 2026-10-23 | 搜索摘要（未逐页打开） | 厂商官方案例 · 准官方（**对象是 PRAGMA 风控栈**） |
+| B4 | https://irishtechnews.ie/revolut-bank-launch-of-ai-assistant | Revolut Bank enters new era of money intelligence with launch of AI assistant | 2026-09-02 | 2026-10-23 | 搜索摘要（正文措辞像官方通稿） | 行业媒体转载官方口径 · 可信 |
+| B5 | https://www.europapress.es/economia/finanzas-00340/noticia-revolut-lanza-air-espana-nuevo-asistente-inteligencia-artificial-gestionar-finanzas-20260901105900.html | Revolut lanza AIR en España, su nuevo asistente de inteligencia artificial para gestionar las finanzas | 2026-09-01 | 2026-10-23 | 搜索摘要 | 官方通讯社 · 可信（AIR 西班牙/欧洲上线） |
+| B6 | https://www.eubiznews.com/article/revolut-launches-air-in-spain-to-bring-banking-and-travel-services-into-one-ai-conversation | Revolut launches AIR in Spain to bring banking and travel services into one AI conversation | 2026-09-02 | 2026-10-23 | 搜索摘要（web_fetch 因 provider 冲突报错，未取全文） | 行业媒体 · 可信 |
+| B7 | https://www.konsulteer.com/article/revolut-launches-ai-financial-assistant-air-in-france | Revolut Launches AI Financial Assistant AIR In France | 2026-09-02 | 2026-10-23 | 搜索摘要 | 一般媒体 · 数字需谨慎（200+ H100、1.2M 客服工单/月等均为公司自述转述） |
+| B8 | https://www.fintechweekly.com/news/revolut-air-ai-assistant-uk-customers-launch-2026 | Revolut Launches AIR, An In-App AI Assistant, to 13 Million UK Customers | 2026-04-11 | 2026-10-23 | 搜索摘要 | 一般科技媒体 · 可信（**关键句："Revolut has not disclosed which AI providers power the product"**） |
+| B9 | https://thenextweb.com/news/nik-storonsky-revolut-global-tech-company-europe-wave-by-vento | Nik Storonsky wants Revolut to be Europe's answer to Meta and Google | 2026-10-09 | 2026-10-23 | 搜索摘要 | 可信媒体 · CEO 访谈（**晚于核验日，属战略表述**） |
+| B10 | https://fintechmagazine.com/news/a-bank-with-zero-risk-nik-storonsky-on-revoluts-expansion | A Bank With Zero Risk: Nik Storonsky on Revolut's Expansion（Google Cloud 为「foundational technology partner」，Gemini 贯穿运营与反欺诈） | 2026-09-22 | 2026-10-23 | 搜索摘要 | 行业媒体 · 可信（**晚于核验日**） |
+| B11 | https://www.forestadmin.com/blog/what-revolut-air-signals-to-fintech-from-interface-to-infrastructure | What Revolut AIR signals to fintech: from interface to infrastructure | 未取得日期 | 2026-10-23 | 搜索摘要 | 第三方厂商技术博客 · 推断性质，非官方 |
+| B12 | https://ai2.work/blog/inside-revolut-s-pragma-the-bank-built-ai-scoring-70m-customers | Inside Revolut's PRAGMA: The Bank-Built AI Scoring 70M Customers | 2026-07-29 | 2026-10-23 | 搜索摘要 | 第三方技术分析 · 对象是 PRAGMA，**不是 AIR** |
+| B13 | https://ergomania.eu/revolut-air-ai-banking-assistant-ux | Revolut AIR：AI 银行助手 UX 分析（声称 AIR 为 **RAG 架构**、与 Google Cloud / Gemini 集成、200+ NVIDIA H100 on Nebius） | 未取得日期 | 2026-10-23 | 搜索摘要 | 个人/公司博客 · **低可信度，非官方，不得当作事实** |
+| B14 | https://www.studioglobal.ai/zh-cn/discover/answers/search-6a8e51b2ce023abfc3deb2a1 | Revolut 成立 AI 研究部门，押注自研银行基础模型 PRAGMA | 2026-08-26 | 2026-10-23 | 搜索摘要 | 中文聚合媒体 · 一般 |
+| B15 | https://www.fxajax.com/news/7257/Revolut-成立研究部门-携手-NVIDIA-打造金融基础模型-PRAGMA | Revolut 成立研究部门，携手 NVIDIA 打造金融基础模型 PRAGMA | 2026-08-25 | 2026-10-23 | 搜索摘要 | 中文媒体 · 一般 |
 
 ### A.3 打开失败 / 未能读取的尝试（如实登记，不得当作已读）
 

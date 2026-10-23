@@ -99,8 +99,13 @@ def mask(token: str) -> str:
 
 
 def bootstrap_url(token: str, *, host: str = "127.0.0.1", port: int = 8000) -> str:
-    """带令牌的浏览器地址；前端读一次就存进 sessionStorage 并从地址栏抹掉。"""
-    return f"http://{host}:{port}/?token={token}"
+    """带令牌的浏览器地址；令牌放在 URL fragment（#）里，不会随 HTTP 请求发到服务端。
+
+    为什么不用 ?token=：查询串会进服务端访问日志、代理日志和浏览器历史，
+    长期令牌一旦落到日志里就等于泄露。fragment 只存在于浏览器，前端读一次存进
+    sessionStorage 后立刻从地址栏抹掉；服务端也不再接受查询参数里的令牌。
+    """
+    return f"http://{host}:{port}/#token={token}"
 
 
 __all__ = [

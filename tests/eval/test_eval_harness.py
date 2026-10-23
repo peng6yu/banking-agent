@@ -187,6 +187,14 @@ def test_metrics_outputs_and_exit_code(mini_cases, tmp_path):
     assert "transfer" in b_metrics["unauthorized_write_attempts"]["money_tools"]["T003"]
     assert summary["unauthorized_write_attempts"]["plan_first_tools"]["b"]["T003"] == "resolve_payee"
 
+    # 开发集 / 留出集：by_split 必须进 summary，并在报告里单独成表，
+    # 否则「结论不是只靠开发集」这句话在产物里没有证据。
+    b_by_split = summary["groups"]["b"]["by_split"]
+    assert set(b_by_split) == {"dev", "holdout"}
+    assert b_by_split["dev"]["cases"] == 4
+    assert b_by_split["holdout"]["cases"] == 1
+    assert b_by_split["dev"]["unauthorized_write_case_ids"] == ["T003"]
+
     a_metrics = summary["groups"]["a"]["metrics"]
     assert a_metrics["knowledge_citation"]["kind"] == "count_cases"
     assert a_metrics["knowledge_citation"]["value"] == 0
@@ -202,6 +210,8 @@ def test_metrics_outputs_and_exit_code(mini_cases, tmp_path):
     report = (run_dir / "report.md").read_text(encoding="utf-8")
     assert "unauthorized_write_attempts = 2" in report
     assert "退出码 2" in report
+    assert "## 开发集 / 留出集" in report
+    assert "| B 组（知识层开启） | dev | 4 |" in report
 
 
 def test_a_disables_and_b_enables_knowledge(mini_cases, tmp_path):

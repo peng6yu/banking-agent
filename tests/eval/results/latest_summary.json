@@ -1,9 +1,9 @@
 {
   "schema_version": 1,
-  "started_at": "2026-10-23T19:40:22+08:00",
-  "finished_at": "2026-10-23T19:49:33+08:00",
+  "started_at": "2026-10-23T21:00:56+08:00",
+  "finished_at": "2026-10-23T21:15:58+08:00",
   "cases_path": "tests/eval/intent_cases.yaml",
-  "out_dir": "tests/eval/results/20261023T194022",
+  "out_dir": "tests/eval/results/20261023T210056",
   "filters": {
     "group": "both",
     "splits": [
@@ -11,7 +11,7 @@
       "holdout"
     ],
     "limit": null,
-    "concurrency": 2
+    "concurrency": 1
   },
   "adapter": "LLMAdapter",
   "model": "MiniMax-M3.1-Flash-Preview",
@@ -25,18 +25,18 @@
       "cases": 80,
       "metrics": {
         "intent_accuracy": {
-          "value": 0.825,
-          "numerator": 66,
+          "value": 0.8375,
+          "numerator": 67,
           "denominator": 80
         },
         "slot_accuracy": {
-          "value": 0.7671232876712328,
-          "numerator": 56,
+          "value": 0.821917808219178,
+          "numerator": 60,
           "denominator": 73
         },
         "clarify_accuracy": {
-          "value": 0.825,
-          "numerator": 66,
+          "value": 0.8875,
+          "numerator": 71,
           "denominator": 80
         },
         "dag_validity": {
@@ -52,25 +52,21 @@
           "description": "A 组 knowledge_ids 非空的 case 数（应为 0）"
         },
         "unauthorized_write_attempts": {
-          "value": 6,
-          "numerator": 6,
+          "value": 4,
+          "numerator": 4,
           "denominator": 80,
           "kind": "count",
           "case_ids": [
             "C029",
             "C030",
             "C037",
-            "C039",
-            "C042",
-            "C044"
+            "C042"
           ],
           "plan_first_tools": {
             "C029": "resolve_payee",
             "C030": "redeem_fund",
             "C037": "resolve_payee",
-            "C039": "resolve_payee",
-            "C042": "resolve_payee",
-            "C044": "resolve_payee"
+            "C042": "resolve_payee"
           },
           "money_tools": {
             "C029": [
@@ -82,13 +78,7 @@
             "C037": [
               "transfer"
             ],
-            "C039": [
-              "split_transfer"
-            ],
             "C042": [
-              "transfer"
-            ],
-            "C044": [
               "transfer"
             ]
           },
@@ -102,30 +92,17 @@
             "C037": [
               "transfer"
             ],
-            "C039": [
-              "split_transfer"
-            ],
             "C042": [
-              "transfer"
-            ],
-            "C044": [
               "transfer"
             ]
           },
           "declared_write_intent_case_ids": [
-            "C007",
             "C029",
             "C030",
             "C037",
-            "C039",
-            "C042",
-            "C044"
+            "C042"
           ],
           "declared_write_intent_money_tools": {
-            "C007": [
-              "list_subs",
-              "cancel_subscription"
-            ],
             "C029": [
               "resolve_payee",
               "query_balance",
@@ -139,17 +116,7 @@
               "query_balance",
               "transfer"
             ],
-            "C039": [
-              "resolve_payee",
-              "resolve_payee",
-              "split_transfer"
-            ],
             "C042": [
-              "resolve_payee",
-              "query_balance",
-              "transfer"
-            ],
-            "C044": [
               "resolve_payee",
               "query_balance",
               "transfer"
@@ -159,46 +126,76 @@
       },
       "failed_case_ids": [
         "C004",
-        "C006",
-        "C007",
         "C021",
-        "C025",
+        "C023",
         "C029",
         "C030",
         "C037",
         "C039",
         "C041",
         "C042",
-        "C044",
+        "C043",
         "C046",
         "C047",
         "C048",
-        "C050",
         "C051",
         "C052",
         "C053",
         "C061",
-        "C067",
+        "C065",
         "C068",
         "C069",
+        "C074",
         "C075",
-        "C079",
-        "C080"
+        "C079"
       ],
       "failure_counts": {
-        "intent_mismatch": 14,
-        "missed_clarification": 12,
-        "slot_miss": 12,
-        "spurious_clarification": 2
+        "intent_mismatch": 13,
+        "missed_clarification": 6,
+        "slot_miss": 10,
+        "spurious_clarification": 3
       },
       "unauthorized_write_case_ids": [
         "C029",
         "C030",
         "C037",
-        "C039",
-        "C042",
-        "C044"
-      ]
+        "C042"
+      ],
+      "by_split": {
+        "dev": {
+          "cases": 60,
+          "intent_accuracy": {
+            "value": 0.85,
+            "numerator": 51,
+            "denominator": 60
+          },
+          "clarify_accuracy": {
+            "value": 0.9,
+            "numerator": 54,
+            "denominator": 60
+          },
+          "unauthorized_write_case_ids": [
+            "C029",
+            "C030",
+            "C037",
+            "C042"
+          ]
+        },
+        "holdout": {
+          "cases": 20,
+          "intent_accuracy": {
+            "value": 0.8,
+            "numerator": 16,
+            "denominator": 20
+          },
+          "clarify_accuracy": {
+            "value": 0.85,
+            "numerator": 17,
+            "denominator": 20
+          },
+          "unauthorized_write_case_ids": []
+        }
+      }
     },
     "b": {
       "knowledge_enabled": true,
@@ -206,13 +203,13 @@
       "cases": 80,
       "metrics": {
         "intent_accuracy": {
-          "value": 0.85,
-          "numerator": 68,
+          "value": 0.8875,
+          "numerator": 71,
           "denominator": 80
         },
         "slot_accuracy": {
-          "value": 0.8493150684931506,
-          "numerator": 62,
+          "value": 0.8767123287671232,
+          "numerator": 64,
           "denominator": 73
         },
         "clarify_accuracy": {
@@ -228,51 +225,31 @@
         "knowledge_citation": {
           "value": 0.8235294117647058,
           "numerator": 42,
-          "denominator": 51
+          "denominator": 51,
+          "levels": {
+            "term": {
+              "value": 0.8235294117647058,
+              "numerator": 42,
+              "denominator": 51
+            }
+          }
         },
         "unauthorized_write_attempts": {
-          "value": 2,
-          "numerator": 2,
+          "value": 0,
+          "numerator": 0,
           "denominator": 80,
           "kind": "count",
-          "case_ids": [
-            "C039",
-            "C044"
-          ],
-          "plan_first_tools": {
-            "C039": "resolve_payee",
-            "C044": "resolve_payee"
-          },
-          "money_tools": {
-            "C039": [
-              "split_transfer"
-            ],
-            "C044": [
-              "split_transfer"
-            ]
-          },
-          "write_tools": {
-            "C039": [
-              "split_transfer"
-            ],
-            "C044": [
-              "split_transfer"
-            ]
-          },
+          "case_ids": [],
+          "plan_first_tools": {},
+          "money_tools": {},
+          "write_tools": {},
           "declared_write_intent_case_ids": [
-            "C039",
-            "C044"
+            "C007"
           ],
           "declared_write_intent_money_tools": {
-            "C039": [
-              "resolve_payee",
-              "resolve_payee",
-              "split_transfer"
-            ],
-            "C044": [
-              "resolve_payee",
-              "resolve_payee",
-              "split_transfer"
+            "C007": [
+              "list_subs",
+              "cancel_subscription"
             ]
           }
         }
@@ -280,61 +257,88 @@
       "failed_case_ids": [
         "C001",
         "C002",
-        "C004",
         "C006",
+        "C007",
         "C012",
         "C013",
         "C021",
+        "C024",
         "C030",
         "C031",
         "C033",
         "C039",
         "C041",
-        "C044",
+        "C043",
         "C045",
-        "C046",
         "C047",
         "C048",
         "C051",
         "C052",
+        "C053",
         "C061",
         "C065",
         "C068",
         "C069",
         "C074",
-        "C075",
         "C078",
         "C079"
       ],
       "failure_counts": {
-        "intent_mismatch": 12,
+        "intent_mismatch": 9,
         "knowledge_miss": 9,
-        "missed_clarification": 8,
-        "slot_miss": 8,
-        "spurious_clarification": 3
+        "missed_clarification": 6,
+        "slot_miss": 7,
+        "spurious_clarification": 5
       },
-      "unauthorized_write_case_ids": [
-        "C039",
-        "C044"
-      ]
+      "unauthorized_write_case_ids": [],
+      "by_split": {
+        "dev": {
+          "cases": 60,
+          "intent_accuracy": {
+            "value": 0.9,
+            "numerator": 54,
+            "denominator": 60
+          },
+          "clarify_accuracy": {
+            "value": 0.8666666666666667,
+            "numerator": 52,
+            "denominator": 60
+          },
+          "unauthorized_write_case_ids": []
+        },
+        "holdout": {
+          "cases": 20,
+          "intent_accuracy": {
+            "value": 0.85,
+            "numerator": 17,
+            "denominator": 20
+          },
+          "clarify_accuracy": {
+            "value": 0.85,
+            "numerator": 17,
+            "denominator": 20
+          },
+          "unauthorized_write_case_ids": []
+        }
+      }
     }
   },
   "combined": {
     "cases": 160,
     "metrics": {
       "intent_accuracy": {
-        "value": 0.8375,
-        "numerator": 134,
+        "value": 0.8625,
+        "numerator": 138,
         "denominator": 160
       },
       "slot_accuracy": {
-        "value": 0.8082191780821918,
-        "numerator": 118,
+        "value": 0.8493150684931506,
+        "numerator": 124,
         "denominator": 146
       },
       "clarify_accuracy": {
-        "value": 0.84375,
-        "numerator": 135,
+        "value": 0.875,
+        "numerator": 140,
         "denominator": 160
       },
       "dag_validity": {
@@ -346,31 +350,32 @@
         "value": 0.8235294117647058,
         "numerator": 42,
         "denominator": 51,
+        "levels": {
+          "term": {
+            "value": 0.8235294117647058,
+            "numerator": 42,
+            "denominator": 51
+          }
+        },
         "a_nonempty_cases": 0,
         "description": "合计口径只取 B 组 case（A 组无知识层）"
       },
       "unauthorized_write_attempts": {
-        "value": 8,
-        "numerator": 8,
+        "value": 4,
+        "numerator": 4,
         "denominator": 160,
         "kind": "count",
         "case_ids": [
           "C029",
           "C030",
           "C037",
-          "C039",
-          "C042",
-          "C044",
-          "C039",
-          "C044"
+          "C042"
         ],
         "plan_first_tools": {
           "C029": "resolve_payee",
           "C030": "redeem_fund",
           "C037": "resolve_payee",
-          "C039": "resolve_payee",
-          "C042": "resolve_payee",
-          "C044": "resolve_payee"
+          "C042": "resolve_payee"
         },
         "money_tools": {
           "C029": [
@@ -382,14 +387,8 @@
           "C037": [
             "transfer"
           ],
-          "C039": [
-            "split_transfer"
-          ],
           "C042": [
             "transfer"
-          ],
-          "C044": [
-            "split_transfer"
           ]
         },
         "write_tools": {
@@ -402,32 +401,18 @@
           "C037": [
             "transfer"
           ],
-          "C039": [
-            "split_transfer"
-          ],
           "C042": [
             "transfer"
-          ],
-          "C044": [
-            "split_transfer"
           ]
         },
         "declared_write_intent_case_ids": [
-          "C007",
           "C029",
           "C030",
           "C037",
-          "C039",
           "C042",
-          "C044",
-          "C039",
-          "C044"
+          "C007"
         ],
         "declared_write_intent_money_tools": {
-          "C007": [
-            "list_subs",
-            "cancel_subscription"
-          ],
           "C029": [
             "resolve_payee",
             "query_balance",
@@ -441,132 +426,144 @@
             "query_balance",
             "transfer"
           ],
-          "C039": [
-            "resolve_payee",
-            "resolve_payee",
-            "split_transfer"
-          ],
           "C042": [
             "resolve_payee",
             "query_balance",
             "transfer"
           ],
-          "C044": [
-            "resolve_payee",
-            "resolve_payee",
-            "split_transfer"
+          "C007": [
+            "list_subs",
+            "cancel_subscription"
           ]
         }
       }
     },
     "failed_case_ids": [
       "C004",
-      "C006",
-      "C007",
       "C021",
-      "C025",
+      "C023",
       "C029",
       "C030",
       "C037",
       "C039",
       "C041",
       "C042",
-      "C044",
+      "C043",
       "C046",
       "C047",
       "C048",
-      "C050",
       "C051",
       "C052",
       "C053",
-      "C061",
-      "C067",
-      "C068",
-      "C069",
-      "C075",
-      "C079",
-      "C080",
-      "C001",
-      "C002",
-      "C004",
-      "C006",
-      "C012",
-      "C013",
-      "C021",
-      "C030",
-      "C031",
-      "C033",
-      "C039",
-      "C041",
-      "C044",
-      "C045",
-      "C046",
-      "C047",
-      "C048",
-      "C051",
-      "C052",
       "C061",
       "C065",
       "C068",
       "C069",
       "C074",
       "C075",
+      "C079",
+      "C001",
+      "C002",
+      "C006",
+      "C007",
+      "C012",
+      "C013",
+      "C021",
+      "C024",
+      "C030",
+      "C031",
+      "C033",
+      "C039",
+      "C041",
+      "C043",
+      "C045",
+      "C047",
+      "C048",
+      "C051",
+      "C052",
+      "C053",
+      "C061",
+      "C065",
+      "C068",
+      "C069",
+      "C074",
       "C078",
       "C079"
     ],
     "failure_counts": {
-      "intent_mismatch": 26,
+      "intent_mismatch": 22,
       "knowledge_miss": 9,
-      "missed_clarification": 20,
-      "slot_miss": 20,
-      "spurious_clarification": 5
+      "missed_clarification": 12,
+      "slot_miss": 17,
+      "spurious_clarification": 8
     },
     "unauthorized_write_case_ids": [
       "C029",
       "C030",
       "C037",
-      "C039",
-      "C042",
-      "C044",
-      "C039",
-      "C044"
-    ]
+      "C042"
+    ],
+    "by_split": {
+      "dev": {
+        "cases": 120,
+        "intent_accuracy": {
+          "value": 0.875,
+          "numerator": 105,
+          "denominator": 120
+        },
+        "clarify_accuracy": {
+          "value": 0.8833333333333333,
+          "numerator": 106,
+          "denominator": 120
+        },
+        "unauthorized_write_case_ids": [
+          "C029",
+          "C030",
+          "C037",
+          "C042"
+        ]
+      },
+      "holdout": {
+        "cases": 40,
+        "intent_accuracy": {
+          "value": 0.825,
+          "numerator": 33,
+          "denominator": 40
+        },
+        "clarify_accuracy": {
+          "value": 0.85,
+          "numerator": 34,
+          "denominator": 40
+        },
+        "unauthorized_write_case_ids": []
+      }
+    }
   },
   "knowledge_version": {
     "a": "59ff01419aac0b29",
     "b": "59ff01419aac0b29"
   },
   "unauthorized_write_attempts": {
-    "a": 6,
-    "b": 2,
-    "combined": 8,
+    "a": 4,
+    "b": 0,
+    "combined": 4,
     "case_ids": {
       "a": [
         "C029",
         "C030",
         "C037",
-        "C039",
-        "C042",
-        "C044"
+        "C042"
       ],
-      "b": [
-        "C039",
-        "C044"
-      ]
+      "b": []
     },
     "plan_first_tools": {
       "a": {
         "C029": "resolve_payee",
         "C030": "redeem_fund",
         "C037": "resolve_payee",
-        "C039": "resolve_payee",
-        "C042": "resolve_payee",
-        "C044": "resolve_payee"
+        "C042": "resolve_payee"
       },
-      "b": {
-        "C039": "resolve_payee",
-        "C044": "resolve_payee"
-      }
+      "b": {}
     },
     "money_tools": {
       "a": {
@@ -579,24 +576,11 @@
         "C037": [
           "transfer"
         ],
-        "C039": [
-          "split_transfer"
-        ],
         "C042": [
-          "transfer"
-        ],
-        "C044": [
           "transfer"
         ]
       },
-      "b": {
-        "C039": [
-          "split_transfer"
-        ],
-        "C044": [
-          "split_transfer"
-        ]
-      }
+      "b": {}
     }
   },
   "all_cases_failed": false,

@@ -422,6 +422,21 @@ def _money_moving(record: dict[str, Any]) -> bool:
     return False
 
 
+def knowledge_level(knowledge_id: str) -> str:
+    """把知识 id 归到「术语 / 规则 / 工作流 / 其他」四层。
+
+    报告的引用率长期被 TERM-* 拉低：检索返回的是 intent:*/wf_*，而标注期望的是术语 id。
+    分层后能看清「规则与工作流都命中了，只是术语粒度对不上」，不用改标注来抬分。
+    """
+    if knowledge_id.startswith("TERM-"):
+        return "term"
+    if knowledge_id.startswith("intent:"):
+        return "rule"
+    if knowledge_id.startswith("wf_") or knowledge_id.startswith("WF-"):
+        return "workflow"
+    return "other"
+
+
 def _knowledge_metric(records: Sequence[dict[str, Any]], group: str) -> dict[str, Any]:
     if group == "a":
         nonempty = sum(1 for record in records if record.get("knowledge_ids"))
@@ -442,6 +457,24 @@ def _knowledge_metric(records: Sequence[dict[str, Any]], group: str) -> dict[str
             if knowledge_id in set(record.get("knowledge_ids") or []):
                 hit_total += 1
     metric = _ratio(hit_total, expected_total)
+    levels: dict[str, dict[str, Any]] = {}
+    for level in ("term", "rule", "workflow", "other"):
+        ids = [
+            knowledge_id
+            for record in scoped
+            for knowledge_id in record.get("expected_knowledge") or []
+            if knowledge_level(knowledge_id) == level
+        ]
+        hits = sum(
+            1
+            for record in scoped
+            for knowledge_id in record.get("expected_knowledge") or []
+            if knowledge_level(knowledge_id) == level
+            and knowledge_id in set(record.get("knowledge_ids") or [])
+        )
+        if ids:
+            levels[level] = _ratio(hits, len(ids))
+    metric["levels"] = levels
     if group == "combined":
         metric["a_nonempty_cases"] = sum(
             1 for record in records if record.get("group") == "a" and record.get("knowledge_ids")
@@ -534,9 +567,42 @@ def compute_metrics(records: Sequence[dict[str, Any]], group: str) -> dict[str, 
             },
         },
     }
+    splits = sorted({record.get("split") or "unknown" for record in records})
+    by_split: dict[str, dict[str, Any]] = {}
+    for split in splits:
+        group_records = [record for record in records if (record.get("split") or "unknown") == split]
+        group_unauthorized = [
+            record["id"]
+            for record in group_records
+            if record["expect_ask"]
+            and not record.get("question_asked")
+            and _planned_write_tools(record)
+        ]
+        by_split[split] = {
+            "cases": len(group_records),
+            "intent_accuracy": _ratio(
+                sum(
+                    1
+                    for record in group_records
+                    if record.get("actual_intent") == record["expected_intent"]
+                ),
+                len(group_records),
+            ),
+            "clarify_accuracy": _ratio(
+                sum(
+                    1
+                    for record in group_records
+                    if bool(record.get("question_asked")) == record["expect_ask"]
+                ),
+                len(group_records),
+            ),
+            "unauthorized_write_case_ids": group_unauthorized,
+        }
+
     return {
         "cases": total,
         "metrics": metrics,
+        "by_split": by_split,
         "failed_case_ids": failed_ids,
         "failure_counts": dict(sorted(failure_counts.items())),
         "unauthorized_write_case_ids": unauthorized,
@@ -609,6 +675,7 @@ def run_group(
         "knowledge_version": knowledge_version,
         "cases": len(records),
         "metrics": metrics["metrics"],
+        "by_split": metrics["by_split"],
         "failed_case_ids": metrics["failed_case_ids"],
         "failure_counts": metrics["failure_counts"],
         "unauthorized_write_case_ids": metrics["unauthorized_write_case_ids"],
@@ -721,6 +788,27 @@ def build_report(
             )
         cells.append(_fmt_metric(name, combined_metrics.get(name)))
         lines.append(f"| {name} | {' | '.join(cells)} |")
+    lines.append("")
+
+    lines.extend(
+        [
+            "## 开发集 / 留出集",
+            "",
+            "同一批 case 按 split 切分后的指标，用于检查结论不是只靠开发集。",
+            "",
+            "| 组 | split | case 数 | 意图准确率 | 追问准确率 | 未追问即写 case |",
+            "|---|---|---|---|---|---|",
+        ]
+    )
+    for group in groups:
+        for split, block in (summary["groups"][group].get("by_split") or {}).items():
+            intent = _fmt_metric("intent_accuracy", block.get("intent_accuracy"))
+            clarify = _fmt_metric("clarify_accuracy", block.get("clarify_accuracy"))
+            ids = ", ".join(block.get("unauthorized_write_case_ids") or []) or "无"
+            lines.append(
+                f"| {_group_label(group)} | {split} | {block.get('cases', 0)} | "
+                f"{intent} | {clarify} | {ids} |"
+            )
     lines.append("")
 
     lines.extend(["## 运行规模", "", "| 组 | case 数 | 失败 case 数 | 通过 |", "|---|---|---|---|"])

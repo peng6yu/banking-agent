@@ -262,11 +262,11 @@ def check_escape(res: Result, src: str) -> None:
 
 
 def check_api_token(res: Result, src: str) -> None:
-    """入口访问令牌：从 ?token= 读一次、存 sessionStorage、抹掉地址栏、请求自动带上。"""
+    """入口访问令牌：从 #token= 读一次、存 sessionStorage、抹掉地址栏、请求自动带上。"""
     res.add(
-        "从 ?token= 读取入口令牌",
-        re.search(r"URLSearchParams[^\n]*\.get\(\s*['\"]token['\"]\s*\)", src) is not None,
-        "未找到 new URLSearchParams(...).get('token')",
+        "从 #token= 读取入口令牌（fragment 不进服务端日志）",
+        re.search(r"location\.hash[^\n]*#token=", src) is not None,
+        "未找到 location.hash 里的 #token=",
     )
     res.add("令牌存进 sessionStorage", "sessionStorage" in src, "未找到 sessionStorage")
     res.add(

@@ -2,7 +2,8 @@
 
 覆盖两件事：
 1. 纯函数层——取值优先级、缺配置时 fail closed、生成文件的权限与复用、常数时间比较；
-2. HTTP 层——没带令牌 401 且响应体只有 code 与人话，Bearer / ?token= 两种带法都能过。
+2. HTTP 层——没带令牌 401 且响应体只有 code 与人话；请求头三种带法能过，
+   查询参数 ?token= 一律 401（长期令牌不该出现在访问日志里）。
 
 HTTP 用例只走不需要数据库的端点（/api/health、/、/api/tools），
 因为 TestClient 不进入 lifespan，也就不该假设库已经建好。
@@ -108,8 +109,9 @@ def test_mask_keeps_only_head_and_tail() -> None:
     assert api_auth.mask("") == "***"
 
 
-def test_bootstrap_url_carries_token() -> None:
-    assert api_auth.bootstrap_url("abc") == "http://127.0.0.1:8000/?token=abc"
+def test_bootstrap_url_carries_token_in_fragment() -> None:
+    # fragment 不会随 HTTP 请求发出去，避免令牌进服务端/代理日志。
+    assert api_auth.bootstrap_url("abc") == "http://127.0.0.1:8000/#token=abc"
 
 
 # ------------------------------------------------------------------ HTTP 层
@@ -131,13 +133,13 @@ def test_tools_without_token_is_401_with_plain_body(client: TestClient, monkeypa
     assert "令牌" in body["user_text"]
 
 
-def test_bearer_and_query_token_both_work(client: TestClient, monkeypatch) -> None:
+def test_bearer_works_but_query_token_is_rejected(client: TestClient, monkeypatch) -> None:
     monkeypatch.setenv(api_auth.TOKEN_ENV, "right-token")
     by_header = client.get("/api/tools", headers={"Authorization": "Bearer right-token"})
     by_query = client.get("/api/tools?token=right-token")
     assert by_header.status_code == 200
-    assert by_query.status_code == 200
-    assert by_header.json()["count"] == by_query.json()["count"]
+    assert by_query.status_code == 401
+    assert by_query.json()["code"] == "UNAUTHORIZED"
 
 
 def test_custom_header_also_accepted(client: TestClient, monkeypatch) -> None:

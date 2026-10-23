@@ -21,7 +21,7 @@ from app.planner.card_actions import (
     CARD_TAIL_REQUIRED,
     card_action,
 )
-from app.planner import kb_bridge, refusal
+from app.planner import kb_bridge, payment_guard, refusal
 from app.planner.intent_schema import (
     CANCEL_SLOT,
     EMIT_INTENT_NAME,
@@ -188,6 +188,9 @@ class IntentResult:
     knowledge_degraded: bool = False
     # 跨场景链路名（例如 redeem_then_transfer）：非空表示这一句要求「先赎回再转账」。
     knowledge_cross: str = ""
+    # 原话层付款歧义命中（multi_payee/multi_transfer/split_ambiguous）：非空表示
+    # 这一轮只能反问。它不进模型上下文、也不看模型给的槽位，命中即拦。
+    guard_reason: str = ""
 
     def to_event(self) -> dict[str, Any]:
         """SSE intent 事件的数据体（docs/07 7.6）。"""
@@ -199,6 +202,7 @@ class IntentResult:
             "question": self.question,
             "ok": self.ok,
             "untrusted_fields": list(self.untrusted_fields),
+            "guard": self.guard_reason,
             "knowledge": {
                 "ids": list(self.knowledge_ids),
                 "sources": list(self.knowledge_sources),
@@ -276,7 +280,8 @@ async def parse(
         # 模型两次都不调工具：先看术语表能不能确定性接住这一句，接不住才反问。
         # 反问轮同样要扫注入（O1），否则攻击话术走这条分支时，审计链里只剩 intent.parsed 一条。
         result = _fallback_result(text)
-        return _mark_injection(result, text, session_id=session_id)
+        guarded = _guard_payment(result, text, session_id=session_id)
+        return guarded if guarded is not None else _mark_injection(result, text, session_id=session_id)
     return _from_args(args, text, retried=retried, session_id=session_id)
 
 
@@ -387,6 +392,11 @@ def _from_args(
         knowledge_degraded=hint.degraded,
         knowledge_cross=hint.cross or "",
     )
+    # 原话层的多收款人/多笔付款检查放在所有知识层分支之前：它不依赖
+    # KNOWLEDGE_ENABLED，也不依赖模型有没有抽对 payee_name，命中就必须先问清。
+    guarded = _guard_payment(result, text, session_id=session_id)
+    if guarded is not None:
+        return guarded
     if hint.cross and any(slot in missing for slot in kb_bridge.CROSS_REQUIRED_SLOTS):
         # 跨场景缺产品：这一轮只问产品、不建图——「先赎回后到账再转账」的依赖
         # 在没有产品代码时根本拼不出来，硬建图会得到一条执行不了的链。
@@ -409,6 +419,29 @@ def _from_args(
         result.ok = False
         return _mark_injection(result, text, session_id=session_id)
     result = _apply_branches(result)
+    return _mark_injection(result, text, session_id=session_id)
+
+
+def _guard_payment(
+    result: IntentResult,
+    text: str,
+    *,
+    session_id: str | None = None,
+) -> IntentResult | None:
+    """原话层付款歧义：命中就把这一轮钉死成「先澄清」，返回 None 表示放行到后续分支。
+
+    刻意不写 missing：这里要问的是「几个收款人 / 几笔」，只有本模块知道怎么问；
+    硬塞 payee_name 会让界面把用户已经说过的人名标成「缺失」。
+    """
+    finding = payment_guard.inspect(text)
+    if not finding.ambiguous:
+        return None
+    if result.intent == "split_bill" and payment_guard.has_split_marker(text):
+        # 用户明确说了 AA/分摊，那是拆账意图本身，交给 split_bill 的模板处理。
+        return None
+    result.question = finding.question
+    result.ok = False
+    result.guard_reason = finding.reason
     return _mark_injection(result, text, session_id=session_id)
 
 

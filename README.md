@@ -2,7 +2,7 @@
 
 > 2026 金融科技大赛 · 人工智能赛道 · 国内赛道
 >
-> **一句话**：市面上的银行 AI 都在做「更会聊天的客服」，我们做的是**银行敢让它真的动钱的 Agent**——每一步都要过一道写死在代码里的权限闸门，高风险动作必须让人点头，全过程写进改不了的审计链。
+> **一句话**：市面上的银行 AI 都在做「更会聊天的客服」，我们做的是**银行敢让它真的动钱的 Agent**——每一步都要过一道写死在代码里的权限闸门，高风险动作必须让人点头，全过程写进只增不改、可逐条复核的审计链。
 
 ## 30 秒看懂
 
@@ -11,14 +11,14 @@
 ```bash
 git clone https://github.com/peng6yu/banking-agent.git && cd banking-agent
 make setup   # 没装 make 就 bash scripts/setup.sh
-make run     # 启动日志会打印一条带 ?token= 的地址，打开那一条
+make run     # 启动日志会打印一条带 #token= 的地址，打开那一条
 ```
 
 `make setup` 依次做：找解释器（3.12 优先）→ 建 `.venv` → 装依赖（自动绕开本机 pip.conf 里解析不了的索引）→ 生成 `.env`（权限 600，不入库）→ 定模型来源 → 建库 + 种子 → 真模型时再跑一遍协议自检。模型来源它自己判断：环境或 `.env` 里已有 key 就用云端，本机 Ollama 在跑就用 Ollama，都没有才退回离线协作桩（`MOCK_MODE=script`，零网络也能演查余额与转账）。可以点名：`make setup ARGS="--ollama"` / `ARGS="--mock"` / `ARGS="--dry-run"`（只打印计划不动文件）。**仓库里没有任何人的 API key**，换厂商只改 `.env` 三行，见下面「模型配置」。
 
 不想建 venv 也行：系统 `python3.12` 装好依赖后，`python3.12 -m scripts.seed && python3.12 -m uvicorn app.main:app --port 8000` 一样能跑。
 
-两把钥匙都是**首次运行自动生成、不写进仓库**：能力令牌密钥落 `data/token_secret`（0600），HTTP 访问令牌落 `data/api_token`（0600）。后者是「谁能调这个端口」的闸：启动日志会打印 `http://127.0.0.1:8000/?token=…`，**浏览器打开这一条**，前端读一次存进 sessionStorage 再从地址栏抹掉；之后手敲 <http://127.0.0.1:8000> 也行（同一浏览器同一标签页内有效）。命令行调用带一行头即可：`curl -H "Authorization: Bearer $(cat data/api_token)" http://127.0.0.1:8000/api/tools`。
+两把钥匙都是**首次运行自动生成、不写进仓库**：能力令牌密钥落 `data/token_secret`（0600），HTTP 访问令牌落 `data/api_token`（0600）。后者是「谁能调这个端口」的闸：启动日志会打印 `http://127.0.0.1:8000/#token=…`，**浏览器打开这一条**，前端读一次存进 sessionStorage 再从地址栏抹掉；之后手敲 <http://127.0.0.1:8000> 也行（同一浏览器同一标签页内有效）。命令行调用带一行头即可：`curl -H "Authorization: Bearer $(cat data/api_token)" http://127.0.0.1:8000/api/tools`。
 
 然后浏览器打开上面那条带令牌的地址，在左栏输入框里打一句：
 
@@ -39,7 +39,7 @@ make run     # 启动日志会打印一条带 ?token= 的地址，打开那一�
 | 步骤 | 命令 | 实测结果 |
 |---|---|---|
 | 0. 一键配置 | `make setup`（等价 `bash scripts/setup.sh`） | 建 `.venv`、装依赖、生成 `.env`、选模型、建库、自检；幂等可重跑，`--dry-run` 只打印计划 |
-| 1. 起服务 | `make run`（等价 `python3.12 -m uvicorn app.main:app --port 8000`） | 启动日志打印 `http://127.0.0.1:8000/?token=…`；打开这条（令牌存 sessionStorage，之后同标签页可裸访问） |
+| 1. 起服务 | `make run`（等价 `python3.12 -m uvicorn app.main:app --port 8000`） | 启动日志打印 `http://127.0.0.1:8000/#token=…`；打开这条（令牌存 sessionStorage，之后同标签页可裸访问） |
 | 2. 自检 | `curl -s -H "X-API-Token: $(cat data/api_token)" http://127.0.0.1:8000/api/health` | `{"ok":true,"status":"ok","model":"MiniMax-M3.1-Flash-Preview","tools":33,"db":true,...}` |
 | 3. 不配模型也要演 | `make setup ARGS="--mock"` | `MOCK_MODE=script` 离线协作桩：查余额、转账两种业务照演，其余照实反问 |
 | 4. 演示跑脏了复原 | `make reseed`（等价 `python3.12 -m scripts.seed --force`） | 删库重建初始态，末行 `seed.ok random_seed=… tables=22 window_days=180` |
@@ -82,7 +82,7 @@ python3.12 -m app.smoke               # 自检：4/4 PASS 才算配好（会打�
 
 ## 这是什么
 
-一个能替用户在手机银行里真实办事的 AI 智能体：理解中文金融意图 → 拆成可执行的 DAG → 每步经过**确定性权限闸门**裁决 → 高风险动作要求人工确认与多因子 → 全链路写入**不可篡改的审计哈希链** → 前端实时把决策过程演出来。
+一个能替用户在手机银行里真实办事的 AI 智能体：理解中文金融意图 → 拆成可执行的 DAG → 每步经过**确定性权限闸门**裁决 → 高风险动作要求人工确认与多因子 → 全链路写入**只增不改、可验证的审计哈希链** → 前端实时把决策过程演出来。
 
 | 场景 | 能做什么 | 当前状态 |
 |---|---|---|
@@ -176,7 +176,7 @@ python3.12 -m app.smoke               # 自检：4/4 PASS 才算配好（会打�
 | 项 | 规则 |
 |---|---|
 | 令牌从哪来 | `API_TOKEN` 环境变量（非空即以其为准）→ 文件 `API_TOKEN_FILE`（默认 `data/api_token`，0600，首次启动用 `secrets.token_urlsafe(32)` 生成）→ 都没有则**一律 401**（fail closed） |
-| 怎么带 | `Authorization: Bearer <token>`、`X-API-Token: <token>`、`?token=<token>` 三种都认；后一种是给浏览器首次打开用的，前端读一次存进 sessionStorage 再从地址栏抹掉 |
+| 怎么带 | `Authorization: Bearer <token>`、`X-API-Token: <token>` 两种请求头；浏览器首次打开用 `#token=<token>`（URL fragment，不随请求发给服务端、不进访问日志），前端读一次存进 sessionStorage 再从地址栏抹掉；查询参数（问号形式）已不再接受 |
 | 怎么比 | `hmac.compare_digest` 常数时间比较；没配、没带、带错一律 False |
 | 拒绝长什么样 | `401` + `{"code":"UNAUTHORIZED","user_text":"这个请求没有带访问令牌，未执行。…"}`，仍然只有 code 与一句人话 |
 | 排障口 | `API_AUTH_DISABLED=1`（也认 true/yes/on）关掉这层，启动日志会打警告；它**不影响**下面的能力令牌校验 |
@@ -198,7 +198,7 @@ curl -s http://127.0.0.1:8000/api/audit/verify
 ### 单元与集成测试（实测全绿，用例数持续增补）
 
 ```bash
-python3.12 -m pytest -q tests/            # 1080 passed, 4 skipped（2026-10-23 实测；用例会随增补变化，复跑以实测为准）
+python3.12 -m pytest -q tests/            # 1112 passed, 4 skipped（2026-10-23 实测；用例会随增补变化，复跑以实测为准）
 ```
 
 ### 前端合规自检（实测 66 项全过）
@@ -268,7 +268,7 @@ python3.12 -m app.smoke                    # 实测 4/4 PASS，主脑延迟约 1
 | `app/tools/` | 33 个工具：查人、查余额、账单、卡片、订阅、转账、资金冻结 + 7 个主动财务（只读/需确认，无动钱语义） |
 | `app/api/` | 17 个 HTTP 端点 + 根页面（新增 7 个储蓄目标/主动提醒/模拟流水端点） |
 | `web/index.html` | 单文件前端（原生 JS，无框架、无 CDN、零外链） |
-| `tests/` | pytest 用例集（1080 passed / 4 skipped，2026-10-23 实测）+ 43 条红队 YAML + `tests/eval/` 80 例 A/B 评估集 |
+| `tests/` | pytest 用例集（1112 passed / 4 skipped，2026-10-23 实测）+ 43 条红队 YAML + `tests/eval/` 80 例 A/B 评估集 |
 | `scripts/` | 种子脚本、前端合规检查器 |
 | `docs/` | 交接规格书 00—10（改造前基线，写代码前必读）+ 11—15 改造设计与验收 + 答辩与演示交付件 |
 | `规划/` | 前期选型与模型实测记录 |
@@ -282,7 +282,7 @@ python3.12 -m app.smoke                    # 实测 4/4 PASS，主脑延迟约 1
 | `make setup` | 一键配置新电脑（.venv + 依赖 + .env + 选模型 + 建库 + 自检） | ✅ 幂等；`ARGS="--dry-run"` 可预演 |
 | `make run` | 启动服务（--reload） | ✅ |
 | `make seed` | 建库 + 种子（幂等） | ✅ |
-| `make test` | pytest 全跑 | ✅ 全绿（1080 passed / 4 skipped，2026-10-23 实测） |
+| `make test` | pytest 全跑 | ✅ 全绿（1112 passed / 4 skipped，2026-10-23 实测） |
 | `make smoke` | 模型连通性自检 | ✅ 4/4 |
 | `make cov` | 覆盖率（未装 pytest-cov 时自动退回纯跑） | ✅ |
 | `make reset` | `POST /api/demo/reset` 演示前清场 | ✅ |
@@ -326,7 +326,7 @@ python3.12 -m app.smoke                    # 实测 4/4 PASS，主脑延迟约 1
 | [docs/12_主动财务管理设计.md](docs/12_主动财务管理设计.md) | 确定性计算、四张表、监测闭环与边界 |
 | [docs/13_竞赛演示手册.md](docs/13_竞赛演示手册.md) | 三段演示逐步脚本与预期输出 |
 | [docs/14_安全回归报告.md](docs/14_安全回归报告.md) | 知识层/主动服务攻击测试、修复记录、残余风险 |
-| [tests/eval/evaluation_report.md](tests/eval/evaluation_report.md) | A/B 实验：指标、失败案例、未授权专项、四轮结果 |
+| [tests/eval/evaluation_report.md](tests/eval/evaluation_report.md) | A/B 实验：指标、失败案例、未授权专项、五轮结果（含 dev/holdout 与并发 2 稳健性） |
 
 **过程材料**（写代码与排练用）：
 

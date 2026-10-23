@@ -248,15 +248,15 @@
 
 ### 一、代码
 - [x] 新增 `app/security/api_auth.py`（纯标准库 `hmac`/`os`/`secrets`/`pathlib`）：`TOKEN_ENV=API_TOKEN`、`TOKEN_FILE_ENV=API_TOKEN_FILE`、`DISABLED_ENV=API_AUTH_DISABLED`、`DEFAULT_TOKEN_FILE=data/api_token`（0600）、`TOKEN_BYTES=32`；`auth_disabled()` / `token_path()` / `load_token()`（env 优先 → 文件 → 空串 fail closed）/ `ensure_token()`（都不存在时 `secrets.token_urlsafe(32)` 写 `.tmp` + chmod 0600 + `os.replace`）/ `is_authorized()`（`hmac.compare_digest`，没配没带带错都 False）/ `mask()` / `bootstrap_url()`。
-- [x] `app/api/routes.py`：`router = APIRouter(dependencies=[Depends(require_api_token)])`，`OPEN_PATHS = {/ , /api/health, /favicon.ico}` 放行；令牌认三种带法 `Authorization: Bearer …`、`X-API-Token`/`token` 头、`?token=…`；失败抛 `Unauthorized(BankError)`（`code=UNAUTHORIZED`、401、只回人话不泄露配置）。
-- [x] `app/main.py`：启动时 `_announce_api_token()` 打印 `api_auth.ready`（打码后的 token）与带 `?token=` 的地址；文件写不进去（OSError）→ `api_auth.token_unwritable` 并让请求照旧 401；`API_AUTH_DISABLED=1` → `api_auth.disabled` 警告。
-- [x] `web/index.html`：从 `?token=` 读一次存 `sessionStorage`，立刻 `history.replaceState` 把 token 从地址栏抹掉（不留在历史/代理日志），再包一层 `window.fetch` 自动加 `Authorization: Bearer`。
+- [x] `app/api/routes.py`：`router = APIRouter(dependencies=[Depends(require_api_token)])`，`OPEN_PATHS = {/ , /api/health, /favicon.ico}` 放行；令牌认两种带法 `Authorization: Bearer …`、`X-API-Token`/`token` 头（v1.8.0 当时代码还接受 `?token=` 查询参数；v1.9.0 起改为 `#token=` fragment，查询参数一律 401，见 v1.9.0 段）；失败抛 `Unauthorized(BankError)`（`code=UNAUTHORIZED`、401、只回人话不泄露配置）。
+- [x] `app/main.py`：启动时 `_announce_api_token()` 打印 `api_auth.ready`（打码后的 token）与带 `#token=` 的地址（v1.8.0 时是 `?token=`，v1.9.0 起改 fragment）；文件写不进去（OSError）→ `api_auth.token_unwritable` 并让请求照旧 401；`API_AUTH_DISABLED=1` → `api_auth.disabled` 警告。
+- [x] `web/index.html`：从 `#token=` 读一次存 `sessionStorage`（v1.8.0 时从 `?token=`），立刻 `history.replaceState` 把 token 从地址栏抹掉（不留在历史/代理日志），再包一层 `window.fetch` 自动加 `Authorization: Bearer`。
 - [x] `scripts/setup.sh` 第 4.5 步预生成令牌（`--dry-run` 只打印）；`Makefile` 的 `run` 前打印带令牌的地址、`reset` 的 curl 自动带头；`.env.example` 新增 ⑪ 段（`API_TOKEN` / `API_TOKEN_FILE` / `API_AUTH_DISABLED`）。
 
 ### 二、测试（+34 条）
-- [x] `tests/test_api_auth.py`（34 条）：纯函数层（disabled 各取值、env 优先于文件、缺文件返回空串、自动生成且 0600 且复用、env 命中不写文件、`is_authorized` 参数化、fail closed、disabled 短路、mask、bootstrap_url）+ HTTP 层（`/` 与 `/api/health` 免令牌、无令牌 401 且 body 只有 `code`/`user_text`、Bearer 与 `?token=` 都 200、`X-API-Token`、错令牌 401、`POST /api/demo/reset` 401、`API_AUTH_DISABLED=1` 放行）。
+- [x] `tests/test_api_auth.py`（34 条）：纯函数层（disabled 各取值、env 优先于文件、缺文件返回空串、自动生成且 0600 且复用、env 命中不写文件、`is_authorized` 参数化、fail closed、disabled 短路、mask、bootstrap_url）+ HTTP 层（`/` 与 `/api/health` 免令牌、无令牌 401 且 body 只有 `code`/`user_text`、Bearer 与 v1.8.0 的 `?token=` 都 200（v1.9.0 起查询参数改 401）、`X-API-Token`、错令牌 401、`POST /api/demo/reset` 401、`API_AUTH_DISABLED=1` 放行）。
 - [x] `tests/conftest.py` 加 autouse fixture `_http_auth_off`（关掉令牌强制），否则 29 条既有 HTTP 用例全变 401；令牌本身的强制由 `test_api_auth.py` 单独覆盖。
-- [x] `scripts/check_frontend.py` 增 `check_api_token` 4 项（读 `?token=` / 存 sessionStorage / `replaceState` 抹地址 / fetch 带 Bearer），静态自检 **62 → 66 项**。
+- [x] `scripts/check_frontend.py` 增 `check_api_token` 4 项（读 `#token=`（v1.8.0 时读 `?token=`）/ 存 sessionStorage / `replaceState` 抹地址 / fetch 带 Bearer），静态自检 **62 → 66 项**。
 - [x] `tests/test_imports.py` 登记 `app.security.api_auth`（第 1 层、零依赖）。
 
 ### 三、文档与数字
@@ -273,3 +273,23 @@
 - 这层只解决「谁能调这个端口」，**不是身份认证**：拿到令牌的人仍可用任意 `session_id` 操作，没有多用户隔离、没有 RBAC。P1 计划：`session_id` 提到 128 bit、确认改一次性令牌、因子尝试次数上限；P2：WebAuthn + 审计外部锚定。
 - `API_AUTH_DISABLED=1` 是为排障留的开关，开了会在启动日志里打警告；生产不该开。
 - `make run` 打印的地址带明文 token，适合本机；对外暴露必须先上 TLS 反代并换掉这套本机令牌方案。
+## v1.9.0 知识层 + 主动财务 + 评估 + 原话付款 guard  2026-10-23
+
+> 起因：赛题要求「银行领域知识真正参与决策」和「主动财务管理」，外部审查又指出多收款人/一句多笔的 P0 规划缺口。本版把三件事一起收口：知识层、主动财务闭环、原话层确定性付款 guard。
+
+### 一、代码
+- [x] `app/knowledge/`：`models`（frozen dataclass）/`loader`（结构错误 fail-closed、内容问题 warning、`version=sha256 前 16 位`）/`parsers`/`normalize`（只做字面别名替换）/`retrieve`（结构化+关键词+场景，无向量库）。数据 `knowledge/{terms,ontology,intent_rules,workflows,sources}.yaml`：40 术语 / 25 实体 / 22 关系 / 11 意图规则 / 10 工作流 / 34 来源，加载时 7 条 warning（1 superseded + 6 unverified）。
+- [x] `app/planner/kb_bridge.py`：确定性后处理，**不把知识塞进模型上下文**（SYSTEM_PROMPT 与 messages 被测试逐字钉死，且不可信文本不应影响授权）；`KNOWLEDGE_ENABLED` 开关；只影响问不问 / 槽位补全 / 跨场景识别 / 解释依据。
+- [x] `app/proactive.py` + `app/tools/proactive.py` + 4 张新表（18→22）：储蓄目标、监测规则、主动提醒、监测运行记录；金额全用整数分，计算在确定性代码里；7 个工具与 6 个 HTTP 端点。监测**只能手动/脚本触发**，不是后台定时服务。
+- [x] `app/planner/payment_guard.py`：只看用户原话，独立于模型与知识开关；多收款人、一句多笔、AA 分摊命中即强制澄清，不生成可执行写 DAG；`intent.py` 与 `routes._events` 双层接线，审计 payload 增 `guard`。
+- [x] 入口令牌从查询参数改到 URL fragment：`bootstrap_url()` 返回 `#token=`，`_presented_token` 拒收查询参数，前端从 `location.hash` 读一次存 sessionStorage 并抹掉；`?token=` 会进访问/代理日志，不再接受。
+
+### 二、测试与评估（本轮实测）
+- [x] `python3.12 -m pytest -q tests/` → **1112 passed / 4 skipped**（新增 guard 26 条、评估/知识/主动服务测试；原 1080 条全部保留）。
+- [x] `python3.12 scripts/check_frontend.py` → **66/66**；`tests/eval/test_eval_harness.py` → 5 passed。
+- [x] A/B 评估（80 例、同模型同参数）共 5 轮，结果与逐例归因写 `tests/eval/evaluation_report.md`；最终轮（`20261023T210056`，含 guard）B 组未追问即列写工具 **0**、A 组 **4**；并发 2 历史轮曾出现 2 例（C039/C044），报告不宣称已稳定归零。
+
+### 三、遗留
+- 主动财务仍是**手动监测**，没有后台调度器；答辩不得说成全天候服务。
+- `scripts/e2e.py` 曾出现 12/13 步解析为空，根因是脚本未带 HTTP 令牌导致请求被 401（健康检查免鉴权）；修复后 `--offline` 与在线默认端口均 **13/13 PASS**。
+- 知识引用率按规则/工作流层已覆盖，术语层因原话不含标准词而漏，属标注粒度差异，已在评估报告中分层说明，不靠改答案抬分。

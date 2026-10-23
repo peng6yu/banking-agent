@@ -75,6 +75,7 @@ LAYERS: dict[str, int] = {
     "app.planner.card_actions": 4,
     # 知识层接线（阶段 3）：把领域知识翻译成「问不问/填什么/怎么解释」，不碰策略
     "app.planner.kb_bridge": 4,
+    "app.planner.payment_guard": 4,
     # 澄清后续答（2026-10-23 限制 3）：短回答接回上一轮原话，只依赖时钟
     "app.planner.clarify": 4,
     # 确定性拒答守卫（2026-10-23 红队收口）：只依赖 re/dataclass，纯函数
@@ -247,6 +248,7 @@ ALLOWED: dict[str, frozenset[str]] = {
         "app.knowledge",
         "app.knowledge.models",
     }),
+    "app.planner.payment_guard": frozenset(),
     "app.planner.card_actions": frozenset({
         "app.clock",
     }),

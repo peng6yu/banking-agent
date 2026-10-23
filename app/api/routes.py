@@ -41,7 +41,7 @@ from app.llm import LLMError, build_adapter
 from app.models import ChatRequest, ConfirmRequest
 from app.money import fen_to_yuan_str
 from app.planner import dag as planner_dag
-from app.planner import executor, intent, ticker
+from app.planner import executor, intent, payment_guard, ticker
 from app.planner.clarify import augment as augment_clarification
 from app.planner.clarify import forget as forget_clarification
 from app.security import api_auth
@@ -236,7 +236,12 @@ OPEN_PATHS: Final[frozenset[str]] = frozenset({"/", "/api/health", "/favicon.ico
 
 
 def _presented_token(request: Request) -> str | None:
-    """令牌可以放在 Authorization、X-API-Token 或 ?token=（浏览器首次打开用）。"""
+    """令牌只从请求头取：Authorization、X-API-Token 或 token。
+
+    刻意**不接受查询参数**：?token= 会随首个请求写进访问日志与代理日志，
+    长期令牌不该出现在那里。浏览器首次打开用 URL fragment（#token=），
+    前端读一次存进 sessionStorage，再由 fetch 自动加 Authorization 头。
+    """
     header = request.headers.get("authorization", "")
     if header.lower().startswith("bearer "):
         return header[7:].strip()
@@ -244,7 +249,7 @@ def _presented_token(request: Request) -> str | None:
         value = request.headers.get(name)
         if value:
             return value.strip()
-    return request.query_params.get("token")
+    return None
 
 
 async def require_api_token(request: Request) -> None:
@@ -634,6 +639,16 @@ def _parse_sync(
 async def _events(session_id: str, parsed: intent.IntentResult, *, user_text: str = "") -> Any:
     """SSE 生成器：先发 start / intent，反问就到此为止，否则挂上执行器。"""
     queue: asyncio.Queue[str | tuple[str, dict[str, Any]]] = asyncio.Queue()
+    # 纵深防御：即便将来有人重构掉意图层的 guard，接口层也拿原话再挡一次。
+    # 命中时改的是同一个 IntentResult，SSE 的 intent 帧与审计都看得到原因。
+    if user_text:
+        risk = payment_guard.inspect(user_text)
+        if risk.ambiguous and not (
+            parsed.intent == "split_bill" and payment_guard.has_split_marker(user_text)
+        ):
+            parsed.question = parsed.question or risk.question
+            parsed.guard_reason = parsed.guard_reason or risk.reason
+            parsed.ok = False
     await queue.put(("start", {"session_id": session_id, "now_ms": clock.now_ms()}))
     await queue.put(("intent", parsed.to_event() | {"session_id": session_id}))
     if parsed.question:
@@ -703,6 +718,7 @@ def _audit_intent(session_id: str, text: str, parsed: intent.IntentResult) -> No
                     "question": parsed.question,
                     "retried": parsed.retried,
                     "source": parsed.source,
+                    "guard": parsed.guard_reason,
                     "text_len": len(text),
                 },
                 session_id=session_id,
@@ -717,6 +733,7 @@ def _audit_intent(session_id: str, text: str, parsed: intent.IntentResult) -> No
                 "missing": parsed.missing,
                 "question": parsed.question,
                 "source": parsed.source,
+                "guard": parsed.guard_reason,
                 "text_len": len(text),
             },
             session_id=session_id,
