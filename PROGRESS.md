@@ -241,3 +241,35 @@
 - [x] README 删掉整节「## 已经解决的问题（写在这里，不再算限制）」（七行表格），349 行；「## 仍然的边界」改回 **「## 已知限制（真正的 7 条，照实写，不藏）」**，抬头改成「下面 7 条是真正还没解决的问题：设计取舍，或没有条件验证。」
 - [x] 那七条的处理结论与回归测试位置归档到新文件 `docs/已知问题处理记录.md`（28 行）：表格原样保留 + 「二、复验证据」段（870/4、43/0、双厂商与真降级链、`setup.sh --mock` 从零、venv 真因），文件头注明「仅留档，README 不再出现」。
 - [x] 复验：`python3.12 -m pytest -q tests/` → **870 passed / 4 skipped**（11.96s，纯文档改动，代码与用例数都没动）。
+
+## v1.8.0 HTTP 入口访问令牌（P0）  2026-10-23
+
+> 起因：用户追问「第零步的安全点是真安全吗」，自查承认原先 `/api/*` **没有任何鉴权**——任何能连 `:8000` 的进程都能用任意 `session_id` 发起转账、读审计、代点确认，只靠 `--host 127.0.0.1` 是部署假设而不是代码保证。这一版把闸门补到路由层。
+
+### 一、代码
+- [x] 新增 `app/security/api_auth.py`（纯标准库 `hmac`/`os`/`secrets`/`pathlib`）：`TOKEN_ENV=API_TOKEN`、`TOKEN_FILE_ENV=API_TOKEN_FILE`、`DISABLED_ENV=API_AUTH_DISABLED`、`DEFAULT_TOKEN_FILE=data/api_token`（0600）、`TOKEN_BYTES=32`；`auth_disabled()` / `token_path()` / `load_token()`（env 优先 → 文件 → 空串 fail closed）/ `ensure_token()`（都不存在时 `secrets.token_urlsafe(32)` 写 `.tmp` + chmod 0600 + `os.replace`）/ `is_authorized()`（`hmac.compare_digest`，没配没带带错都 False）/ `mask()` / `bootstrap_url()`。
+- [x] `app/api/routes.py`：`router = APIRouter(dependencies=[Depends(require_api_token)])`，`OPEN_PATHS = {/ , /api/health, /favicon.ico}` 放行；令牌认三种带法 `Authorization: Bearer …`、`X-API-Token`/`token` 头、`?token=…`；失败抛 `Unauthorized(BankError)`（`code=UNAUTHORIZED`、401、只回人话不泄露配置）。
+- [x] `app/main.py`：启动时 `_announce_api_token()` 打印 `api_auth.ready`（打码后的 token）与带 `?token=` 的地址；文件写不进去（OSError）→ `api_auth.token_unwritable` 并让请求照旧 401；`API_AUTH_DISABLED=1` → `api_auth.disabled` 警告。
+- [x] `web/index.html`：从 `?token=` 读一次存 `sessionStorage`，立刻 `history.replaceState` 把 token 从地址栏抹掉（不留在历史/代理日志），再包一层 `window.fetch` 自动加 `Authorization: Bearer`。
+- [x] `scripts/setup.sh` 第 4.5 步预生成令牌（`--dry-run` 只打印）；`Makefile` 的 `run` 前打印带令牌的地址、`reset` 的 curl 自动带头；`.env.example` 新增 ⑪ 段（`API_TOKEN` / `API_TOKEN_FILE` / `API_AUTH_DISABLED`）。
+
+### 二、测试（+34 条）
+- [x] `tests/test_api_auth.py`（34 条）：纯函数层（disabled 各取值、env 优先于文件、缺文件返回空串、自动生成且 0600 且复用、env 命中不写文件、`is_authorized` 参数化、fail closed、disabled 短路、mask、bootstrap_url）+ HTTP 层（`/` 与 `/api/health` 免令牌、无令牌 401 且 body 只有 `code`/`user_text`、Bearer 与 `?token=` 都 200、`X-API-Token`、错令牌 401、`POST /api/demo/reset` 401、`API_AUTH_DISABLED=1` 放行）。
+- [x] `tests/conftest.py` 加 autouse fixture `_http_auth_off`（关掉令牌强制），否则 29 条既有 HTTP 用例全变 401；令牌本身的强制由 `test_api_auth.py` 单独覆盖。
+- [x] `scripts/check_frontend.py` 增 `check_api_token` 4 项（读 `?token=` / 存 sessionStorage / `replaceState` 抹地址 / fetch 带 Bearer），静态自检 **62 → 66 项**。
+- [x] `tests/test_imports.py` 登记 `app.security.api_auth`（第 1 层、零依赖）。
+
+### 三、文档与数字
+- [x] README：新增「入口访问令牌」一节（三种带法、`compare_digest`、401 形状、`API_AUTH_DISABLED` 排障口）；能力密钥段改写为三段取值（显式 → `CAPABILITY_SECRET` → `data/token_secret` 0600）；「已知限制」第 5 条改成「已有本机 HTTP 令牌，但仍是单用户：`session_id` 客户端传入、无多用户/RBAC」。
+- [x] `docs/安全自评报告.md`：结构性闸门「三道 → 四道」（入口访问令牌列为第 1 道），新增风险 **R-15**（HTTP 入口无身份校验 → 已缓解，残余：拿到令牌者可用任意 `session_id`、`API_AUTH_DISABLED` 排障口、`session_id` 仅 32 bit）。
+- [x] 全仓测试数 **870 → 904 passed / 4 skipped**、前端自检 **62 → 66/66 项**同步（README、技术文档、答辩PPT大纲、提交物对照表、交付说明、红队失败归因、已知问题处理记录、`build_ppt.py`）。
+
+### 四、复验（2026-10-23 实测）
+- `python3.12 -m pytest -q tests/` → **904 passed / 4 skipped**
+- `python3.12 -m scripts.redteam` → **PASS 43 / FAIL 0**（红队全在进程内跑 intent→dag→executor，不走 HTTP，不受令牌影响）
+- `python3.12 -m scripts.seed --force` → `seed.ok tables=18`；`python3.12 scripts/check_frontend.py` → **66/66**；`python3.12 docs/交付/build_ppt.py` → 13 页 PPT 重新生成
+
+### 遗留（照实说）
+- 这层只解决「谁能调这个端口」，**不是身份认证**：拿到令牌的人仍可用任意 `session_id` 操作，没有多用户隔离、没有 RBAC。P1 计划：`session_id` 提到 128 bit、确认改一次性令牌、因子尝试次数上限；P2：WebAuthn + 审计外部锚定。
+- `API_AUTH_DISABLED=1` 是为排障留的开关，开了会在启动日志里打警告；生产不该开。
+- `make run` 打印的地址带明文 token，适合本机；对外暴露必须先上 TLS 反代并换掉这套本机令牌方案。

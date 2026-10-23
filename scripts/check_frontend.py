@@ -261,6 +261,26 @@ def check_escape(res: Result, src: str) -> None:
     res.add("没有 var 声明（const 优先）", re.search(r"\bvar\s+[A-Za-z_$]", src) is None, "发现 var 声明")
 
 
+def check_api_token(res: Result, src: str) -> None:
+    """入口访问令牌：从 ?token= 读一次、存 sessionStorage、抹掉地址栏、请求自动带上。"""
+    res.add(
+        "从 ?token= 读取入口令牌",
+        re.search(r"URLSearchParams[^\n]*\.get\(\s*['\"]token['\"]\s*\)", src) is not None,
+        "未找到 new URLSearchParams(...).get('token')",
+    )
+    res.add("令牌存进 sessionStorage", "sessionStorage" in src, "未找到 sessionStorage")
+    res.add(
+        "读完后抹掉地址栏里的 token",
+        "replaceState" in src,
+        "未找到 history.replaceState",
+    )
+    res.add(
+        "fetch 自动带 Authorization",
+        "Authorization" in src and "Bearer " in src,
+        "未找到 Authorization: Bearer",
+    )
+
+
 def check_contract(res: Result, src: str) -> None:
     """docs/07 第 7.7 节的函数约定与确认卡片硬性要求。"""
     for func in REQUIRED_FUNCS:
@@ -300,6 +320,7 @@ def main() -> int:
     check_sse(res, src)
     check_colors(res, src)
     check_escape(res, src)
+    check_api_token(res, src)
     check_contract(res, src)
 
     return res.report()
