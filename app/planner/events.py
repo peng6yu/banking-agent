@@ -13,6 +13,7 @@ from app.models import Action, Decision
 from app.money import fen_to_yuan_str
 from app.planner.state import (
     CONFIRM_TIMEOUT_MS,
+    confirm_timeout_ms,
     Confirmation,
     Emit,
     action_text,
@@ -105,7 +106,8 @@ def prompt_payload(node: Any, conf: Confirmation, decision: Decision) -> dict[st
         "payee_name": conf.payee_name,
         "slots": {"payee_name": conf.payee_name} if conf.payee_name else {},
         "required": list(conf.required_factors),
-        "expires_in_s": CONFIRM_TIMEOUT_MS // 1000,
+        # 前端倒计时用的是实际生效的那一档（CONFIRM_TIMEOUT_S 可调），不是写死的 120。
+        "expires_in_s": confirm_timeout_ms() // 1000,
         "reason_text": decision.reason_text,
     }
 
