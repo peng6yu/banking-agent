@@ -19,6 +19,7 @@ from app.models import Dag, DAGNode
 from app.planner.intent import ACCOUNT_OWNER_SLOT
 from app.planner.card_actions import CARD_TOOLS, card_params, card_template
 from app.planner.due import parse_due_ms
+from app.planner.refusal import REFUSAL_SLOT
 from app.planner.split_plan import SPLIT_INTENT, build_split
 from app.planner.subscription import cancel_params, resolve_match, subscription_template
 from app.tools.base import ValidationError
@@ -97,6 +98,20 @@ def build(intent: dict[str, Any]) -> Dag:
     return dag
 
 
+def _unsupported_dag(name: str, slots: dict[str, Any]) -> Dag:
+    """哨兵单步图：工具不在册，交给 R03 亮红灯。
+
+    确定性拒答（app/planner/refusal.py）命中时把话术一起带上：R03 的通用句
+    「我还不会这个操作」对「把验证码念给我」太含糊，具体话术由策略层带出去。
+    话术走 params 而不是改 Decision：裁决仍是同一个 R03，审计口径不变。
+    """
+    params: dict[str, Any] = {"intent": str(name)}
+    reply = str(slots.get(REFUSAL_SLOT) or "").strip()
+    if reply:
+        params[REFUSAL_SLOT] = reply
+    return Dag(id=new_id("r"), nodes=[DAGNode(id="n1", tool=UNSUPPORTED_TOOL, params=params)])
+
+
 def build_or_single(intent: dict[str, Any]) -> Dag:
     """E8：模板在册但建图失败时，回退成模板第一个工具的单步图，不中断整轮会话。
 
@@ -109,16 +124,10 @@ def build_or_single(intent: dict[str, Any]) -> Dag:
             return build_split(slots)
         except ValidationError:
             # 人数不够或金额缺失：不猜，落到未支持请求上由策略层拒绝并留痕
-            return Dag(
-                id=new_id("r"),
-                nodes=[DAGNode(id="n1", tool=UNSUPPORTED_TOOL, params={"intent": str(name)})],
-            )
+            return _unsupported_dag(name, slots)
     template = _template(name, slots)
     if template is None:
-        return Dag(
-            id=new_id("r"),
-            nodes=[DAGNode(id="n1", tool=UNSUPPORTED_TOOL, params={"intent": str(name)})],
-        )
+        return _unsupported_dag(name, slots)
     try:
         return build(intent)
     except ValidationError:

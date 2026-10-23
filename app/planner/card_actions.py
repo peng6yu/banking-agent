@@ -10,6 +10,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any, Final
 
 from app.clock import ValidationError
@@ -30,8 +31,21 @@ CARD_ACTION_WORDS: Final[tuple[tuple[str, tuple[str, ...]], ...]] = (
     ("freeze", ("冻结", "冻", "锁卡", "锁住", "停用", "先别用")),
     ("set_limit", ("限额", "限到", "单笔上限", "调整额度", "提高额度", "降低额度")),
     ("apply", ("申请", "办一张", "开一张", "开卡", "新办", "虚拟卡")),
-    ("change_pin", ("改密码", "换密码", "重置密码", "修改密码")),
+    ("change_pin", ("改密码", "换密码", "重置密码", "修改密码", "密码改成", "密码改为",
+                     "密码设成", "密码设为", "设置密码", "设置新密码", "改登录密码",
+                     "修改登录密码", "登录密码改成", "重设密码", "密码重置", "改密", "换密")),
     ("close", ("销户", "注销", "不用这张卡了", "消掉")),
+)
+
+# 词表兜不住的说法：「把登录密码改成 123456」「密码改一下」「设置新密码」。
+# change_card_pin 属 SENSITIVE_TOOLS（执行必吃 R09 红），漏判就等于把一次改密
+# 悄悄降级成查卡绿灯——红队 O3 抓的就是这个洞。
+# 兜底规则：句中有「密码」，且离它不远有改类动词，就归 change_pin。
+# 「查密码」「找回密码」「密码忘了」不带改类动词，不会被误伤；
+# 「密码是谁设的」这类会被兜住，属于宁可多问一句的过度触发，不改变安全方向。
+_PIN_VERBS: Final[str] = "改|换|重置|重设|设置|设成|设为|设定|更新|变更|调整|修改"
+_PIN_CHANGE_RE: Final[re.Pattern[str]] = re.compile(
+    rf"密码.{{0,6}}(?:{_PIN_VERBS})" rf"|(?:{_PIN_VERBS}).{{0,4}}密码"
 )
 
 # 每路一张单步模板；卡片管理没有多步链路，所有工具都不依赖上游结果。
@@ -63,8 +77,19 @@ def card_action(slots: dict[str, Any], text: str) -> dict[str, Any]:
         if any(word in text for word in words):
             action = name
             break
+    if action != "change_pin" and _mentions_pin_change(text):
+        # 话里就是改密，词表没抓住：宁可归 change_pin（执行走 R09 红），
+        # 也别把一次改密降级成查卡绿灯（O3）。
+        action = "change_pin"
     slots[CARD_ACTION_SLOT] = action
     return slots
+
+
+def _mentions_pin_change(text: str) -> bool:
+    """这句话是不是在改密码：「密码」附近有改类动词就算。"""
+    if not text:
+        return False
+    return _PIN_CHANGE_RE.search(text) is not None
 
 
 def is_query(text: str) -> bool:

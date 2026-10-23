@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Final
 
 from app import audit
-from app.clock import now_ms
+from app.clock import SystemBusy, now_ms
 
 ROOT: Final[Path] = Path(__file__).resolve().parent.parent
 DEFAULT_DB_PATH: Final[Path] = ROOT / "data" / "bank.db"
@@ -284,6 +284,30 @@ def connect(path: str | Path | None = None) -> sqlite3.Connection:
     for pragma_sql in PRAGMAS:
         conn.execute(pragma_sql)
     return conn
+
+
+#: SQLite 的「写锁没抢到」措辞；都在 OperationalError 里，靠文本来分类。
+_BUSY_MARKERS: Final[tuple[str, ...]] = (
+    "database is locked",
+    "database table is locked",
+    "database schema is locked",
+    "database is busy",
+)
+
+
+def as_busy_error(exc: BaseException) -> SystemBusy | None:
+    """把「数据库忙」从一堆异常里分出来；不是忙就返回 None。
+
+    busy_timeout 用尽后 sqlite3 抛的是 OperationalError，和「SQL 写错了」
+    「表不存在」同属一类，只能按文本区分。分出来之后调用方可以当业务异常
+    走（标失败 + 回一句人话），而不是落进 INTERNAL 兜底。
+    """
+    if not isinstance(exc, sqlite3.OperationalError):
+        return None
+    text = str(exc).lower()
+    if not any(marker in text for marker in _BUSY_MARKERS):
+        return None
+    return SystemBusy(None, sqlite_error=str(exc)[:120])
 
 
 @contextmanager

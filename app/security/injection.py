@@ -308,9 +308,9 @@ class _TurnEntry:
 class _TurnChannel:
     """用户原话命中的接力棒：意图层压棒，执行层取棒，一根棒只给一轮用。
 
-    认领按会话严格配对：先找 session_id 对得上的那根（多根取最老的一根），
-    没有精确匹配时只认领 session_id 留空的那根（解析层拿不到会话时的兼容路径），
-    两种都没有就空手而归——绝不越过会话边界去拿别人的棒。
+    认领按会话严格配对：只找 session_id 与调用方完全相等的那根（多根取最老的一根），
+    没有就空手而归——会话号是 None 的调用方只领匿名棒，有会话号的调用方不碰匿名棒。
+    绝不越过会话边界去拿别人的棒。
     超过 TURN_TTL_MS 没人取的自动作废，免得一句很久以前的脏话把后来的无关会话顶红。
     """
 
@@ -329,27 +329,26 @@ class _TurnChannel:
     def claim(self, session_id: str | None = None, *, now_ms: int | None = None) -> TurnTaint | None:
         """认领一根棒：宁可这一轮不升色，也不许领走别的会话的棒。
 
-        取棒顺序：
-        1. 有精确的 session_id 匹配 → 取匹配的那几根里最老的一根；
-        2. 没有精确匹配 → 只认领 session_id 为 None 的棒（调用方确实拿不到会话时的兼容路径）；
-        3. 两种都没有 → 返回 None。
+        取棒规则只有一条——**严格相等**：
+        - 调用方给了 session_id=X：只领 session_id == X 的棒（多根取最老的一根）；
+        - 调用方没给（session_id=None）：只领 session_id is None 的匿名棒；
+        - 没有对得上的：返回 None，不降级、不兜底。
 
-        为什么不再用「取最老的一根」兜底：接力棒是模块级单例，一根棒只记着「这句原话
-        命中了注入」，不记「是谁说的」。两个用户同时说话时，兜底会让 B 领走 A 的棒
-        （A 假红、B 漏升色），也会让 A 领走 B 的棒——两种错法都会削弱注入裁决的可靠性，
-        还让红队与回归结果不可复现。这里选「宁可漏升色也不串味」：漏升色最多是这一轮
-        少一次提醒，串味会同时污染两个会话。
+        为什么连「有会话号就去领匿名棒」也删掉（2026-10-23 收紧）：
+        意图层压棒时一定带着会话号（app/planner/intent.py），所以生产链路的棒永远不是
+        匿名的；只有老调用方、离线脚本这类真的拿不到会话号的路径才压匿名棒。既然如此，
+        「有会话号却领匿名棒」只剩一种后果：会话 B 把某个不带会话号的调用（A 的原话）
+        压下的棒认领走，B 按 A 的污点升色。这正是要治的串味。
+        代价是有会话号的调用方再也领不到匿名棒——那本就是别人的棒，漏领一次升色，
+        好过串到另一个会话里。测试见 tests/test_injection_session_taint.py。
         """
         now = clock.now_ms() if now_ms is None else now_ms
         self._expire(now)
         if not self._entries:
             return None
-        exact = [i for i, item in enumerate(self._entries) if session_id and item.session_id == session_id]
-        if exact:
-            return self._entries.pop(exact[0]).taint
-        anonymous = [i for i, item in enumerate(self._entries) if item.session_id is None]
-        if anonymous:
-            return self._entries.pop(anonymous[0]).taint
+        matched = [i for i, item in enumerate(self._entries) if item.session_id == session_id]
+        if matched:
+            return self._entries.pop(matched[0]).taint
         return None
 
     def release(self, taint: TurnTaint | None) -> None:

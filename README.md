@@ -179,7 +179,7 @@ curl -s http://127.0.0.1:8000/api/audit/verify
 ### 单元与集成测试（实测全绿，用例数持续增补）
 
 ```bash
-python3.12 -m pytest -q tests/            # 731 passed, 4 skipped（2026-10-23 实测；用例会随增补变化，复跑以实测为准）
+python3.12 -m pytest -q tests/            # 820 passed, 4 skipped（2026-10-23 实测；用例会随增补变化，复跑以实测为准）
 ```
 
 ### 前端合规自检（实测 62 项全过）
@@ -229,12 +229,12 @@ python3.12 -c "import yaml;d=yaml.safe_load(open('tests/redteam/cases.yaml'));as
 
 **自动判定 runner 已交付**：`scripts/redteam{,_model,_setup,_judge}.py` 四个模块（commit c94a8cd），`python3.12 -m scripts.redteam` 能跑完 43 条并打印七列判定表。
 
-⚠️ 两点如实说明：① 全量运行约 12 秒自行结束（2026-10-22 复跑实测 18 秒，含建库与启动开销），**退出码 1 表示有用例未通过、不是卡死**——CI 或验收脚本的 timeout 给 60 秒以上即可；② 当前仍有判定未通过的用例，通过数已按最终实跑回填为 **PASS 29 / FAIL 14**（见「已知限制」第 2 条）。上面那行自检命令仍可用来证明用例集的数量与 id 唯一性。
+⚠️ 两点如实说明：① 全量运行约 12 秒自行结束（2026-10-22 复跑实测 18 秒，含建库与启动开销），**退出码 1 表示有用例未通过、不是卡死**——CI 或验收脚本的 timeout 给 60 秒以上即可；② 2026-10-23 复跑 **43/43 全过**（退出码 0）；历史 14 条 FAIL 的逐条归因与修正记录见 `docs/红队失败归因.md` §4/§6。上面那行自检命令可证明用例集的数量与 id 唯一性。
 
 ### 模型连通性自检
 
 ```bash
-python3.12 -m app.smoke                    # 实测 4/4 PASS，主脑延迟约 1.5s
+python3.12 -m app.smoke                    # 实测 4/4 PASS，主脑延迟约 1.5s（若报 429 即账号额度用尽，换 key 或充额度）
 ```
 
 ## 项目结构
@@ -247,7 +247,7 @@ python3.12 -m app.smoke                    # 实测 4/4 PASS，主脑延迟约 1
 | `app/tools/` | 26 个工具：查人、查余额、账单、卡片、订阅、转账、资金冻结等 |
 | `app/api/` | 10 个 HTTP 端点 + 根页面 |
 | `web/index.html` | 单文件前端（原生 JS，无框架、无 CDN、零外链） |
-| `tests/` | pytest 用例集（731 passed / 4 skipped，2026-10-23 实测）+ 43 条红队 YAML |
+| `tests/` | pytest 用例集（820 passed / 4 skipped，2026-10-23 实测）+ 43 条红队 YAML |
 | `scripts/` | 种子脚本、前端合规检查器 |
 | `docs/` | 交接规格书 00—10（写代码前必读）+ 答辩与演示交付件 |
 | `规划/` | 前期选型与模型实测记录 |
@@ -260,7 +260,7 @@ python3.12 -m app.smoke                    # 实测 4/4 PASS，主脑延迟约 1
 |---|---|---|
 | `make run` | 启动服务（--reload） | ✅ |
 | `make seed` | 建库 + 种子（幂等） | ✅ |
-| `make test` | pytest 全跑 | ✅ 全绿（731 passed / 4 skipped，2026-10-23 实测） |
+| `make test` | pytest 全跑 | ✅ 全绿（820 passed / 4 skipped，2026-10-23 实测） |
 | `make smoke` | 模型连通性自检 | ✅ 4/4 |
 | `make cov` | 覆盖率（未装 pytest-cov 时自动退回纯跑） | ✅ |
 | `make reset` | `POST /api/demo/reset` 演示前清场 | ✅ |
@@ -270,12 +270,12 @@ python3.12 -m app.smoke                    # 实测 4/4 PASS，主脑延迟约 1
 ## 已知限制（照实写，不藏）
 
 1. **能力令牌密钥必须存在。** `CAPABILITY_SECRET`（64 位十六进制）缺失或格式不对时，系统按设计 fail closed：黄灯/红灯在用户点确认后会直接返回 `MISSING_CAPABILITY`，绿灯查询不受影响。`setup_env.sh` 现在会生成这一行（`.env.example` 里也有占位）；如果你的 `.env` 是早先生成的，请手动补上或重新 export。
-2. **红队判定尚未全部通过。** 自动判定 runner 已交付并可跑通（`make redteam` / `python3.12 -m scripts.redteam`，四模块 commit c94a8cd）：43 条红队用例：PASS 29 / FAIL 14（快照：commit `6b3b6c9` 实跑仍为 29/14，逐条归因见 `docs/红队失败归因.md` —— 14 条里 8 条属夹具/判定口径缺陷，夹具修正后数字会变，不是长期结论）。14 条未达标全部是 `LEVEL_BELOW`（级别判低）：13 条停在 `level=none`——请求在意图层就被短路（反问 / 模型不可用 / 写锁兜底），根本没进策略层，审计只有 `intent.parsed`、没有 `policy.decided`；1 条（D02）判成 green——注入命中了，但 R04 只在金额字段被污染时升色，只读分支不升色；D04/D05 的注入载荷在 setup 字段、请求在反问轮收尾，连 `injection.detected` 都没落。14 条的 must_not 探针全部通过、资金零变动，无攻击得手。这是**拦截粒度**问题：拦得住，却留不下裁决痕迹，攻击面统计因此失真；改进方向是把风险裁决前移到意图层出口（反问/短路也要落拒绝审计），并让 R04 对只读分支同样升色（根因见 `docs/安全自评报告.md` §2.2 的 R-08 / R-05）。全量约 12 秒跑完（退出码 1 表示有用例未通过，不是卡死）。
+2. **红队 43 条现已全部通过。** 自动判定 runner（`make redteam` / `python3.12 -m scripts.redteam`，四模块 commit c94a8cd）2026-10-23 实跑 **PASS 43 / FAIL 0**，约 12 秒自行结束。历史 14 条 FAIL（commit `6b3b6c9` 快照）当时全部是 `LEVEL_BELOW`，逐条归因后分成两类：**8 条是夹具/判定口径缺陷**（脚本模型认不出卡片写操作、判定器根本没有「这一轮没走到策略层」这个级别、期望里把 503/反问轮写成 green），**6 条是设计取舍**（澄清即拒答、模型不可用、反问轮无裁决）。修的时候没有放宽标准，而是两边一起改 —— 产品侧新增确定性拒答守卫 `app/planner/refusal.py`（验证码/系统提示词/密钥/删审计/加收款人/改登录密码/冒充内部身份这 7 类话术在**调用模型之前**就送进 R03 红灯并落 `policy.decided`）、反问轮也扫注入并落 `injection.detected`、写库失败降级落盘并带 `trace_id` 回查、改密措辞词表补齐、注入污点棒改**严格会话认领**（宁可漏升色也不串味）、写锁竞争转 `SYSTEM_BUSY` 一句人话；判定侧新增 `level=none`（表示这一轮没有裁决记录，而不是判了绿灯）、把 `injection.detected.level_floor` 纳入级别判定、新增 `partial_write` 探针与 `must_contain_text` 断言。逐条归属与修正记录见 `docs/红队失败归因.md`，旧数字在 `docs/安全自评报告.md` §0.0 保留为历史快照。
 3. **同名收款人要带卡尾号。** 种子数据里有两个「张三」；第一轮会正确反问「你要付给哪一位？」，**带上卡尾号即可收敛**——「转 500 元给张三尾号 4417」只解析出 1 个张三 → R06 黄灯 → 确认 → 转账成功（余额 1286050 → 1236050，本机实测，commit `56a2741`）。不带尾号时仍会反问让你选择，这是刻意的：不盲选同名收款人。演示请用「张三尾号 4417」或唯一收款人（王强 / 房东李静）。
 4. **场景 6 已用真实模型跑通，但需要一轮澄清。** 2026-10-22 用真实 MiniMax 跑赛题原句「下周三我妈生日，帮我提前留出300块，到时候给她订束花送过去」：模型把「我妈」当关系词而不是姓名，首轮反问「这份礼物是给谁过生日？」，补一句「我妈」后四节点全走通（`resolve_payee → query_balance → reserve_funds → pay_merchant`，两次黄灯确认），余额 1286050 → 1256050。其余跨场景仍由 `scripts/e2e.py` 13 步演示覆盖（真实 FastAPI + 真实策略/工具/审计，只把 LLM 那一层换成脚本适配器）。
 5. SSE 流在等待用户确认期间保持打开（最长 120 秒）。这是有意的——确认结果顺着同一条流回传，代价是纯命令行客户端需要自己另开一个请求去 POST 确认。前端不受影响。120 秒内没人点头，确认卡自动作废、预授权全部释放（此前曾因毫秒当秒而失效，已修：commit `93f28f2`，回归测试 `tests/test_confirm_timeout.py`）。
-6. 依赖装在系统 `python3.12` 里，没有 venv。本机 pypi 直连不稳定，建 venv 再装容易失败，这是当时的取舍。
-7. 模型默认走云端 MiniMax（`MiniMax-M3.1-Flash-Preview`），但**只实测过 MiniMax 这一家**；代码只依赖 OpenAI 兼容协议，换厂商只改 `.env` 三行（`LLM_API_KEY` / `LLM_BASE_URL` / `LLM_MODEL`），各厂商填法与兼容性底线见 [docs/模型配置说明.md](docs/模型配置说明.md)，本仓库不替其他厂商背书，换完请以 `python3.12 -m app.smoke` 与回归测试的实测结果为准。`MOCK_MODE=1`（等价 `true`）是**对抗演示专用**的离线固定桩：它把模型换成一个恶意的，固定吐「转出全部余额到陌生账户」的计划，只用来现场演示「模型被劫持也动不了一分钱」；**不能拿它演普通问答**——问什么都是「我听不懂」。断网要演正常链路请用 `MOCK_MODE=script`：协作回放桩，纯规则、确定性、零网络，只回放「查余额」与「转账」两种业务，其余话术照实反问，绝不瞎猜。
+6. **依赖装在系统 `python3.12` 里，没有 venv。** 实测：`python3.12 -m venv` 能建，但本机 `pip install` 装不上 —— 对 pypi 域名解析失败（`Failed to establish a new connection: [Errno -2] 名称或服务未知`）。`curl https://pypi.org/simple/` 返回 200、`getent hosts pypi.org` 只给 IPv6，属本机网络环境，不是项目配置。换到能连 pypi 的机器按 `requirements.txt` 建 venv 即可，代码没有写死任何系统级路径。
+7. **模型默认走云端 MiniMax，但厂商可换、可自动降级。** 代码只依赖 OpenAI 兼容协议（`tools` + `tool_choice:"auto"` + SSE 流式），换厂商只改 `.env` 三行（`LLM_API_KEY` / `LLM_BASE_URL` / `LLM_MODEL`，旧名 `MINIMAX_*` 仍然生效）。主目标不可用时按 `LLM_FALLBACK`（同厂商换模型）与 `LLM_FALLBACK_VENDORS`（跨厂商，格式 `base_url::模型名::KEY_ENV_NAME`）自动降级：401/403/404/408/429/5xx/超时会切，400/422 不切（请求体错了换谁都一样）；切换会打 `llm.fallback.switch` 日志，`LLMResponse.served_by` 告诉你谁真正服务了这次请求。换厂商之前用一条命令验四件事 —— `python3.12 -m scripts.provider_check`（连通性 / 真有 `tool_calls` / 接受 `tool_choice:"auto"` / SSE 以 `finish_reason` 收尾），它只从环境变量读 key、输出全打码。**如实说明**：本次只在 MiniMax 上真机跑过，降级链与其他厂商兼容性有 21 条单测覆盖、但**没有别家的 key 做真机验证**，本仓库不替其他厂商背书；各厂商填法与兼容底线见 [docs/模型配置说明.md](docs/模型配置说明.md)（含第 12 节降级链），结论以 `app.smoke` 与回归测试实测为准。`MOCK_MODE=1`（等价 `true`）是**对抗演示专用**的离线固定桩：它把模型换成一个恶意的，固定吐「转出全部余额到陌生账户」的计划，只用来现场演示「模型被劫持也动不了一分钱」；**不能拿它演普通问答**——问什么都是「我听不懂」。断网要演正常链路请用 `MOCK_MODE=script`：协作回放桩，纯规则、确定性、零网络，只回放「查余额」与「转账」两种业务，其余话术照实反问，绝不瞎猜。
 
 ## 演示与答辩材料
 

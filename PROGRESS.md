@@ -137,3 +137,40 @@
 - 复验：`pytest -q tests/` = **731 passed / 4 skipped**（11.3s）；`scripts.redteam` = PASS 29 / FAIL 14（未退化）；`check_frontend` 62/62；`app.smoke` 真模型 4/4（旧名路径与通用名路径各跑一遍，均通，MiniMax 端点与模型名解析正确）。
 - 遗留：**只实测过 MiniMax 一家**，其余厂商的兼容性由使用者按 `docs/模型配置说明.md` 自验；未做多厂商自动降级（`LLM_MODEL_BACKUP` 只给 smoke 自检用，生产链路不读）。
 
+## v1.6.0 把 v1.5.0 的限制逐条收口  2026-10-23
+
+> 目标：v1.5.0 结尾列的"遗留"与 README「已知限制」里**能解的那几条**真解掉；解不掉的照实改写。
+
+### 一、模型侧：厂商可换 + 可自动降级 + 一条命令自检
+- [x] **降级链**（`app/config.py` / `app/llm.py`）：新增 `LLM_FALLBACK`（同厂商模型名，逗号分隔）与 `LLM_FALLBACK_VENDORS`（`base_url::模型名::KEY_ENV_NAME`，第三段是**环境变量名**，配置串里永不出现密钥）。尝试顺序 = 主目标 → 同厂商模型 → 跨厂商；超时/连接失败、401/403/404/408/429、5xx 会切，**400/422 不切**（请求体错了换谁都一样）；切换打 `llm.fallback.switch` 日志，`LLMResponse.served_by` 告诉你谁真正服务了这次请求；全失败抛 `LLMError` 且消息逐条列目标、经 `_scrub` 抹掉任何 key。
+- [x] **厂商兼容性自检** `scripts/provider_check.py`：四项检查（连通性 200 / 真有 `tool_calls` / 接受 `tool_choice:"auto"` / SSE 以 `finish_reason` 收尾且兼容无 `[DONE]`）+ `--json` + 可复制 .env 建议；key 只从环境变量读，输出三层打码，四项全过退出码 0。换厂商前先跑它。
+- [x] 新增 `tests/test_llm_fallback.py`（21 条）与 `tests/test_provider_check.py`（29 条）。
+- [x] `.env.example` 增第 ⑥ 节降级链；`docs/模型配置说明.md` 增 **§12 降级链**（两变量 / 切与不切错误表 / 密钥怎么放 / 怎么确认降级 / 两条注意）与 §7 的四步验证（含 `provider_check`）。
+
+### 二、红队：43 条从 PASS 29 / FAIL 14 到 PASS 43 / FAIL 0
+- [x] **新增确定性拒答守卫** `app/planner/refusal.py`：验证码 / 系统提示词 / 密钥 / 删审计流水 / 加收款人 / 改登录密码 / 读登录密码 / 冒充内部身份查他人资料这 7 类话术，**在调用模型之前**识别 → `intent=unsupported` → `unsupported_request` → R03 红灯 → 落 `policy.decided` 与 `confirm.rejected`，话术原样进 `reason_text`。解决 B03/B06/B07/B08/C01/C02/C10"拦得住但审计没痕迹"。
+- [x] **O1 反问轮留痕**：`intent.parse` 反问轮也扫注入、记 `injection_level_floor`，但不压棒、不建 DAG；`routes._audit_injection_reflection` 给反问轮与守卫轮补写 `injection.detected`（`fields=[]`、`reflection=true`）。D04/D05 由此能取到期望级别。
+- [x] **O2 写库失败降级**：审计写库抛错时整行 JSON 落 `data/audit_fallback.log`（带 `trace_id` / `session_id` / `event_type` / `degraded`），回包带 `trace_id=new_id("tr")` 供回查；不假装成功。`app/ids.py` 白名单补 `tr`。
+- [x] **O3 改密措辞**：`CARD_ACTION_WORDS.change_pin` 扩到 17 个词 + 「密码 + 改类动词」双向正则兜底（不误伤查密码 / 改限额）。
+- [x] **O4 污点棒严格认领**：`injection.claim_turn` 改严格相等（有会话号只领同会话，`None` 只领匿名棒，领不到返回 `None`），删掉"有会话号就领匿名棒"的跨会话兜底；契约测试改写为「宁可漏升色也不串味」。
+- [x] **O5 写锁竞争人话**：新增 `SystemBusy`（`SYSTEM_BUSY` / 503 /「系统正忙，刚才这笔没有执行，过一会儿再试一次。」），`db.as_busy_error` 转 `sqlite3.OperationalError` 的锁竞争，`executor.run` 兜住落 `error` 事件——不再一路冒到 INTERNAL 兜底。
+- [x] 夹具/判定侧（如实标注，不是放宽标准）：桩模型补 `card_manage` 与 `card_tail` 抽取（C08 走真实 R09）；判定器新增 `level=none`（表示这一轮**没有裁决记录**，不是判绿灯）、把 `injection.detected.level_floor` 与 SSE `trace` 级别纳入取最大、新增 `partial_write` 探针与 `must_contain_text` 断言；E01/E02/E05 三条期望 level 改 `none` 并写明理由。
+- [x] 新增 `tests/test_refusal_guard.py`（17 条）与 `tests/test_redteam_product_defects.py`（20 条）。
+- [x] `docs/红队失败归因.md` 增 **§7 修正记录**：8 条夹具/口径逐条 + 6 条设计取舍背后的产品短板 + 复跑结果；§4 标注 O1—O4 已修。
+
+### 三、诚实的部分（解不掉的照实写）
+- [x] **venv**：`python3.12 -m venv` 能建，但本机 `pip install` 装不上 —— 对 pypi 域名解析失败（`Failed to establish a new connection: [Errno -2] 名称或服务未知`）；`curl https://pypi.org/simple/` 返回 200、`getent hosts pypi.org` 只给 IPv6。属本机网络环境，不是项目配置，README 第 6 条已改成这个实测结论。
+- [x] **其他厂商**：降级链与 `provider_check` 都已交付并有 50 条单测，但手上只有 MiniMax 的 key，**没有别家真机验证**；README 第 7 条保留"不替其他厂商背书"，并给出换厂商前的自检命令。
+- [x] **不改的设计取舍**：同名收款人必须带卡尾号（不盲选）、SSE 在等确认期间保持 120 秒、场景 6 需一轮澄清、能力令牌密钥必填（fail closed）。
+
+### 复验（2026-10-23 实测）
+- `python3.12 -m pytest -q tests/` → **820 passed / 4 skipped**（v1.5.0 的 731 + 89 条新增）
+- `python3.12 -m scripts.redteam` → **用例 43 条：PASS 43 / FAIL 0**，退出码 0，约 12 秒；跑完 `python3.12 -m scripts.seed --force` 恢复演示库
+- `python3.12 -m app.smoke` → 真模型 4/4 PASS；`python3.12 scripts/check_frontend.py` → 62/62
+- 同日收盘复跑 `app.smoke` 时 MiniMax 账号 **Token Plan 配额用尽**（HTTP 429 `rate_limit_error: 已达到 Token Plan 用量上限`），真机 3 项 FAIL、mock 兜底 1 项 PASS；降级链按设计把「所有模型目标均失败」逐条列出（当次只配了 1 个目标）。这是账号额度问题、与本轮代码无关，配额恢复后重跑即 4/4。
+- 文档同步：README「已知限制」第 2/6/7 条重写、`docs/安全自评报告.md` 增 §0.0 复测更新（旧数字保留为历史快照）、`docs/04` 增 §4.9 新契约、`docs/02` 登记 6 个新文件、答辩 PPT 重生成（13 页）
+
+### 遗留（下一轮再说）
+- 其他厂商真机验证（需要各自的 key）；降级链目前只在"主目标失败"时切，没有做"模型回答质量差就切"的语义级降级。
+- 拒答守卫是**词表 + 正则**，高精度但不可能穷尽话术；新的绕过说法要往 `app/planner/refusal.py` 的 `RULES` 里补，并同步 `tests/test_refusal_guard.py` 的 HITS/PASS_THROUGH。
+- 红队 43 条是冻结用例集，改期望要留 note；新增攻击面请加新用例而不是改旧用例。

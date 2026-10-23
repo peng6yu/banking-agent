@@ -113,6 +113,59 @@ def build_endpoint(base_url: str, endpoint_override: str = "") -> str:
     return base + "/v1/chat/completions"
 
 
+# --------------------------------------------------------------------------
+# 降级链：主目标不可用时按配置顺序切到下一个目标
+# --------------------------------------------------------------------------
+# LLM_FALLBACK          逗号分隔的**同厂商**模型名（与主目标同 base、同 key）
+# LLM_FALLBACK_VENDORS  逗号分隔的**跨厂商**条目：base_url::模型名::KEY_ENV_NAME
+#   第三段 KEY_ENV_NAME 是**环境变量名**，运行时才从那个环境变量里读密钥；
+#   配置串里永远不出现密钥本身。
+# --------------------------------------------------------------------------
+# 跨厂商条目的分隔符
+_FALLBACK_VENDOR_SEP = "::"
+
+
+@dataclass(frozen=True)
+class LLMTarget:
+    """一个可服务的模型目标（主目标或降级目标）。
+
+    api_key 是运行时读到的真实密钥：只允许待在内存里，
+    不许写进配置文件、日志或错误消息（错误消息只报 base / 模型 / 错误类别）。
+    label 是给审计看的短标识，同样不含密钥。
+    """
+
+    base_url: str
+    api_key: str
+    model: str
+    endpoint: str
+    label: str
+
+
+def parse_fallback_models(raw: str) -> tuple[str, ...]:
+    """LLM_FALLBACK：逗号分隔的同厂商模型名，保序去重。"""
+    names: list[str] = []
+    for chunk in (raw or "").split(","):
+        name = chunk.strip()
+        if name and name not in names:
+            names.append(name)
+    return tuple(names)
+
+
+def parse_fallback_vendors(raw: str) -> tuple[tuple[str, str, str], ...]:
+    """LLM_FALLBACK_VENDORS：逗号分隔的 base_url::模型名::KEY_ENV_NAME。
+
+    格式不对的条目直接跳过（少一个降级目标好过整个进程起不来）。
+    第三段是**环境变量名**，不是密钥。
+    """
+    vendors: list[tuple[str, str, str]] = []
+    for chunk in (raw or "").split(","):
+        parts = [part.strip() for part in chunk.strip().split(_FALLBACK_VENDOR_SEP)]
+        if len(parts) != 3 or not all(parts):
+            continue
+        vendors.append((parts[0], parts[1], parts[2]))
+    return tuple(vendors)
+
+
 @dataclass(frozen=True)
 class Settings:
     """运行时配置。
@@ -163,6 +216,49 @@ class Settings:
             if marker in base:
                 return name
         return "openai-compatible"
+
+    @property
+    def fallback_targets(self) -> tuple[LLMTarget, ...]:
+        """目标链：第 0 位永远是主目标，后面按配置顺序排降级目标。
+
+        - 主目标：当前 base_url / api_key / model_brain；
+        - LLM_FALLBACK：同厂商降级模型（同一个 base、同一把 key）；
+        - LLM_FALLBACK_VENDORS：跨厂商条目，密钥在运行时从 KEY_ENV_NAME 指向的
+          环境变量里读，配置串里不出现密钥。
+
+        这里做成 property 而不是字段：每次访问都重新读环境变量，
+        改完 .env 不用重启进程；同时显式构造 Settings(api_key=...) 也能生效。
+        """
+        primary = LLMTarget(
+            base_url=self.base_url,
+            api_key=self.api_key,
+            model=self.model_brain,
+            endpoint=self.endpoint,
+            label="primary",
+        )
+        targets: list[LLMTarget] = [primary]
+        for name in parse_fallback_models(_env("LLM_FALLBACK")):
+            targets.append(
+                LLMTarget(
+                    base_url=self.base_url,
+                    api_key=self.api_key,
+                    model=name,
+                    endpoint=self.endpoint,
+                    label="fallback:" + name,
+                )
+            )
+        for base, model, key_env in parse_fallback_vendors(_env("LLM_FALLBACK_VENDORS")):
+            targets.append(
+                LLMTarget(
+                    base_url=base,
+                    # 跨厂商的密钥运行时才读，且只来自环境变量
+                    api_key=(os.getenv(key_env) or "").strip(),
+                    model=model,
+                    endpoint=build_endpoint(base),
+                    label="vendor:" + base,
+                )
+            )
+        return tuple(targets)
 
     @classmethod
     def from_env(cls) -> "Settings":

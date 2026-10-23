@@ -557,7 +557,9 @@ def test_build_node_action_writes_no_audit_itself(bank: Path) -> None:
 
 def test_run_audits_user_text_taint_and_releases_the_baton(bank: Path) -> None:
     """整轮跑完：原话污点留了痕，接力棒也交还了，下一轮不会被顶红。"""
-    taint = injection.mark_turn(INJECTED_TEXT)
+    # 生产链路的棒一定带会话号（intent.parse/routes._parse_sync 都传 session_id）：
+    # 2026-10-23 起认领是严格相等，这里不压上会话号就领不到自己的棒。
+    taint = injection.mark_turn(INJECTED_TEXT, session_id=SESSION_AUDIT)
     assert taint is not None
     dag = Dag(id=new_id("r"), nodes=[DAGNode(id="n1", tool="query_balance", params={})])
     asyncio.run(executor.run(SESSION_AUDIT, dag, _emit, secret=SECRET, confirm_timeout_ms=1_000))

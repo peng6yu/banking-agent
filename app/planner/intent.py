@@ -21,6 +21,7 @@ from app.planner.card_actions import (
     CARD_TAIL_REQUIRED,
     card_action,
 )
+from app.planner import refusal
 from app.planner.intent_schema import (
     CANCEL_SLOT,
     EMIT_INTENT_NAME,
@@ -138,6 +139,11 @@ class IntentResult:
     # 用户原话里扫出的注入命中：只留字段名与类别，不留原文
     untrusted_fields: list[str] = field(default_factory=list)
     injection_patterns: list[str] = field(default_factory=list)
+    # 注入命中的裁决下限（green/yellow/red）：语义是「这轮原话命中了哪几类注入
+    # （injection_patterns），按其中最坏的一类该把验证等级顶到哪一档」。
+    # 反问轮（ok=False）不执行任何工具、也不压棒，但照样扫一次并记在这里，
+    # 好让 API 层能补一条 injection.detected 审计（O1：反问轮不能零留痕）。
+    injection_level_floor: str = "green"
 
     def to_event(self) -> dict[str, Any]:
         """SSE intent 事件的数据体（docs/07 7.6）。"""
@@ -189,6 +195,24 @@ async def parse(
     session_id 是这一轮会话的身份：原话命中注入时要压一根「属于这个会话」的棒，
     执行层取棒时按会话认领，宁可漏升色也不跨会话串味（app/security/injection.py）。
     """
+    # 确定性拒答先于模型：这类请求（念验证码、要密钥、要系统提示词、冒充内部身份
+    # 调他人资料、改登录密码、加收款人、删审计日志）生产上根本没有工具能做，
+    # 交给模型判断只会得到一句反问，审计里也看不出拒绝了什么（见 app/planner/refusal.py）。
+    # 命中即走 unsupported 意图 → DAG 哨兵节点 → R03 红灯，话术由策略层带出去。
+    refused = refusal.detect(text)
+    if refused is not None:
+        guarded = IntentResult(
+            intent=refusal.REFUSAL_INTENT,
+            slots={
+                refusal.REFUSAL_SLOT: refused.reply,
+                refusal.REFUSAL_CATEGORY_SLOT: refused.category,
+            },
+            confidence=0.99,
+            ok=True,
+            source="guard",
+        )
+        return _scan_only(guarded, text)
+
     client = adapter if adapter is not None else _default_adapter()
     messages = build_messages(text, history)
     args = _first_call_args(client, messages)
@@ -198,7 +222,9 @@ async def parse(
         messages = messages + [{"role": "user", "content": RETRY_HINT}]
         args = _first_call_args(client, messages)
     if args is None:
-        return IntentResult(
+        # 模型两次都不调工具：这一轮只能反问。反问轮同样要扫注入（O1），
+        # 否则攻击话术走这条分支时，审计链里只剩 intent.parsed 一条。
+        result = IntentResult(
             intent="unknown",
             missing=["intent"],
             confidence=0.0,
@@ -207,6 +233,7 @@ async def parse(
             retried=True,
             source="fallback",
         )
+        return _mark_injection(result, text, session_id=session_id)
     return _from_args(args, text, retried=retried, session_id=session_id)
 
 
@@ -247,7 +274,7 @@ def _from_args(
         # 这次要问的是「哪一条订阅」，只有这一处知道该怎么问。
         result.question = SUBSCRIPTION_NAME_QUESTION
         result.ok = False
-        return result
+        return _mark_injection(result, text, session_id=session_id)
     result = _apply_branches(result)
     return _mark_injection(result, text, session_id=session_id)
 
@@ -264,14 +291,35 @@ def _mark_injection(
     命中不改 question、不改槽位、不改任何用户可见的回复内容——扫描结果只用于裁决
     （执行层取棒后并进 untrusted_fields，R04 再升红）。反问轮（ok=False）不压棒。
     session_id 标上这根棒属于哪个会话：执行层只认领自己会话的棒，跨会话不串味。
+
+    反问轮（ok=False）不压棒：这一轮不执行任何工具，压了也没人领；更不能让下一轮
+    凭一根早过期（或根本不属于自己）的棒升色。但反问轮照样扫一次，把命中的类别与
+    裁决下限记进结果，由 API 层补一条 injection.detected 审计——攻击话术走反问分支时，
+    审计链里不能只剩 intent.parsed（O1）。
     """
     if not result.ok:
-        return result
+        return _scan_only(result, text)
     taint = injection.mark_turn(text, session_id=session_id)
     if taint is None:
         return result
     result.untrusted_fields = list(taint.fields)
     result.injection_patterns = list(taint.patterns)
+    result.injection_level_floor = taint.level_floor
+    return result
+
+
+def _scan_only(result: IntentResult, text: str) -> IntentResult:
+    """只扫不压棒：反问轮与确定性拒答轮都用它。
+
+    这两类轮次不执行任何工具，压了棒没人认领；留在通道里的棒还会被同会话的
+    下一轮认领走，等于给一句不相干的话升色。扫描结果照样记进结果，供 API 层
+    补 injection.detected 审计。
+    """
+    scan_result = injection.scan(text)
+    if not scan_result.hit:
+        return result
+    result.injection_patterns = list(scan_result.patterns)
+    result.injection_level_floor = injection.level_floor_for(scan_result.patterns)
     return result
 
 

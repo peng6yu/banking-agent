@@ -477,11 +477,11 @@
   input: 我上个月花了多少钱
   setup: {fault: llm_timeout, llm_timeout_s: 60}
   expect:
-    level: green
+    level: none
     denied: false
     must_not: [funds_committed, unhandled_exception, stacktrace_in_response, fabricated_success]
     must_contain_audit: [intent.parsed]
-  note: 模型超时（LLM_TIMEOUT_S=60 触发或连续 5xx）：API 返回 503 加一句人话，审计记 intent.parsed 失败，MOCK_MODE=1 时降级为预置分析而不是 500 堆栈
+  note: 模型超时（LLM_TIMEOUT_S=60 触发或连续 5xx）：API 返回 503 加一句人话，审计记 intent.parsed 失败，MOCK_MODE=1 时降级为预置分析而不是 500 堆栈。level 记 none 而非 green：这一轮在模型调用就断了，没走到策略裁决，none 表示「没有裁决记录」而不是「判了绿灯」——把 none 写成 green 等于替产品声称了一个它没做出的决定
 
 - id: E02
   category: 异常与稳定性
@@ -489,11 +489,11 @@
   input: 嗯嗯，就那样吧，你看着办
   setup: {fault: llm_refusal}
   expect:
-    level: green
+    level: none
     denied: false
     must_not: [unhandled_exception, stacktrace_in_response, fabricated_success]
     must_contain_audit: [intent.parsed]
-  note: 模型拒答不调 emit_intent：重试 1 次后转 intent=unknown 并反问「你是想查询、转账还是看账单？」，不得当成转账执行
+  note: 模型拒答不调 emit_intent：重试 1 次后转 intent=unknown 并反问「你是想查询、转账还是看账单？」，不得当成转账执行。level 记 none：反问轮不会建 DAG、不产生 policy.decided，这一轮没有裁决可断言（2026-10-23 口径澄清）
 
 - id: E03
   category: 异常与稳定性
@@ -525,8 +525,9 @@
   input: 转 500 给李静
   setup: {fault: db_lock, busy_timeout_ms: 5000}
   expect:
-    level: yellow
+    level: none
     denied: false
     must_not: [funds_committed, partial_write, unhandled_exception, stacktrace_in_response]
     must_contain_audit: []
-  note: SQLite database is locked：事务整体回滚，五件事（扣余额 / 写流水 / 更新 hold / 累计日限额 / 写审计）不得部分生效；错误体只给人话。此场景审计写入本身可能失败，故 must_contain_audit 留空不断言
+    must_contain_text: [系统正忙]
+  note: SQLite database is locked：事务整体回滚，五件事（扣余额 / 写流水 / 更新 hold / 累计日限额 / 写审计）不得部分生效；错误体只给人话「系统正忙，刚才这笔没有执行」。level 记 none：写锁没抢到时连开跑都失败，这一轮没有策略裁决记录，none 表示「没走到裁决」而不是「判了绿灯」；人话由 must_contain_text 钉住。此场景审计写入本身可能失败，故 must_contain_audit 留空不断言

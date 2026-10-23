@@ -11,14 +11,15 @@
 这里钉住六条契约（前四条是通道语义，后两条是「修复的接线」）：
 1. B 会话认领不到 A 会话压下的棒；
 2. A/B 交错压棒时各自只领自己那根；
-3. 匿名棒（session_id 为 None）仍能被任意会话认领——兼容性契约，不是 bug，
-   别让未来的人当成顺手可删的分支；
+3. 认领是严格相等：匿名棒（session_id 为 None）只被 session_id=None 的调用方领走，
+   有会话号的调用方不碰匿名棒——2026-10-23 收紧，原来的「匿名棒可被任意会话认领」
+   正是最后的串味口子（会话 B 领走 A 不带会话号那轮压下的棒）。改它是修复，不是顺手删分支；
 4. 精确匹配有多根时取最老的一根——全仓唯一允许「取最老」的地方，
    必须显式钉住，否则它和上面那个毛病长得一样，容易被当成同一个东西一起清掉；
 5. intent.parse(session_id=...) 压出的棒带会话号；
 6. routes._parse_sync(session_id=...) 一路把会话号带到压棒那一步。
 
-谁把 claim 改回「无精确匹配就取最老一根」，第 1、2 条会红；
+谁把 claim 改回「无精确匹配就取最老一根」或「有会话号就领匿名棒」，第 1、2、3 条会红；
 谁把 intent/routes 那两跳的 session_id 删掉，第 5、6 条会红。
 """
 
@@ -99,17 +100,22 @@ def test_interleaved_batons_stay_with_their_own_session() -> None:
     assert injection.claim_turn(SESSION_B) is None
 
 
-def test_anonymous_baton_is_claimable_by_any_session() -> None:
-    """拿不到会话的调用方压下的棒：兼容性契约，仍可被任意会话认领。
+def test_anonymous_baton_only_goes_to_a_session_less_caller() -> None:
+    """匿名棒只被「也没有会话号」的调用方领走：严格相等，不跨边界兜底。
 
-    这一条不是 bug——解析层偶尔拿不到会话号（老调用方、离线脚本），
-    那根棒必须还能被领走，否则那一轮就白白漏掉一次升色。
+    2026-10-23 收紧：原来的契约是「匿名棒可被任意会话认领」，理由是"解析层偶尔拿不到
+    会话号，棒必须还能被领走"。但生产链路（intent.parse / routes._parse_sync）压棒时
+    一定带会话号，匿名棒只可能来自离线脚本或老调用方；放开给任意会话，等于让会话 B
+    把别的会话压下的棒认领走——那正是本文件开头说的串味。
+    宁可漏一次升色（少一次提醒），也不让污点串到别人会话里。
     """
     anon = injection.mark_turn(INJECT_TEXT)
     assert anon is not None
 
-    assert injection.claim_turn(SESSION_A) is anon, "匿名棒认领不到：兼容性被误删了"
-    assert injection.claim_turn(SESSION_B) is None, "一根棒只给一轮用"
+    assert injection.claim_turn(SESSION_A) is None, "有会话号的调用方领走了匿名棒：串味口子又开了"
+    assert injection.claim_turn(SESSION_B) is None
+    assert injection.claim_turn() is anon, "拿不到会话的调用方领不到匿名棒：离线路径断了"
+    assert injection.claim_turn() is None, "一根棒只给一轮用"
 
 
 def test_exact_match_with_several_batons_takes_the_oldest() -> None:
