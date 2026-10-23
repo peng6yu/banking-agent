@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from datetime import datetime
 from typing import Any, Final
 
@@ -25,6 +26,8 @@ from app.tools.base import ValidationError
 log = logging.getLogger(__name__)
 
 REF_PREFIX: Final[str] = "@"
+# note 里明确写了「尾号4417」时，把 4417 当收款人卡尾号用（真模型会往 note 里塞）。
+_TAIL_IN_NOTE: Final[re.Pattern[str]] = re.compile(r"尾号[^0-9]{0,3}(\d{4})")
 # 理财意图按 action 分三路：买=申购、赎回=卖出、查=看产品清单。
 # 槽位名 product_code 与 app/tools/tool_specs.py 的 buy_fund/redeem_fund 参数同名，零映射。
 # 认不出 action 时走「查」这一路：宁可给产品清单，也不带着猜出来的参数去动钱。
@@ -486,12 +489,39 @@ def _card_tail(slots: dict[str, Any], ids: dict[str, str]) -> dict[str, Any]:
 
 
 def _payee_params(slots: dict[str, Any]) -> dict[str, Any]:
-    """收款人查询：姓名必填；说了卡尾号就带上，用来在同名里收窄到一个。"""
+    """收款人查询：姓名必填；说了卡尾号或手机号就带上，用来在同名里收窄到一个。
+
+    这里有个实测出来的坑：用户说「转 500 给张三尾号 4417」时，模型两次实跑分别把 4417
+    塞进了 payee_phone 和 note，一次也没进 card_tail（那个槽位原本的说明写着「转账不
+    需要」）。以前这里只读 card_tail，4417 一路被丢掉，resolve_payee 只拿到姓名、看到
+    两个张三、反问同一句，用户补多少遍尾号都收敛不了。
+
+    现在三条通道都认，优先级从可信到不可信：payee_card_tail（新加的专属槽位）→
+    card_tail（模型偶尔还是塞这里）→ payee_phone 恰好 4 位数字 → note 里「尾号XXXX」
+    这种明确说法。全部只用来「收窄」，对不上仍然一条都不留，不猜人、不换人。
+    """
     params: dict[str, Any] = {"name": _payee_name(slots)}
-    tail = str(slots.get("card_tail") or "").strip()
+    tail = _payee_tail(slots)
+    phone = str(slots.get("payee_phone") or "").strip()
+    digits = "".join(ch for ch in phone if ch.isdigit())
     if tail:
         params["card_tail"] = tail
+    elif len(digits) >= 7:
+        params["phone"] = phone
     return params
+
+
+def _payee_tail(slots: dict[str, Any]) -> str:
+    """从四个可能被模型塞进尾号的地方，取出一个 4 位数字。"""
+    for key in ("payee_card_tail", "card_tail"):
+        value = "".join(ch for ch in str(slots.get(key) or "") if ch.isdigit())
+        if len(value) == 4:
+            return value
+    phone = "".join(ch for ch in str(slots.get("payee_phone") or "") if ch.isdigit())
+    if len(phone) == 4:
+        return phone
+    hit = _TAIL_IN_NOTE.search(str(slots.get("note") or ""))
+    return hit.group(1) if hit else ""
 
 
 def _payee_name(slots: dict[str, Any]) -> str:

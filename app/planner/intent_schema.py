@@ -84,6 +84,10 @@ SLOT_KEYS: Final[tuple[str, ...]] = (
     "txn_ref",
     # 收款人手机号：用户念号码时说（「转 500 给 13900138001」）
     "payee_phone",
+    # 收款人的卡尾号：用户用尾号区分同名收款人时说（「转 500 给张三尾号4417」）。
+    # 单独一个槽位是因为 card_tail 指的是用户自己的卡，真模型实测会把这个尾号乱塞进
+    # card_tail / payee_phone / note 三个地方之一，没有专属槽位就没法稳定收窄。
+    "payee_card_tail",
 )
 
 # 模型偶尔会报一个我们根本没有的槽位名（真模型实测生日场景报的是 birthday_date，
@@ -104,7 +108,13 @@ MISSING_ALIASES: Final[dict[str, str]] = {
 
 # 槽位说明：模型不会照字段名猜语义，缺说明就填不对（product_code 就是这么填错过）。
 SLOT_GUIDE: Final[dict[str, str]] = {
-    "card_tail": "仅当用户明确说到某张卡尾号时才填；转账、申购、账单都不需要",
+    "card_tail": "用户自己的卡尾号（查余额、冻结卡、账单这类操作用）；收款人的卡尾号不要填这里",
+    "payee_card_tail": (
+        "收款人的卡尾号：只在用户主动说出收款人尾号时填，例如「转 500 给张三尾号4417」填 4417。"
+        "这是唯一该放收款人尾号的槽位，不要放进 card_tail、payee_phone 或 note。"
+        "用户没说尾号就不要填、也不要反问他要尾号：「转 500 给张三」这种只填 payee_name，"
+        "同名候选由系统列出来让他挑，你反问会把这条路堵死"
+    ),
     "payee_name": (
         "收款人姓名：用户用亲属称谓指代收款人时（我妈、我爸、我老婆、我爱人、我女儿这类），"
         "把称谓原文填进来（我妈就填「我妈」），不要留空"
@@ -202,6 +212,7 @@ def emit_intent_schema() -> dict[str, Any]:
         "payee_names": {"type": "array", "items": {"type": "string"}},
         "txn_ref": {"type": "string"},
         "payee_phone": {"type": "string"},
+        "payee_card_tail": {"type": "string"},
         "missing": {"type": "array", "items": {"type": "string"}},
         "confidence": {"type": "number"},
     }

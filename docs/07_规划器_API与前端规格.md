@@ -61,7 +61,7 @@ def parse(text: str, history: list) -> IntentResult
                                'merchant': {'type': 'string',
                                             'description': '商户代码：花店填 flower_shop、蛋糕店填 cake_shop'},
                                'card_tail': {'type': 'string',
-                                             'description': '仅当用户明确说到某张卡尾号时才填；转账、申购、账单都不需要'},
+                                             'description': '用户自己的卡尾号（查余额、冻结卡、账单这类操作用）；收款人的卡尾号不要填这里'},
                                'sub_name': {'type': 'string',
                                             'description': '订阅名称：用户说「爱奇艺会员」就填「爱奇艺会员」；只在用户明确要取消某条订阅时填，查订阅时不要填'},
                                'period': {'type': 'string', 'enum': ['month', 'year']},
@@ -94,6 +94,14 @@ def parse(text: str, history: list) -> IntentResult
                                            'description': '要冲正的那笔交易说明，例如「刚才转给张三的500」'},
                                'payee_phone': {'type': 'string',
                                                'description': '用户单独说了手机号才填，可以是完整号码或后四位'},
+                               'payee_card_tail': {'type': 'string',
+                                                   'description': '收款人的卡尾号：只在用户主动说出收款人尾号时填，例如「转 '
+                                                                  '500 给张三尾号4417」填 '
+                                                                  '4417。这是唯一该放收款人尾号的槽位，不要放进 '
+                                                                  'card_tail、payee_phone 或 '
+                                                                  'note。用户没说尾号就不要填、也不要反问他要尾号：「转 '
+                                                                  '500 给张三」这种只填 '
+                                                                  'payee_name，同名候选由系统列出来让他挑，你反问会把这条路堵死'},
                                'missing': {'type': 'array', 'items': {'type': 'string'}},
                                'confidence': {'type': 'number'}},
                 'required': ['intent', 'missing', 'confidence'],
