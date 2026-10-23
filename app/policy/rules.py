@@ -19,11 +19,14 @@ from app.money import fen_to_yuan_str
 SINGLE_LIMIT_FEN: Final[int] = 100_000
 DAILY_LIMIT_FEN: Final[int] = 100_000
 
-# 权威工具表（docs/06 6.1）：只读 9 个 + 写 17 个，共 26 个。
-# 只读：基础六件套 + 理财只读两件套（与场景三、场景四的写工具分开，R01 才能一条规则覆盖全部查询）
+# 权威工具表（docs/06 6.1 + 阶段 5）：只读 12 个 + 写 21 个（已实现），共 33 个。
+# 只读：基础六件套 + 理财只读两件套 + 定时查询 + 阶段 5 目标/计划/提醒三件套
+# （与写工具分开，R01 才能一条规则覆盖全部查询）
 READONLY_TOOLS: Final[frozenset[str]] = frozenset(
     {"query_balance", "query_transactions", "analyze_bill", "list_subs", "list_cards", "resolve_payee",
-     "list_products", "estimate_risk", "list_scheduled"})
+     "list_products", "estimate_risk", "list_scheduled",
+     # 阶段 5：储蓄目标、确定性储蓄计划、主动提醒都是纯查询，不写库
+     "list_savings_goals", "compute_savings_plan", "list_proactive_alerts"})
 # 会动钱的写工具：金额进 R06/R07/R08 的分档判定。
 # split_transfer 用总额判档（AA 四个人各 250，出账仍是 1000，日累计按总额算才对）。
 # schedule_transfer 也在里面：预约的钱到日子才划，但「要排多大一笔」当场就要判——
@@ -32,8 +35,12 @@ SPEND_TOOLS: Final[frozenset[str]] = frozenset(
     {"transfer", "reserve_funds", "pay_merchant", "split_transfer", "schedule_transfer"}
 )
 # 只确认不验因子：赛题把「订阅取消」和「虚拟卡申请」都写在黄灯（docs/05 5.2）
+# 阶段 5 的四个主动财务写工具同样走黄灯：建/调目标、处理提醒、手动监测都只写
+# 目标、规则与提醒，钱一分不动，也不进 SPEND_TOOLS / SENSITIVE_TOOLS / INVEST_TOOLS。
 CONFIRM_ONLY_TOOLS: Final[frozenset[str]] = frozenset(
-    {"cancel_subscription", "apply_virtual_card", "cancel_scheduled"}
+    {"cancel_subscription", "apply_virtual_card", "cancel_scheduled",
+     "create_savings_goal", "update_savings_goal", "resolve_proactive_alert",
+     "run_proactive_monitor"}
 )
 # 日累计线按「钱真正出账的那一天」判。预约的钱到日子才走，所以创建期只判单笔上限，
 # 日线留到执行那天由 app/tools/scheduled.py 的资金闸门原子地核：撞线就顺延次日（t11）。

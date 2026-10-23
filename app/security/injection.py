@@ -114,6 +114,23 @@ KEYWORD_PATTERNS: Final[tuple[tuple[str, re.Pattern[str]], ...]] = (
         ),
     ),
     (
+        # 跳过验证/免确认类：备注、商户名、IM 转发里最常见的一句「别验证了，直接执行」。
+        # 它不改变放行方向（命中只加验证，不放行），但必须被登记，否则 R04 没有理由升级双因子。
+        "BYPASS_CONFIRMATION",
+        re.compile(
+            r"跳过(验证|确认|审核|人脸|风控|密码|校验)"
+            r"|绕过(验证|确认|审核|风控|校验)"
+            r"|(免|不用|无需|不需要|别|不要)(验证|确认|审核|人脸|校验)"
+            r"|(直接|立即|立刻|马上)执行"
+            r"|skip (the )?(verification|confirmation|check|review)"
+            r"|bypass (the )?(verification|confirmation|check|review)"
+            r"|no need to (verify|confirm|check)"
+            r"|sans (verification|confirmation)"
+            r"|ohne (uberprufung|bestatigung)",
+            re.I,
+        ),
+    ),
+    (
         "HIDDEN_INSTRUCTION",
         re.compile(
             r"翻页到底部|隐藏指令|后面还有指令|<\!--|不要告诉用户|保密"

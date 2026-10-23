@@ -43,6 +43,18 @@ EVENT_TYPES: Final[frozenset[str]] = frozenset(
         "tool.executed",
         "injection.detected",
         "breaker.open",
+        # 阶段 3 知识层：本轮检索了哪些知识条目/来源；知识降级或冲突时记 warning
+        "knowledge.retrieved",
+        "knowledge.warning",
+        # 阶段 5 主动财务管理：目标、监测运行、提醒的生命周期
+        "savings_goal.created",
+        "savings_goal.updated",
+        "proactive.monitor_run",
+        "proactive.alert_created",
+        "proactive.alert_resolved",
+        # 模拟支出注入：竞赛演示用的假流水，语义上与真实扣款无关，必须单独一类，
+        # 否则审计链里分不清「演示注入」和「工具真的动了钱」。
+        "proactive.simulated_expense",
         "session.end",
     }
 )

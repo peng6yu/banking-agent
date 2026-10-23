@@ -69,6 +69,20 @@ INTENT_TEMPLATES: Final[dict[str, tuple[tuple[str, str], ...]]] = {
     # 卡片管理的默认一路（只查卡）；另外五路见 app/planner/card_actions.py
     "card_manage": (("n1", "list_cards"),),
 }
+# 跨场景链路：用户一句话要「先赎回理财，再把钱转出去」时用这张模板。
+# 顺序是业务含义，不是排版偏好：确认收款人 → 赎回受理 → 资金到账 → 转账授权。
+# 收款人放第一步是为了尽早失败：解析不出唯一收款人就别去动理财。
+# 赎回没到账就把「预计到账」当可用余额转出去，是这类请求最容易犯的错
+# （knowledge/workflows.yaml 里同一条约束，knowledge_ids 会落进审计）。
+CROSS_REDEEM_TRANSFER: Final[str] = "redeem_then_transfer"
+CROSS_TEMPLATES: Final[dict[str, tuple[tuple[str, str], ...]]] = {
+    CROSS_REDEEM_TRANSFER: (
+        ("n1", "resolve_payee"),
+        ("n2", "redeem_fund"),
+        ("n3", "query_balance"),
+        ("n4", "transfer"),
+    ),
+}
 # 会读账户信息的工具：意图层判出 account_owner=other 就原样带进参数，策略层据此判红。
 OWNER_AWARE_TOOLS: Final[tuple[str, ...]] = ("query_balance", "list_subs", "analyze_bill")
 DEFAULT_INTENT: Final[str] = "query_balance"
@@ -112,13 +126,26 @@ def _unsupported_dag(name: str, slots: dict[str, Any]) -> Dag:
     return Dag(id=new_id("r"), nodes=[DAGNode(id="n1", tool=UNSUPPORTED_TOOL, params=params)])
 
 
-def build_or_single(intent: dict[str, Any]) -> Dag:
+def build_or_single(intent: dict[str, Any], *, cross: str | None = None) -> Dag:
     """E8：模板在册但建图失败时，回退成模板第一个工具的单步图，不中断整轮会话。
 
     模板不在册（模型编了一个没登记的意图）不再回退到默认意图：那不是「降级」，
     是把一个说不出口的请求换成一个用户没提的请求去做。见 UNSUPPORTED_TOOL。
+
+    cross 是知识层识别出的跨场景链路名（目前只有先赎回再转账）。它只对 transfer
+    意图生效，且建图失败时不回退成普通转账——把「先赎回」悄悄丢掉，等于替用户
+    改了他要办的事；宁可落到未支持请求上由策略层拒绝并留痕。
     """
     name, slots = split(intent)
+    cross_template = CROSS_TEMPLATES.get(str(cross or ""))
+    if cross_template is not None and name == "transfer":
+        try:
+            dag = Dag(id=new_id("r"), nodes=_nodes(cross_template, slots))
+            validate(dag)
+            _audit_ignored_slots(dag, str(cross), slots)
+            return dag
+        except ValidationError:
+            return _unsupported_dag(str(cross), slots)
     if name == SPLIT_INTENT:
         try:
             return build_split(slots)

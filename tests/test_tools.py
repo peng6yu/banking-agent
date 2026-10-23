@@ -50,6 +50,16 @@ SPLIT_TOOL_NAMES = ("split_transfer",)
 CARD_CLOSE_TOOL_NAMES = ("close_card", "change_card_pin")
 #: 回退冲正
 REVERSAL_TOOL_NAMES = ("reverse_transfer",)
+#: 阶段 5 新增，追加到权威表尾部：储蓄目标/计划/提醒三只读 + 四个黄灯写工具
+PROACTIVE_TOOL_NAMES = (
+    "list_savings_goals",
+    "compute_savings_plan",
+    "list_proactive_alerts",
+    "create_savings_goal",
+    "update_savings_goal",
+    "resolve_proactive_alert",
+    "run_proactive_monitor",
+)
 CARD_TOOL_NAMES = (
     "apply_virtual_card",
     "set_card_limit",
@@ -69,6 +79,7 @@ def test_tool_names_match_authoritative_table() -> None:
         + SPLIT_TOOL_NAMES
         + CARD_CLOSE_TOOL_NAMES
         + REVERSAL_TOOL_NAMES
+        + PROACTIVE_TOOL_NAMES
     )
     assert set(TOOL_NAMES) == set(registry.TOOLS)
     assert len(registry.tool_schemas()) == len(TOOL_NAMES)

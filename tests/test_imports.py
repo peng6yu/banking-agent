@@ -32,6 +32,13 @@ LAYERS: dict[str, int] = {
     "app.log": 0,
     "app.models": 0,
     "app.money": 0,
+    # 银行领域知识层（阶段 3）：只读 knowledge/*.yaml，只依赖时钟与自身数据结构
+    "app.knowledge": 0,
+    "app.knowledge.loader": 0,
+    "app.knowledge.models": 0,
+    "app.knowledge.normalize": 0,
+    "app.knowledge.parsers": 0,
+    "app.knowledge.retrieve": 0,
     # 协作回放桩（MOCK_MODE=script）：模型层的离线替身，和 app.llm 一样在最底层
     "app.script_mode": 0,
     "app.security.envelope": 0,
@@ -40,6 +47,8 @@ LAYERS: dict[str, int] = {
     "app.security.injection": 1,
     "app.security.token": 1,
     "app.funds": 2,
+    # 主动财务管理（阶段 5）：确定性计算 + 目标/规则/提醒仓储，只依赖数据层
+    "app.proactive": 2,
     "app.policy.engine": 2,
     "app.policy.rules": 2,
     "app.tools.base": 3,
@@ -47,6 +56,8 @@ LAYERS: dict[str, int] = {
     "app.tools.cards": 3,
     "app.tools.invest": 3,
     "app.tools.products": 3,
+    # 阶段 5：七个主动财务工具，只做计划/提醒，没有任何动钱入口
+    "app.tools.proactive": 3,
     "app.tools.tool_specs": 3,
     "app.tools.queries": 3,
     "app.tools.registry": 3,
@@ -62,6 +73,8 @@ LAYERS: dict[str, int] = {
     "app.planner.runner": 4,
     "app.planner.state": 4,
     "app.planner.card_actions": 4,
+    # 知识层接线（阶段 3）：把领域知识翻译成「问不问/填什么/怎么解释」，不碰策略
+    "app.planner.kb_bridge": 4,
     # 澄清后续答（2026-10-23 限制 3）：短回答接回上一轮原话，只依赖时钟
     "app.planner.clarify": 4,
     # 确定性拒答守卫（2026-10-23 红队收口）：只依赖 re/dataclass，纯函数
@@ -96,9 +109,11 @@ ALLOWED: dict[str, frozenset[str]] = {
         "app.config",
         "app.ids",
         "app.llm",
+        "app.money",
         "app.models",
         "app.planner",
         "app.planner.clarify",
+        "app.proactive",
         "app.security",
         "app.tools.registry",
     }),
@@ -122,6 +137,28 @@ ALLOWED: dict[str, frozenset[str]] = {
     }),
     "app.ids": frozenset({
         "app.clock",
+    }),
+    "app.knowledge": frozenset({
+        "app.knowledge.loader",
+        "app.knowledge.models",
+        "app.knowledge.normalize",
+        "app.knowledge.retrieve",
+    }),
+    "app.knowledge.loader": frozenset({
+        "app.clock",
+        "app.knowledge.models",
+        "app.knowledge.parsers",
+    }),
+    "app.knowledge.models": frozenset(),
+    "app.knowledge.normalize": frozenset({
+        "app.knowledge.models",
+    }),
+    "app.knowledge.parsers": frozenset({
+        "app.clock",
+        "app.knowledge.models",
+    }),
+    "app.knowledge.retrieve": frozenset({
+        "app.knowledge.models",
     }),
     "app.llm": frozenset({
         # 降级链要记 llm.fallback.switch 审计：切目标必须留痕
@@ -206,6 +243,10 @@ ALLOWED: dict[str, frozenset[str]] = {
         "app.security",
         "app.tools",
     }),
+    "app.planner.kb_bridge": frozenset({
+        "app.knowledge",
+        "app.knowledge.models",
+    }),
     "app.planner.card_actions": frozenset({
         "app.clock",
     }),
@@ -219,6 +260,14 @@ ALLOWED: dict[str, frozenset[str]] = {
     "app.policy": frozenset({
         "app.policy.engine",
         "app.policy.rules",
+    }),
+    "app.proactive": frozenset({
+        "app.audit",
+        "app.clock",
+        "app.db",
+        "app.ids",
+        "app.log",
+        "app.money",
     }),
     "app.policy.engine": frozenset({
         "app.clock",
@@ -296,6 +345,11 @@ ALLOWED: dict[str, frozenset[str]] = {
         "app.money",
         "app.tools.base",
     }),
+    "app.tools.proactive": frozenset({
+        "app.models",
+        "app.proactive",
+        "app.tools.base",
+    }),
     "app.tools.queries": frozenset({
         "app.clock",
         "app.models",
@@ -342,6 +396,7 @@ ALLOWED: dict[str, frozenset[str]] = {
         "app.tools.bill",
         "app.tools.cards",
         "app.tools.invest",
+        "app.tools.proactive",
         "app.tools.products",
         "app.tools.queries",
         "app.tools.scheduled",

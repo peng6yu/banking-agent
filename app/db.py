@@ -46,6 +46,10 @@ TABLE_NAMES: Final[tuple[str, ...]] = (
     "fund_products",
     "fund_holdings",
     "scheduled_transfers",
+    "savings_goals",
+    "monitor_rules",
+    "proactive_alerts",
+    "monitor_runs",
 )
 
 SCHEMA_SQL: Final[str] = """
@@ -264,6 +268,60 @@ CREATE TABLE IF NOT EXISTS scheduled_transfers (
 );
 CREATE INDEX IF NOT EXISTS idx_sched_due ON scheduled_transfers(status, due_ms);
 CREATE INDEX IF NOT EXISTS idx_sched_user ON scheduled_transfers(user_id, status);
+
+-- 阶段 5 主动财务管理：目标 → 监测规则 → 提醒 → 监测运行记录。
+-- 这四张表只存「计划与提醒」，不碰 accounts/transactions 的余额：主动服务可以算、
+-- 可以提醒，但转账/申购/扣款一律不在这里发生。
+-- 金额仍用 INTEGER 分；target_date 是「日期」不是时刻，按本地日历日存 YYYY-MM-DD，
+-- 避免把一个 12-31 的截止日按 UTC 推成 1-1。
+CREATE TABLE IF NOT EXISTS savings_goals (
+  id          TEXT PRIMARY KEY,
+  user_id     TEXT NOT NULL REFERENCES users(id),
+  name        TEXT NOT NULL DEFAULT '',
+  target_fen  INTEGER NOT NULL CHECK (target_fen > 0),
+  target_date TEXT NOT NULL,
+  saved_fen   INTEGER NOT NULL DEFAULT 0 CHECK (saved_fen >= 0),
+  status      TEXT NOT NULL CHECK (status IN ('active','achieved','cancelled')),
+  created_ms  INTEGER NOT NULL,
+  updated_ms  INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_savings_goals_user ON savings_goals(user_id, status);
+
+CREATE TABLE IF NOT EXISTS monitor_rules (
+  id          TEXT PRIMARY KEY,
+  goal_id     TEXT NOT NULL REFERENCES savings_goals(id),
+  kind        TEXT NOT NULL CHECK (kind IN ('progress','budget')),
+  -- progress：允许落后计划的百分点；budget：本期支出上限（分）
+  threshold   INTEGER NOT NULL CHECK (threshold > 0),
+  period      TEXT NOT NULL CHECK (period IN ('monthly','weekly')),
+  enabled     INTEGER NOT NULL DEFAULT 1 CHECK (enabled IN (0,1)),
+  created_ms  INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_monitor_rules_goal ON monitor_rules(goal_id, enabled);
+
+CREATE TABLE IF NOT EXISTS proactive_alerts (
+  id            TEXT PRIMARY KEY,
+  goal_id       TEXT REFERENCES savings_goals(id),
+  rule_id       TEXT REFERENCES monitor_rules(id),
+  reason        TEXT NOT NULL,
+  evidence_json TEXT NOT NULL,
+  suggestion    TEXT NOT NULL DEFAULT '',
+  created_ms    INTEGER NOT NULL,
+  status        TEXT NOT NULL CHECK (status IN ('open','ignored','resolved')),
+  resolved_ms   INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_alerts_goal_status ON proactive_alerts(goal_id, status, created_ms);
+CREATE INDEX IF NOT EXISTS idx_alerts_created ON proactive_alerts(created_ms);
+
+CREATE TABLE IF NOT EXISTS monitor_runs (
+  id             TEXT PRIMARY KEY,
+  started_ms     INTEGER NOT NULL,
+  finished_ms    INTEGER,
+  status         TEXT NOT NULL CHECK (status IN ('ok','failed')),
+  alerts_created INTEGER NOT NULL DEFAULT 0,
+  detail         TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_monitor_runs_started ON monitor_runs(started_ms);
 
 -- 审计只增不改：UPDATE/DELETE 一律由 SQLite 层拦掉（docs/03 3.2 第 7 张表）
 CREATE TRIGGER IF NOT EXISTS audit_no_update BEFORE UPDATE ON audit_log

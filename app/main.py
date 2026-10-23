@@ -16,6 +16,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
+from app import db
 from app.api import routes
 from app.clock import BankError
 from app.llm import LLMError
@@ -59,9 +60,30 @@ def _announce_api_token() -> None:
     log.info("api_auth.open_url %s", api_auth.bootstrap_url(token))
 
 
+def _ensure_schema() -> None:
+    """启动时把表补齐：DDL 幂等，老库（上一版留下的 data/bank.db）自动多出新增的表。
+
+    为什么放在启动：新增的 savings_goals / monitor_rules / proactive_alerts /
+    monitor_runs 四张表只写在本版本的 DDL 里，而线上库是旧版本建的。
+    没有这一步，升级后第一次调用主动财务接口就是 "no such table"。
+    失败不阻塞启动（模型/静态页仍可用），但会留一条 warn 级日志。
+    """
+    try:
+        connection = db.connect()
+        try:
+            db.init_db(connection)
+            tables = db.table_names(connection)
+        finally:
+            connection.close()
+        log.info("app.startup schema_ok tables=%d", len(tables))
+    except Exception as exc:  # noqa: BLE001 - 起不来也要先把服务拉起来，错误留日志
+        log.warning("app.startup schema_failed %s: %s", type(exc).__name__, exc)
+
+
 @asynccontextmanager
 async def _lifespan(_app: FastAPI) -> AsyncIterator[None]:
-    """启动时起到点执行节拍，关闭时收掉；SCHEDULED_TICK_MS=0 可关。"""
+    """启动时补齐表结构、起到点执行节拍，关闭时收掉；SCHEDULED_TICK_MS=0 可关。"""
+    _ensure_schema()
     task = ticker.start()
     log.info("app.startup ticker=%s", "on" if task is not None else "off")
     _announce_api_token()
