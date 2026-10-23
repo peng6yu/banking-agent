@@ -1,13 +1,17 @@
 # 银行 AI 智能体 · 常用命令
-# 解释器固定用系统 python3.12（本机已装好全部依赖；pip 直连 pypi 不稳，别建 venv）
+# 默认用系统 python3.12（本机已装好全部依赖）；也可以 make venv 建一个隔离环境。
 
 PY ?= python3.12
+#: 建 venv 时用的索引；本机 pip.conf 里有个解析不了的 extra-index-url，必须绕开
+PIP_INDEX ?= https://pypi.tuna.tsinghua.edu.cn/simple
+VENV_PY ?= .venv/bin/python
 
-.PHONY: help install run seed reseed test cov redteam smoke browser-smoke fresh clean reset check-env
+.PHONY: help install venv run seed reseed test cov redteam smoke browser-smoke fresh clean reset check-env
 
 help:
 	@echo 可用命令：
 	@echo   make check-env 打印解释器版本
+	@echo   make venv     建 .venv 并装依赖（绕开本机 pip.conf 的坏索引）
 	@echo   make run       启动服务 http://127.0.0.1:8000
 	@echo   make seed      建库与种子数据（已有数据则跳过）
 	@echo   make reseed    删库重建（演示跑过转账、余额变了之后用）
@@ -22,7 +26,16 @@ check-env:
 	$(PY) --version
 
 install:
-	@echo 已使用系统 $(PY)；如需自建环境： $(PY) -m venv .venv && .venv/bin/python -m pip install -r requirements.txt
+	@echo 已使用系统 $(PY)；如需自建环境： make venv
+
+venv:
+	$(PY) -m venv .venv
+	@# PIP_CONFIG_FILE=/dev/null + --isolated 双保险：本机 ~/.config/pip/pip.conf 里
+	@# 的 extra-index-url 指向一个解析不了的域名（pypi.ngc.nvidia.com），
+	@# 不清掉它每个包都会报 Failed to establish a new connection: [Errno -2]。
+	PIP_CONFIG_FILE=/dev/null $(VENV_PY) -m pip install --disable-pip-version-check --isolated \
+		--index-url $(PIP_INDEX) -r requirements.txt
+	@echo ✓ 已装好；用 $(VENV_PY) -m pytest -q tests/ 验证
 
 run:
 	$(PY) -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8000

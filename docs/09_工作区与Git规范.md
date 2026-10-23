@@ -177,7 +177,9 @@ git checkout main && git merge --no-ff feat/m3-policy && git push
 | `LLM_TIMEOUT` | 单次调用超时（秒） | `60` | `LLM_TIMEOUT_S` |
 | `SCHEDULED_TICK_MS` | 定时转账后台节拍间隔（毫秒），`0` 关闭后台节拍 | `30000` | — |
 | `MOCK_MODE` | 真值（`1`/`true`/`yes`/`on`）= 对抗恶意桩；`script` = 离线协作桩；`false` = 真模型 | `false` | — |
-| `CAPABILITY_SECRET` | 能力令牌 HMAC 密钥，**缺失时黄灯/红灯全链路 fail closed**；`setup_env.sh` 会自动生成 | `token_hex(32)` | — |
+| `CAPABILITY_SECRET` | 能力令牌 HMAC 密钥（64 位十六进制）。**未设置**时首次运行自动生成并落盘到 `data/token_secret`（0600，gitignored），重启复用；**设置了**（含空串）就只认 64 位十六进制，不合格则黄/红灯全链路 fail closed | 自动生成 `token_hex(32)` | — |
+| `CAPABILITY_SECRET_FILE` | 自动生成密钥的落盘路径 | `data/token_secret` | — |
+| `CONFIRM_TIMEOUT_S` | 确认卡等待窗口（秒），范围 10—3600，非法值回落 120 并打 `planner.confirm_timeout.*` 警告；SSE 的 `expires_in_s` 与确认卡 `expires_ms` 同档 | `120` | — |
 
 > 数据库路径**不是**环境变量：固定为 `data/bank.db`（`app/db.py:21 DEFAULT_DB_PATH`）；测试用 `monkeypatch.setattr(db, "DEFAULT_DB_PATH", ...)` 换库。
 > 以上键名与 `app/config.py` 的 `Settings` 字段、`app/security/token.py:32` 逐字对齐。

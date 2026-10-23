@@ -251,7 +251,7 @@ MOCK_MODE=true python3.12 -m uvicorn app.main:app --port 8000
 
 | 指标 | 实测值 |
 |---|---|
-| 自动化测试 | `820 passed / 4 skipped`（2026-10-23 实测） |
+| 自动化测试 | `862 passed / 4 skipped`（2026-10-23 实测） |
 | 前端合规检查 | `62/62 项全部达标`（零外链、零框架、零构建） |
 | 模型连通性 | `app.smoke` 4/4 PASS，主脑首 token 约 1.5s |
 | 决策延迟 | 一轮「查人+查余额+转账裁决」三次模型调用，实测约 1.5s/次 |
@@ -303,4 +303,4 @@ MOCK_MODE=true python3.12 -m uvicorn app.main:app --port 8000
 1. **不念功能清单**：每页只讲一条判断，细节留给演示。
 2. **不等被问才讲安全**：第 4、5、6 页就是安全主线，必须主动演。
 3. **被问弱点不辩解**：直接说「这是现状，我们的计划是……」，第 9 页已经备好。
-4. **演示前必做**：`python3.12 -m scripts.seed` → `export CAPABILITY_SECRET=$(python3.12 -c "import secrets;print(secrets.token_hex(32))")` → 起服务 → `curl -s http://127.0.0.1:8000/api/health`。三步缺一，第 5 页的演示会翻车。
+4. **演示前必做**：`python3.12 -m scripts.seed` → 起服务 → `curl -s http://127.0.0.1:8000/api/health`。密钥**不用手动配**（首次运行自动生成 `data/token_secret`，0600）；但要确保 shell 里没有残留一把**错的** `CAPABILITY_SECRET` —— 想显式指定就先 `unset CAPABILITY_SECRET` 或 `export CAPABILITY_SECRET=$(python3.12 -c "import secrets;print(secrets.token_hex(32))")`。少了起服务这步，第 5 页的演示会翻车。
