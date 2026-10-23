@@ -21,7 +21,7 @@ from app.planner.card_actions import (
     CARD_TAIL_REQUIRED,
     card_action,
 )
-from app.planner import refusal
+from app.planner import kb_bridge, refusal
 from app.planner.intent_schema import (
     CANCEL_SLOT,
     EMIT_INTENT_NAME,
@@ -180,6 +180,14 @@ class IntentResult:
     # 反问轮（ok=False）不执行任何工具、也不压棒，但照样扫一次并记在这里，
     # 好让 API 层能补一条 injection.detected 审计（O1：反问轮不能零留痕）。
     injection_level_floor: str = "green"
+    # 知识层接线（阶段 3）：这一轮检索到哪些知识条目、依据哪些来源、知识版本号。
+    # 只用于解释与审计，不参与放行判断——放行永远在 app/policy/。
+    knowledge_ids: list[str] = field(default_factory=list)
+    knowledge_sources: list[str] = field(default_factory=list)
+    knowledge_version: str = ""
+    knowledge_degraded: bool = False
+    # 跨场景链路名（例如 redeem_then_transfer）：非空表示这一句要求「先赎回再转账」。
+    knowledge_cross: str = ""
 
     def to_event(self) -> dict[str, Any]:
         """SSE intent 事件的数据体（docs/07 7.6）。"""
@@ -191,6 +199,13 @@ class IntentResult:
             "question": self.question,
             "ok": self.ok,
             "untrusted_fields": list(self.untrusted_fields),
+            "knowledge": {
+                "ids": list(self.knowledge_ids),
+                "sources": list(self.knowledge_sources),
+                "version": self.knowledge_version,
+                "degraded": self.knowledge_degraded,
+                "cross": self.knowledge_cross,
+            },
         }
 
 
@@ -258,17 +273,9 @@ async def parse(
         messages = messages + [{"role": "user", "content": RETRY_HINT}]
         args = _first_call_args(client, messages)
     if args is None:
-        # 模型两次都不调工具：这一轮只能反问。反问轮同样要扫注入（O1），
-        # 否则攻击话术走这条分支时，审计链里只剩 intent.parsed 一条。
-        result = IntentResult(
-            intent="unknown",
-            missing=["intent"],
-            confidence=0.0,
-            question=UNKNOWN_QUESTION,
-            ok=False,
-            retried=True,
-            source="fallback",
-        )
+        # 模型两次都不调工具：先看术语表能不能确定性接住这一句，接不住才反问。
+        # 反问轮同样要扫注入（O1），否则攻击话术走这条分支时，审计链里只剩 intent.parsed 一条。
+        result = _fallback_result(text)
         return _mark_injection(result, text, session_id=session_id)
     return _from_args(args, text, retried=retried, session_id=session_id)
 
@@ -285,6 +292,60 @@ def _first_call_args(client: ChatAdapter, messages: list[dict[str, Any]]) -> dic
     return dict(call.args()) if call is not None else None
 
 
+def _fallback_result(text: str) -> IntentResult:
+    """模型两次都没给出结构化结果时的兜底。
+
+    先看标准术语（「转账」「赎回」「账单」这类业务词）能不能确定性接住这一句：
+    接住了就按那个意图往下走，槽位照样只从原话里取，缺什么照样反问；
+    接不住就维持原来的 unknown + 反问。source 一律记 fallback，
+    审计一眼能看出这一轮不是模型给的，是知识层按词表接回来的。
+    """
+    if injection.scan(text).hit:
+        # 扫到注入就不接：这类话术即便提到了业务词，也不该由词表替模型「读懂」它。
+        # 维持反问，让 O1 的 injection.detected 审计照常落库。
+        return IntentResult(
+            intent="unknown",
+            missing=["intent"],
+            confidence=0.0,
+            question=UNKNOWN_QUESTION,
+            ok=False,
+            retried=True,
+            source="fallback",
+        )
+    hint = kb_bridge.advise(text, intent="unknown", slots={}, weak=True)
+    knowledge = {
+        "knowledge_ids": list(hint.knowledge_ids),
+        "knowledge_sources": list(hint.source_ids),
+        "knowledge_version": hint.version,
+        "knowledge_degraded": hint.degraded,
+    }
+    if not hint.corrected_intent:
+        return IntentResult(
+            intent="unknown",
+            missing=["intent"],
+            confidence=0.0,
+            question=UNKNOWN_QUESTION,
+            ok=False,
+            retried=True,
+            source="fallback",
+            **knowledge,
+        )
+    intent = hint.corrected_intent
+    slots = _slots({"intent": intent}, text, intent)
+    return _apply_branches(
+        IntentResult(
+            intent=intent,
+            slots=slots,
+            missing=_missing(intent, slots, None),
+            confidence=0.6,
+            retried=True,
+            source="fallback",
+            knowledge_cross=hint.cross or "",
+            **knowledge,
+        )
+    )
+
+
 def _from_args(
     args: dict[str, Any],
     text: str,
@@ -294,8 +355,25 @@ def _from_args(
 ) -> IntentResult:
     """模型给了工具调用：取槽位、补金额口语化、算 missing，按分支表决定要不要反问。"""
     intent = str(args.get("intent") or "unknown").strip() or "unknown"
+    invalid_intent = intent not in INTENT_NAMES
+    if invalid_intent:
+        # 模型编了一个没登记的意图名。原样透传会让下游按「不存在的意图」建图，
+        # 用户看到的是一个已经受理、实际跑不动的请求；统一落到 unknown + 反问。
+        # 这里刻意不让知识层再做兜底分类：模型的结构化输出已经非法，
+        # 这一轮该做的是问清楚，而不是换一条路猜它想干什么。
+        intent = "unknown"
     slots = _slots(args, text, intent)
+    # 知识层在这里介入：纠正明显走偏的意图（预约转账被当成立刻转账）、补口语槽位、
+    # 为跨场景链路追加必填槽位。它只改「这一轮问什么、填什么」，不放行任何东西。
+    hint = kb_bridge.advise(
+        text, intent=intent, slots=slots, weak=(intent == "unknown" and not invalid_intent)
+    )
+    if hint.corrected_intent:
+        intent = hint.corrected_intent
+        slots = _slots({**args, "intent": intent}, text, intent)
+    slots.update(dict(hint.slot_patches))
     missing = _missing(intent, slots, args.get("missing"))
+    missing = [*missing, *[s for s in hint.extra_required if s not in slots and s not in missing]]
     confidence = _number(args.get("confidence"), default=0.0)
     result = IntentResult(
         intent=intent,
@@ -303,12 +381,31 @@ def _from_args(
         missing=missing,
         confidence=confidence,
         retried=retried,
+        knowledge_ids=list(hint.knowledge_ids),
+        knowledge_sources=list(hint.source_ids),
+        knowledge_version=hint.version,
+        knowledge_degraded=hint.degraded,
+        knowledge_cross=hint.cross or "",
     )
+    if hint.cross and any(slot in missing for slot in kb_bridge.CROSS_REQUIRED_SLOTS):
+        # 跨场景缺产品：这一轮只问产品、不建图——「先赎回后到账再转账」的依赖
+        # 在没有产品代码时根本拼不出来，硬建图会得到一条执行不了的链。
+        result.question = kb_bridge.CROSS_SLOT_QUESTION
+        result.ok = False
+        return _mark_injection(result, text, session_id=session_id)
     if intent == "subscription" and slots.get(CANCEL_SLOT) and not slots.get("sub_name"):
         # 用户说了要取消订阅，但没说是哪一条：这里反问一次（一次只问一个问题）。
         # 刻意不填 missing——missing 走的是通用槽位话术，念出来的是英文槽位名；
         # 这次要问的是「哪一条订阅」，只有这一处知道该怎么问。
         result.question = SUBSCRIPTION_NAME_QUESTION
+        result.ok = False
+        return _mark_injection(result, text, session_id=session_id)
+    if hint.ask:
+        # 知识层判定这一轮不能直接往下执行：收款人只有一个姓/是角色词、一句话里两笔转账、
+        # 「全部」被模型自己拍成了具体金额、跨场景没说清哪只产品。
+        # 这些情况模型给的槽位「看起来能用」，直接用就可能转错人、少转一笔或转空账户，
+        # 所以统一只问不做；missing 不硬塞已在槽位里的字段，免得界面把用户给过的值标成缺失。
+        result.question = hint.ask
         result.ok = False
         return _mark_injection(result, text, session_id=session_id)
     result = _apply_branches(result)

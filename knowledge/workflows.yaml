@@ -1,0 +1,220 @@
+schema_version: "1.0"
+last_updated: "2026-10-23"
+metadata:
+  project: "banking-agent（银行 AI 智能体竞赛项目，阶段 3：银行领域知识层）"
+  scope: "跨工具的业务流程约束，共 10 条；覆盖转账、赎回后转账、申购、解约、挂失、预约转账、AA 拆账、冲正、生日关怀、账单分析"
+  usage: "建图阶段（app/planner/dag.py:build_or_single）用来校验节点依赖顺序；顺序不合法就降级为追问或拒绝，而不是继续执行。"
+  caveats:
+    - "nodes 只写 app/tools/tool_specs.py 里真实注册的工具名，写错等于规划出一个不存在的节点。"
+    - "transitions 是给人和测试读的依赖声明（形如 A -> B），不是可执行代码。"
+    - "本文件不改变策略层的限额与强验证判定；它只规定「先后顺序」与「必须确认」。"
+    - "工作流是数据不是指令：模型读到它也不能据此跳过确认或提高额度。"
+
+workflows:
+  - id: "wf_transfer_two_phase"
+    name: "转账两阶段流程"
+    preconditions:
+      - "用户已登录且身份已验签，付款账户为本人名下账户。"
+      - "收款人已解析为唯一对象；零候选或多候选时不得进入本流程。"
+      - "本次金额未超过单笔限额，且当日累计（含冻结金额）未超过日累计限额。"
+    nodes: ["resolve_payee", "query_balance", "transfer"]
+    transitions:
+      - "resolve_payee -> query_balance（先确定收款人，再核对可用余额）"
+      - "query_balance -> transfer（余额足够才允许发起转账）"
+    failure_handling:
+      - "收款人解析失败或多义：中止本流程，回到追问澄清，不建单。"
+      - "余额不足：明确告知差额，不拆分金额绕过限额。"
+      - "转账执行失败：保留冻结记录并按冲正规则释放，要求用户重新确认后再试。"
+      - "并发重复提交：以幂等键拦截，不得产生第二笔扣款。"
+    required_confirmations:
+      - "执行 transfer 前必须取得与「收款人 + 金额」完全一致的一次性确认。"
+      - "黄色或红色风险区间必须追加显式确认，红色还需强验证。"
+    rules:
+      - "转账先冻结后扣款，冻结不等于扣款，用户可在确认前取消。"
+      - "单笔限额与日累计限额同时生效，任一超限即拒绝。"
+      - "同一请求重试必须命中幂等，不得重复记账。"
+    source_ids: ["CONTEST-POLICY-RULES-PY", "CONTEST-REQ-2026", "BANK-ICBC-MB-RULES", "BANK-ICBC-EB-RULES-2025"]
+
+  - id: "wf_wealth_redeem_then_transfer"
+    name: "理财赎回后转账（资金到账依赖）"
+    preconditions:
+      - "用户持有该理财产品份额，且赎回份额不超过持仓。"
+      - "赎回资金必须回到本人同名账户，不接受指定他人账户。"
+      - "转账目标账户与赎回到账账户一致（本人账户）。"
+    nodes: ["resolve_payee", "redeem_fund", "query_balance", "transfer"]
+    transitions:
+      - "resolve_payee -> redeem_fund（先确认收款人唯一，避免钱赎回到账后才发现转不出去）"
+      - "redeem_fund -> query_balance（赎回受理成功后必须重新查余额，等到账）"
+      - "query_balance -> transfer（只有余额已包含该笔到账资金，才允许发起转账）"
+    failure_handling:
+      - "赎回失败或份额不足：中止，不进入转账环节，并说明失败原因。"
+      - "资金尚未到账：不得先行转账；改为提示预计到账时间，或让用户选择用其他可用余额。"
+      - "到账金额小于预期：按实际可用余额重新确认转账金额。"
+    required_confirmations:
+      - "赎回前确认产品名称、赎回份额与预计到账时间。"
+      - "转账前再次确认金额，且确认必须发生在到账之后。"
+    rules:
+      - "赎回资金未到账前，该笔资金不得用于任何出账操作，包括转账、支付与预约转账。"
+      - "工作日 08:00–15:00 赎回当日实时到账；00:00–08:00 预约当日 9:00 后到账；15:00–24:00 及非工作日预约下一工作日凌晨到账。"
+      - "禁止把 redeem_fund 与 transfer 规划成两个可并行节点，二者存在资金先后依赖。"
+      - "单账户每日赎回申请不超过 30 次。"
+    source_ids: ["BANK-ABC-PS-2016", "BANK-ABC-EWEALTH-PRODUCT-PAGE", "CONTEST-REQ-2026"]
+
+  - id: "wf_wealth_purchase"
+    name: "理财申购（适当性前置）"
+    preconditions:
+      - "客户风险测评在有效期内（一年），且已得到风险承受能力等级。"
+      - "产品风险等级不高于客户风险承受能力等级。"
+      - "当前时间处于申购开放时段 00:00–17:00。"
+    nodes: ["list_products", "estimate_risk", "query_balance", "buy_fund"]
+    transitions:
+      - "list_products -> estimate_risk（先看产品，再确认客户风险等级是否匹配）"
+      - "estimate_risk -> query_balance（匹配后才核对资金）"
+      - "query_balance -> buy_fund（资金足够才提交申购）"
+    failure_handling:
+      - "测评过期：中止申购，先引导重新测评，不允许「先买后补」。"
+      - "产品风险高于承受能力：明确拒绝销售，可提示更低风险产品。"
+      - "余额不足：告知差额，不诱导借贷或赎回其他产品凑款。"
+    required_confirmations:
+      - "申购属红色强验证操作，必须完成强验证并显式确认产品与金额。"
+    rules:
+      - "不得向客户主动推介高风险产品，也不得承诺保本或收益。"
+      - "申购扣款只能来自本人账户，且金额不超过可用余额。"
+      - "不把产品风险等级与客户风险承受能力混为同一字段。"
+    source_ids: ["BANK-ABC-PS-2016", "REG-SUITABILITY-2025-07", "CONTEST-REQ-2026"]
+
+  - id: "wf_mandate_cancel"
+    name: "订阅解约（代扣协议撤销）"
+    preconditions:
+      - "代扣协议属于本人账户，且当前处于生效状态。"
+      - "用户已明确要撤销的是哪一条协议（按 sub_name 定位）。"
+    nodes: ["list_subs", "cancel_subscription"]
+    transitions:
+      - "list_subs -> cancel_subscription（先列出本人协议，再由用户选定后解约）"
+    failure_handling:
+      - "协议不存在或已撤销：如实告知，不重复执行。"
+      - "用户其实想退订商户服务：说明银行侧只能撤销代扣，商户侧需用户自行处理。"
+    required_confirmations:
+      - "解约前必须显式确认；解约属确认类操作，一次确认对应一条协议。"
+    rules:
+      - "撤销后银行侧不再代扣，但商户侧订阅可能仍然有效并继续计费。"
+      - "不得代替用户向商户发起退订，也不得承诺「以后绝对不会再扣」。"
+      - "解约结果必须落审计，包含协议标识与操作时间。"
+    source_ids: ["BANK-ICBC-MANDATE-BIZ", "BANK-ICBC-MANDATE-CANCEL", "BANK-CCB-CHARGE", "GAP-MANDATE-TERMINATION-LIMITS"]
+
+  - id: "wf_card_loss"
+    name: "银行卡挂失"
+    preconditions:
+      - "卡片归属本人名下账户，卡号尾号仅用于定位。"
+      - "用户已确认要挂失，而不是仅询问挂失后果。"
+    nodes: ["list_cards", "report_card_loss"]
+    transitions:
+      - "list_cards -> report_card_loss（先定位卡片，再执行挂失）"
+    failure_handling:
+      - "尾号匹配到多张卡：追问澄清，不默认选第一张。"
+      - "挂失接口失败：明确告知未成功，提示改用客服渠道，不得谎称已挂失。"
+    required_confirmations:
+      - "挂失属红色强验证操作，必须完成强验证并获得显式确认，且要提示不可逆。"
+    rules:
+      - "挂失不可逆，补卡需另行走柜面或客服流程，不在同一操作里自动完成。"
+      - "挂失成功后应立即冻结该卡相关支付能力，并落审计。"
+      - "不得在对话中回显完整卡号。"
+    source_ids: ["CONTEST-REQ-2026", "BANK-ICBC-EB-RULES-2025", "LAW-PIPL-2021"]
+
+  - id: "wf_scheduled_transfer"
+    name: "预约转账"
+    preconditions:
+      - "收款人已解析为唯一对象，执行日已换算成明确日期。"
+      - "用户已确认金额与执行日。"
+    nodes: ["resolve_payee", "schedule_transfer", "list_scheduled", "cancel_scheduled"]
+    transitions:
+      - "resolve_payee -> schedule_transfer（先确定收款人，再登记预约）"
+      - "schedule_transfer -> list_scheduled（创建后可查询确认）"
+      - "list_scheduled -> cancel_scheduled（查询到具体预约后才能取消）"
+    failure_handling:
+      - "执行日早于当前时间：拒绝创建并追问正确日期。"
+      - "执行日余额不足：执行日核额失败时通知用户，不自动透支。"
+    required_confirmations:
+      - "创建预约前回显「转给谁、多少钱、哪天执行」并要求确认。"
+    rules:
+      - "创建预约只登记计划，不扣款、不占用当日转账额度。"
+      - "执行日当天再按当日累计额度原子核额；预约转账是日累计规则的豁免工具，但单笔限额仍生效。"
+      - "本原型只支持单次预约，周期预约须说明不支持。"
+    source_ids: ["CONTEST-POLICY-RULES-PY", "CONTEST-REQ-2026"]
+
+  - id: "wf_split_bill"
+    name: "AA 拆账"
+    preconditions:
+      - "至少 2 位参与人，且每位都解析为唯一收款人。"
+      - "总金额为正，且拆出金额合计不超过实付金额。"
+    nodes: ["split_transfer", "resolve_payee", "query_balance"]
+    transitions:
+      - "resolve_payee -> split_transfer（参与人全部唯一后才拆账）"
+      - "split_transfer -> query_balance（拆账后核对账户余额变化）"
+    failure_handling:
+      - "参与人重名或无法解析：中止拆账，先澄清名单。"
+      - "合计超过实付：拒绝并给出正确上限。"
+      - "某笔失败：只回滚该笔，不影响其他已确认的笔数，并如实汇报。"
+    required_confirmations:
+      - "每笔拆出的转账都要单独确认，不能一次确认批量放行。"
+    rules:
+      - "拆分不改变限额口径：合计金额仍计入当日累计。"
+      - "不得代人垫付，也不得向未确认的第三方收款。"
+    source_ids: ["CONTEST-REQ-2026", "CONTEST-POLICY-RULES-PY"]
+
+  - id: "wf_reversal"
+    name: "转账冲正"
+    preconditions:
+      - "待冲正交易为本人账户 7 天内的出账交易。"
+      - "该交易此前未被冲正过。"
+    nodes: ["query_transactions", "reverse_transfer"]
+    transitions:
+      - "query_transactions -> reverse_transfer（先定位原交易，再冲正）"
+    failure_handling:
+      - "超过 7 天或非本人出账：拒绝冲正，说明可走的替代路径。"
+      - "已冲正过：拒绝重复冲正，避免反向记账两次。"
+    required_confirmations:
+      - "冲正前确认原交易的时间、金额与对方，并要求显式确认。"
+    rules:
+      - "冲正只做反向记账，不新建一笔对外转账。"
+      - "一笔原交易最多对应一条有效冲正记录。"
+    source_ids: ["CONTEST-POLICY-RULES-PY", "GAP-TRANSFER-RETURN-CN", "GAP-TRANSFER-STATUS-CODE"]
+
+  - id: "wf_birthday_plan"
+    name: "生日关怀（白名单商户下单）"
+    preconditions:
+      - "收款人（收礼人）与预算金额已确认。"
+      - "目标商户在白名单内（花店、蛋糕店）。"
+    nodes: ["resolve_payee", "query_balance", "reserve_funds", "pay_merchant"]
+    transitions:
+      - "resolve_payee -> query_balance（先确定收礼人，再核对预算）"
+      - "query_balance -> reserve_funds（余额足够才冻结资金）"
+      - "reserve_funds -> pay_merchant（资金冻结成功后才向商户下单）"
+    failure_handling:
+      - "商户不在白名单：不硬凑，建议改选白名单商户。"
+      - "下单失败：释放冻结资金并告知用户，避免资金长期挂起。"
+    required_confirmations:
+      - "下单前确认收礼人、礼品、金额与商户。"
+    rules:
+      - "不得泄露收礼人的手机号、地址等个人信息给商户以外的对象。"
+      - "支付只能走向白名单商户，且金额不超过已冻结金额。"
+    source_ids: ["CONTEST-POLICY-RULES-PY", "CONTEST-REQ-2026", "LAW-PIPL-2021"]
+
+  - id: "wf_bill_analysis"
+    name: "账单分析"
+    preconditions:
+      - "分析范围限定为本人账户与本人卡片的交易流水。"
+      - "时间范围已明确（默认最近一个自然月）。"
+    nodes: ["query_transactions", "analyze_bill"]
+    transitions:
+      - "query_transactions -> analyze_bill（先取流水，再汇总分析）"
+    failure_handling:
+      - "该期间无交易：如实告知无数据，不编造消费类别。"
+      - "数据不全：说明覆盖范围与缺失原因，不给出精确总额。"
+    required_confirmations:
+      - "本流程为只读分析，无需金额确认；但导出或分享明细前需用户同意。"
+    rules:
+      - "分析口径（是否含转账、是否含理财申购）必须显式说明。"
+      - "不根据消费记录推断健康、宗教等敏感个人信息。"
+      - "消费明细原文不回显到对话，只给汇总与必要示例。"
+    source_ids: ["LAW-PIPL-2021", "CONTEST-REQ-2026", "BANK-ICBC-ACCT-AGREEMENT-2021"]

@@ -62,7 +62,8 @@ from app.api import routes  # noqa: E402
 from app.ids import new_id  # noqa: E402
 from app.llm import LLMResponse, MockAdapter, ToolCall  # noqa: E402
 from app.main import app as fastapi_app  # noqa: E402
-from app.models import Dag, DAGNode  # noqa: E402
+from app.models import Dag, DAGNode
+from app.security.api_auth import load_token  # noqa: E402
 from app.planner import executor  # noqa: E402
 from app.tools import registry  # noqa: E402
 from app.tools.base import ToolContext  # noqa: E402
@@ -238,7 +239,12 @@ def make_client(port: int) -> tuple[httpx.Client, Any]:
         server.should_exit = True
         thread.join(timeout=15)
 
-    return httpx.Client(base_url=f"http://127.0.0.1:{port}", timeout=60.0), stop
+    # 受保护端点要令牌：HTTP 鉴权是生产默认（app/security/api_auth.py），
+    # 脚本不能因为"本地演示"就绕过；没配令牌时 load_token() 返回空串，
+    # 服务端仍会按 fail-closed 返回 401，问题会立刻暴露而不是被悄悄放过。
+    headers = {"X-API-Token": load_token()}
+    return httpx.Client(base_url=f"http://127.0.0.1:{port}", timeout=60.0,
+                        headers=headers), stop
 
 
 def wait_ready(client: httpx.Client, *, timeout: float = 30.0) -> dict[str, Any]:
@@ -565,10 +571,10 @@ def run_demo(client: httpx.Client) -> list[Step]:
     steps.append(yellow)
     balance = int(yellow.data["balance_fen"])
     steps.append(step_transfer_red(client, balance, seen))
-    balance -= 200000
-    steps.append(step_injection(client, balance, seen))
-    balance -= 50000
-    steps.append(step_scenario6(client, balance, seen))
+    # 第 8、9 步的基准取实时余额：第 8 步的注入可能被拦在追问上（安全行为），
+    # 这时余额没变；若按「上一步一定转出 500」做减法，第 9 步的断言会失真。
+    steps.append(step_injection(client, account_balance_fen(), seen))
+    steps.append(step_scenario6(client, account_balance_fen(), seen))
     steps.append(step_scenario6_lookup(client, seen))
     steps.append(step_audit(client, str(yellow.data.get("session_id") or "")))
     steps.append(step_panels(client, seen))

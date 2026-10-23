@@ -18,6 +18,7 @@ from typing import Any, Final
 import app.tools.bill as bill  # noqa: PLR0402
 import app.tools.cards as cards  # noqa: PLR0402
 import app.tools.invest as invest  # noqa: PLR0402
+import app.tools.proactive as proactive_tools  # noqa: PLR0402
 import app.tools.products as products  # noqa: PLR0402
 import app.tools.queries as queries  # noqa: PLR0402
 import app.tools.scheduled as scheduled  # noqa: PLR0402
@@ -57,6 +58,23 @@ _CARD_LIMIT_FEN: Final[dict[str, Any]] = {
     "minimum": 1,
     "maximum": 5_000_000,
     "description": "单笔限额，单位分（1 元 = 100 分），上限 500 万分即 5 万元",
+}
+
+# 阶段 5：储蓄目标的金额与日期。日期是日历日 YYYY-MM-DD，不用时间戳——
+# 目标「到 2026-12-31」是账面上的日期，用 UTC 小时推日会在跨时区时差一天。
+MAX_TARGET_FEN: Final[int] = 100_000_000_00
+_TARGET_FEN: Final[dict[str, Any]] = {
+    "type": "integer",
+    "minimum": 1,
+    "maximum": MAX_TARGET_FEN,
+    "description": "目标金额，单位分（1 元 = 100 分），上限 1 亿元",
+}
+_TARGET_DATE: Final[dict[str, Any]] = {
+    "type": "string",
+    "minLength": 10,
+    "maxLength": 10,
+    "pattern": r"^[0-9]{4}-[0-9]{2}-[0-9]{2}$",
+    "description": "目标日期，格式 YYYY-MM-DD，例如 2026-12-31",
 }
 
 
@@ -529,6 +547,130 @@ TOOL_SPECS: Final[tuple[ToolSpec, ...]] = (
             "additionalProperties": False,
         },
         handler=transfers.reverse_transfer,
+        writes=True,
+    ),
+
+    # ---------------------------------------------------------------- 阶段 5 主动财务管理
+    # 只读三件套：看目标、算计划、看提醒。计划里的钱全部来自 app.proactive 的 int 分计算。
+    ToolSpec(
+        name='list_savings_goals',
+        description='列出储蓄目标与当前进度：还差多少、每期要存多少、可行性如何。默认只看进行中的目标。',
+        params={
+            "type": "object",
+            "properties": {
+                "status": {"type": "string", "enum": ["active", "achieved", "cancelled", "all"], "description": "按状态筛选；all 表示不过滤"},
+                "limit": {"type": "integer", "minimum": 1, "maximum": 200, "description": "最多返回多少条，默认 20"}
+            },
+            "required": [],
+            "additionalProperties": False,
+        },
+        handler=proactive_tools.list_savings_goals,
+        writes=False,
+    ),
+    ToolSpec(
+        name='compute_savings_plan',
+        description='确定性计算储蓄计划：剩余目标、剩余期数、每期应存、历史平均收入与必要支出、预计结余、可行性。给 goal_id 按已有目标算，否则按临时参数算，不写库。',
+        params={
+            "type": "object",
+            "properties": {
+                "goal_id": {"type": "string", "minLength": 1, "description": "已有目标 id，先用 list_savings_goals 拿到；给了它就不用再传目标金额与日期"},
+                "target_fen": _TARGET_FEN,
+                "target_date": _TARGET_DATE,
+                "saved_fen": {"type": "integer", "minimum": 0, "maximum": MAX_TARGET_FEN, "description": "已存金额，单位分，默认 0"},
+                "lookback_months": {"type": "integer", "minimum": 1, "maximum": 24, "description": "回看几个月的历史流水来估收入与必要支出，默认 6"}
+            },
+            "required": [],
+            "additionalProperties": False,
+        },
+        handler=proactive_tools.compute_savings_plan,
+        writes=False,
+    ),
+    ToolSpec(
+        name='list_proactive_alerts',
+        description='列出主动提醒：进度落后、预算超支、现金流不足，每条都带证据。默认只看待处理的。',
+        params={
+            "type": "object",
+            "properties": {
+                "status": {"type": "string", "enum": ["open", "ignored", "resolved", "all"], "description": "按状态筛选；all 表示不过滤"},
+                "goal_id": {"type": "string", "minLength": 1, "description": "只看某个目标的提醒"},
+                "limit": {"type": "integer", "minimum": 1, "maximum": 200, "description": "最多返回多少条，默认 20"}
+            },
+            "required": [],
+            "additionalProperties": False,
+        },
+        handler=proactive_tools.list_proactive_alerts,
+        writes=False,
+    ),
+    # 黄灯四件套：建目标/调目标/处理提醒/手动监测。只写目标、规则与提醒，钱一分不动。
+    ToolSpec(
+        name='create_savings_goal',
+        description='创建一个储蓄目标（例如「2026-12-31 前存够 3 万元」），同时建一条按月盯进度的监测规则；给了月度预算再加一条预算规则。',
+        params={
+            "type": "object",
+            "properties": {
+                "name": {"type": "string", "minLength": 1, "maxLength": 40, "description": "目标名称，例如「年终奖存钱」"},
+                "target_fen": _TARGET_FEN,
+                "target_date": _TARGET_DATE,
+                "saved_fen": {"type": "integer", "minimum": 0, "maximum": MAX_TARGET_FEN, "description": "已经存了多少，单位分，默认 0"},
+                "budget_fen": {"type": "integer", "minimum": 1, "maximum": MAX_TARGET_FEN, "description": "可选的月度支出预算，单位分；给了就额外建预算提醒"},
+                "progress_tolerance": {"type": "integer", "minimum": 1, "maximum": 100, "description": "进度落后多少个百分点才提醒，默认 10"},
+                "period": {"type": "string", "enum": ["monthly", "weekly"], "description": "监测周期，默认 monthly"}
+            },
+            "required": ['name', 'target_fen', 'target_date'],
+            "additionalProperties": False,
+        },
+        handler=proactive_tools.create_savings_goal,
+        writes=True,
+    ),
+    ToolSpec(
+        name='update_savings_goal',
+        description='调整储蓄目标：改目标金额、日期、已存金额、预算或开关监测。达成与回退会自动切换状态，并按新参数重算计划。',
+        params={
+            "type": "object",
+            "properties": {
+                "goal_id": {"type": "string", "minLength": 1, "description": "要调整的目标 id"},
+                "name": {"type": "string", "minLength": 1, "maxLength": 40, "description": "新名称"},
+                "target_fen": _TARGET_FEN,
+                "target_date": _TARGET_DATE,
+                "saved_fen": {"type": "integer", "minimum": 0, "maximum": MAX_TARGET_FEN, "description": "新的已存金额，单位分"},
+                "status": {"type": "string", "enum": ["active", "achieved", "cancelled"], "description": "手动改状态；一般不用传，系统会自动收口"},
+                "budget_fen": {"type": "integer", "minimum": 1, "maximum": MAX_TARGET_FEN, "description": "新的月度支出预算，单位分"},
+                "progress_tolerance": {"type": "integer", "minimum": 1, "maximum": 100, "description": "新的进度落后容忍百分点"},
+                "monitor_enabled": {"type": "boolean", "description": "是否开启监测；关掉后手动监测也不会为它生成提醒"}
+            },
+            "required": ['goal_id'],
+            "additionalProperties": False,
+        },
+        handler=proactive_tools.update_savings_goal,
+        writes=True,
+    ),
+    ToolSpec(
+        name='resolve_proactive_alert',
+        description='处理一条主动提醒：ignore 表示先放着不再弹，resolve 表示已经处理完。重复处理同一条不会出错。',
+        params={
+            "type": "object",
+            "properties": {
+                "alert_id": {"type": "string", "minLength": 1, "description": "提醒 id，先用 list_proactive_alerts 拿到"},
+                "action": {"type": "string", "enum": ["ignore", "resolve"], "description": "ignore 忽略，resolve 标记已处理"}
+            },
+            "required": ['alert_id', 'action'],
+            "additionalProperties": False,
+        },
+        handler=proactive_tools.resolve_proactive_alert,
+        writes=True,
+    ),
+    ToolSpec(
+        name='run_proactive_monitor',
+        description='手动触发一次主动监测：读目标、交易与储蓄，按规则生成有证据的提醒。只写提醒与运行记录，不转账、不申购、不改余额；可以重复触发。',
+        params={
+            "type": "object",
+            "properties": {
+                "goal_id": {"type": "string", "minLength": 1, "description": "只监测某个目标；不传则跑该用户全部进行中的目标"}
+            },
+            "required": [],
+            "additionalProperties": False,
+        },
+        handler=proactive_tools.run_proactive_monitor,
         writes=True,
     ),
 )

@@ -1,0 +1,238 @@
+schema_version: "1.0"
+last_updated: "2026-10-23"
+metadata:
+  project: "banking-agent（银行 AI 智能体竞赛项目，阶段 3：银行领域知识层）"
+  scope: "覆盖 app/planner/intent_schema.py 的 INTENT_NAMES 全部 11 个意图"
+  alignment:
+    required_slots: "必须与 app/planner/intent.py 的 _missing() 真实必填槽位一致；条件必填写在 ask_when 与 optional_slots 里，不写成必填。"
+    slot_names: "只用 intent_schema.py 的 SLOT_KEYS 里存在的槽位名，不发明新槽位。"
+    allowed_tools: "只用 app/tools/tool_specs.py 里真实注册的工具名；写错工具名等于让模型去调空气。"
+    forbidden_ops: "写该意图下明确禁止的动作，用来在规划阶段就挡掉越权与跳过确认的路径。"
+  caveats:
+    - "本文件是业务规则数据，不是系统提示词：它描述「该问什么、不能做什么」，不赋予任何调用权限。"
+    - "金额一律以分（fen）为单位的整数槽位 amount_fen 表达，不做浮点换算。"
+    - "allowed_tools 是上限不是计划：最终调哪些工具仍由规划器与策略层决定。"
+
+intents:
+  - intent: "query_balance"
+    required_slots: []
+    optional_slots: ["card_tail", "note"]
+    ask_when:
+      - "用户只问「我还有多少钱」但名下有多张卡且未指定卡片时，先按默认主卡回答并说明口径，不逐张播报。"
+      - "用户要求查询非本人账户余额时，不追问，直接拒绝。"
+    preconditions:
+      - "只能查询当前登录用户本人名下账户的余额。"
+      - "余额必须由交易流水推导，不允许凭空给出数字。"
+    allowed_tools: ["query_balance", "list_cards"]
+    forbidden_ops:
+      - "查询他人账户或他人卡片余额。"
+      - "以「帮你查一下」为由绕过身份校验。"
+      - "把余额与卡号完整号段一起播报。"
+    ambiguity:
+      - "「余额」可能指可用余额，也可能指账户总资产；默认回答可用余额并说明。"
+      - "「卡里还有多少钱」在有多张卡时指代不明，默认取主卡。"
+    source_ids: ["CONTEST-REQ-2026", "BANK-ICBC-ACCT-AGREEMENT-2021", "LAW-PIPL-2021"]
+
+  - intent: "transfer"
+    required_slots: ["payee_name", "amount_fen"]
+    optional_slots: ["note", "payee_card_tail", "payee_phone"]
+    ask_when:
+      - "缺少收款人姓名时不建单，先追问「转给谁」。"
+      - "缺少金额或金额不是正数时不建单，先追问金额。"
+      - "收款人解析出零个或多个候选时追问澄清，不允许自行挑一个。"
+      - "金额触发黄色或红色区间时，先说明将要发生的扣款并要求显式确认。"
+    preconditions:
+      - "收款人必须先解析为唯一对象，再查余额，最后才发起转账。"
+      - "单笔金额不得超过 SINGLE_LIMIT_FEN，且当日累计（含已冻结的预授权）不得超过 DAILY_LIMIT_FEN。"
+      - "转账采用两阶段执行：先冻结资金，确认后再实际扣款。"
+    allowed_tools: ["resolve_payee", "query_balance", "transfer", "reserve_funds"]
+    forbidden_ops:
+      - "未确认就扣款，或跳过两阶段直接记账。"
+      - "向非本人账户出账，或把他人账户当付款账户。"
+      - "把聊天里出现的卡号直接当作已核验收款人使用。"
+      - "为绕开限额而拆分成多笔连续转账。"
+    ambiguity:
+      - "「转 500」未说明币种与单位；人民币场景下按元理解并回显「500 元 = 50000 分」。"
+      - "「转给老王」可能命中多个收款人别名，必须澄清。"
+    source_ids: ["CONTEST-POLICY-RULES-PY", "CONTEST-REQ-2026", "BANK-ICBC-MB-RULES", "BANK-ICBC-EB-RULES-2025", "LAW-ANTI-FRAUD-2022"]
+
+  - intent: "bill_analysis"
+    required_slots: []
+    optional_slots: ["month", "period", "note"]
+    ask_when:
+      - "用户未说明时间范围时，默认分析最近一个自然月并说明口径。"
+      - "用户问「为什么这个月花这么多」但未指定月份时，先确认月份。"
+    preconditions:
+      - "只能分析本人账户与本人卡片的账单。"
+      - "分析结论必须能回指到具体交易流水，不做无依据推测。"
+    allowed_tools: ["analyze_bill", "query_transactions"]
+    forbidden_ops:
+      - "分析或展示他人消费记录。"
+      - "把消费明细原文整段回显到对话里。"
+      - "根据消费记录推断健康、宗教等敏感个人信息。"
+    ambiguity:
+      - "「最近」可能指 7 天、30 天或上个自然月，默认上个自然月并说明。"
+      - "「花销」可能含转账与理财申购，默认只统计消费类支出并注明口径。"
+    source_ids: ["LAW-PIPL-2021", "CONTEST-REQ-2026", "BANK-ICBC-ACCT-AGREEMENT-2021"]
+
+  - intent: "subscription"
+    required_slots: []
+    optional_slots: ["sub_name", "period", "note"]
+    ask_when:
+      - "用户说「不想被扣了」但未指明是哪个订阅时，先列出本人代扣协议再让用户选。"
+      - "解约前必须确认是「只停银行侧代扣」还是「连商户订阅一起退」。"
+    preconditions:
+      - "解约只作用于本人名下签约的代扣协议。"
+      - "解约属确认类操作，必须显式确认后才执行。"
+    allowed_tools: ["list_subs", "cancel_subscription"]
+    forbidden_ops:
+      - "代替用户向商户侧发起退订。"
+      - "未经确认直接解约。"
+      - "对他人名下代扣协议执行解约。"
+    ambiguity:
+      - "「取消自动续费」可能指银行侧解约，也可能指商户侧退订；本原型只能完成前者，必须说明后者需用户自行到商户处理。"
+    source_ids: ["BANK-ICBC-MANDATE-BIZ", "BANK-ICBC-MANDATE-CANCEL", "CONTEST-POLICY-RULES-PY", "BANK-CCB-CHARGE"]
+
+  - intent: "birthday_plan"
+    required_slots: ["payee_name", "amount_fen"]
+    optional_slots: ["gift", "note", "date_hint"]
+    ask_when:
+      - "缺少收款人（送给谁）或预算金额时先追问，不预设。"
+      - "商户不在白名单内时不要硬凑，建议改选花店或蛋糕店。"
+    preconditions:
+      - "先解析收款人并核对余额，再冻结资金，最后在商户下单。"
+      - "商户只允许白名单内的花店与蛋糕店。"
+    allowed_tools: ["resolve_payee", "query_balance", "reserve_funds", "pay_merchant"]
+    forbidden_ops:
+      - "向白名单外商户下单。"
+      - "跳过确认直接支付。"
+      - "泄露收礼人的手机号或地址等个人信息。"
+    ambiguity:
+      - "「生日礼物」可能指实物礼品或红包；本原型只支持白名单商户下单。"
+    source_ids: ["CONTEST-POLICY-RULES-PY", "CONTEST-REQ-2026", "LAW-PIPL-2021"]
+
+  - intent: "invest"
+    # 产品代码不是硬必填：与 app/planner/intent.py:_missing 的既有行为对齐，
+    # 缺 product_code 时规划器回退到只读产品目录，不凭猜测下单。
+    required_slots: []
+    optional_slots: ["product_code", "amount_fen", "period", "note"]
+    ask_when:
+      - "用户说「想买点理财」但未指明产品时，先列出在售产品并说明风险等级。"
+      - "用户说买/赎但没给产品代码时，先追问是哪只产品；模型若只给出 invest 而产品不明，系统按既有行为回退到只读产品目录（list_products），不得凭猜测下单。"
+      - "用户风险承受能力未知或测评过期时，先安排风险测评，不直接申购。"
+      - "申购或赎回金额缺失时追问，不默认全额。"
+    preconditions:
+      - "产品风险等级不得高于客户风险承受能力。"
+      - "申购开放时段 00:00–17:00；赎回开放时段 08:00–15:00，时段外登记为预约。"
+      - "赎回资金到账前不得用于转账，不得承诺「马上能转走」。"
+      - "理财申购属红色强验证操作，必须完成强验证与显式确认。"
+    allowed_tools: ["list_products", "estimate_risk", "buy_fund", "redeem_fund", "query_balance"]
+    forbidden_ops:
+      - "销售风险等级高于客户承受能力的产品。"
+      - "主动向用户推介高风险产品。"
+      - "承诺保本或承诺收益。"
+      - "在赎回资金未到账时安排以该笔资金出账的转账。"
+    ambiguity:
+      - "「理财」可能指申购、赎回或查询持仓；按用户动词区分，动词不明时先问。"
+      - "「取出来」可能指赎回理财，也可能指转账，需按上下文判断。"
+    source_ids: ["BANK-ABC-PS-2016", "REG-SUITABILITY-2025-07", "REG-LARGE-TX-2016-03", "CONTEST-REQ-2026"]
+
+  - intent: "card_manage"
+    # 必填槽位是条件性的（card_action 决定 card_tail / amount_fen），因此不写进 required_slots，
+    # 条件必填写在 ask_when 里；card_action 是 app/planner/card_actions.py 的内部槽位名。
+    required_slots: []
+    optional_slots: ["card_action", "card_tail", "amount_fen"]
+    ask_when:
+      - "用户只说「管一下卡」但未说明动作时，先列卡片并追问要做什么。"
+      - "动作为 set_limit / freeze / unfreeze / loss / change_pin / close 时必须追问卡号尾号。"
+      - "动作为 set_limit 时必须追问限额金额，且不得超过 5000 元。"
+      - "挂失与改密前必须提示这是不可逆的强验证操作并要求确认。"
+    preconditions:
+      - "卡片必须归属本人名下账户；卡号尾号只是定位线索。"
+      - "挂失属红色强验证操作，必须完成强验证后才能执行。"
+      - "冻结、解冻、改密、挂失、销卡都必须落审计。"
+    allowed_tools: ["list_cards", "apply_virtual_card", "set_card_limit", "freeze_card", "unfreeze_card", "report_card_loss", "change_card_pin", "close_card"]
+    forbidden_ops:
+      - "操作他人名下的卡片。"
+      - "跳过强验证直接挂失或改密。"
+      - "把卡片完整卡号、密码、CVV 回显在对话里。"
+      - "把卡片限额当成账户转账限额使用。"
+    ambiguity:
+      - "「限额」可能指单笔、日累计或渠道限额；本原型只支持设置卡片单笔限额。"
+      - "「卡丢了」优先按挂失处理，但必须先确认用户是否还想保留该卡。"
+    source_ids: ["CONTEST-REQ-2026", "BANK-ICBC-EB-RULES-2025", "LAW-PIPL-2021"]
+
+  - intent: "schedule_transfer"
+    required_slots: ["payee_name", "amount_fen", "due_ms"]
+    optional_slots: ["due_hint", "note", "recurrence"]
+    ask_when:
+      - "缺少执行时间时先追问具体日期，把「下周三」这类相对说法换算成明确日期后再确认。"
+      - "金额与执行日都齐了以后，回显完整计划并要求确认后才创建。"
+    preconditions:
+      - "创建预约只登记计划，不扣款、不占用当日转账额度。"
+      - "执行日当天再按当日累计额度原子核额，超额则失败并告知。"
+      - "预约转账是日累计规则的豁免工具，但单笔限额仍然生效。"
+    allowed_tools: ["resolve_payee", "schedule_transfer", "list_scheduled", "cancel_scheduled"]
+    forbidden_ops:
+      - "创建预约时立即扣款。"
+      - "把预约当成绕过当日限额的通道。"
+      - "未确认执行日就创建预约。"
+    ambiguity:
+      - "「下周转」可能指下周某一天或下周同一天；必须先换算成具体日期再确认。"
+      - "「每月转一次」属于周期预约，本原型只支持单次预约，须说明限制。"
+    source_ids: ["CONTEST-POLICY-RULES-PY", "CONTEST-REQ-2026"]
+
+  - intent: "split_bill"
+    required_slots: ["payee_names", "amount_fen"]
+    optional_slots: ["note"]
+    ask_when:
+      - "参与人少于 2 人时不建单，先追问还有谁一起分摊。"
+      - "总金额缺失或与人均金额对不上时先追问总金额。"
+    preconditions:
+      - "拆出的每笔转账金额合计不得超过实付金额。"
+      - "每位参与人都要解析为唯一收款人。"
+      - "每笔拆出的转账都要单独确认，不能一次确认批量放行。"
+    allowed_tools: ["split_transfer", "resolve_payee", "query_balance"]
+    forbidden_ops:
+      - "合计金额超过实付金额。"
+      - "向未确认的参与人发起收款或付款。"
+      - "用一次确认覆盖多笔参数不同的转账。"
+    ambiguity:
+      - "「AA」可能指均摊，也可能指按比例分摊；默认均摊并说明。"
+      - "「你先帮我垫上」可能指代付，本原型不支持代人付款。"
+    source_ids: ["CONTEST-REQ-2026", "CONTEST-POLICY-RULES-PY"]
+
+  - intent: "reversal"
+    required_slots: []
+    optional_slots: ["txn_ref", "amount_fen", "note"]
+    ask_when:
+      - "用户说「转错了」但未指明是哪一笔时，先查最近交易让用户确认。"
+      - "交易超出 7 天或不是本人出账时，说明不能冲正并给出替代路径。"
+    preconditions:
+      - "只能冲正本人账户 7 天内的出账交易。"
+      - "一笔原交易只能冲正一次；冲正失败不得重试成两笔。"
+    allowed_tools: ["query_transactions", "reverse_transfer"]
+    forbidden_ops:
+      - "冲正他人账户的交易。"
+      - "对已冲正过的交易重复冲正。"
+      - "把冲正当成新的转账指令使用。"
+    ambiguity:
+      - "「退回来」可能指冲正、退款或对方主动退回；三者路径不同，需先分辨。"
+    source_ids: ["CONTEST-POLICY-RULES-PY", "GAP-TRANSFER-RETURN-CN", "GAP-TRANSFER-STATUS-CODE"]
+
+  - intent: "unknown"
+    required_slots: []
+    optional_slots: []
+    ask_when:
+      - "无法归入已知意图时，先问清用户想办理什么业务，不猜测、不试调用。"
+      - "用户一次提出多个业务时，先拆成单个意图逐个确认。"
+    preconditions:
+      - "意图不明时不得调用任何写操作工具。"
+      - "意图不明时只允许做澄清性追问，不做业务承诺。"
+    allowed_tools: []
+    forbidden_ops:
+      - "在意图不明时调用转账、申购、解约、挂失等写操作。"
+      - "编造业务规则或承诺办理结果。"
+    ambiguity:
+      - "「帮我弄一下」这类请求完全没有业务信息，必须追问。"
+    source_ids: ["CONTEST-REQ-2026"]

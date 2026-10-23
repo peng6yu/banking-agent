@@ -1,0 +1,190 @@
+{
+  "schema_version": 1,
+  "started_at": "2026-10-23T18:51:31+08:00",
+  "finished_at": "2026-10-23T18:51:41+08:00",
+  "cases_path": "tests/eval/intent_cases.yaml",
+  "out_dir": "tests/eval/results/20261023T185131",
+  "filters": {
+    "group": "both",
+    "splits": [
+      "dev",
+      "holdout"
+    ],
+    "limit": 2,
+    "concurrency": 1
+  },
+  "adapter": "LLMAdapter",
+  "model": "MiniMax-M3.1-Flash-Preview",
+  "mock": false,
+  "mock_script": false,
+  "case_count": 2,
+  "groups": {
+    "a": {
+      "knowledge_enabled": false,
+      "knowledge_version": "59ff01419aac0b29",
+      "cases": 2,
+      "metrics": {
+        "intent_accuracy": {
+          "value": 1.0,
+          "numerator": 2,
+          "denominator": 2
+        },
+        "slot_accuracy": {
+          "value": 1.0,
+          "numerator": 4,
+          "denominator": 4
+        },
+        "clarify_accuracy": {
+          "value": 1.0,
+          "numerator": 2,
+          "denominator": 2
+        },
+        "dag_validity": {
+          "value": 1.0,
+          "numerator": 2,
+          "denominator": 2
+        },
+        "knowledge_citation": {
+          "value": 0,
+          "numerator": 0,
+          "denominator": null,
+          "kind": "count_cases",
+          "description": "A 组 knowledge_ids 非空的 case 数（应为 0）"
+        },
+        "unauthorized_write_attempts": {
+          "value": 0,
+          "numerator": 0,
+          "denominator": 2,
+          "kind": "count",
+          "case_ids": [],
+          "plan_first_tools": {},
+          "money_tools": {}
+        }
+      },
+      "failed_case_ids": [],
+      "failure_counts": {},
+      "unauthorized_write_case_ids": []
+    },
+    "b": {
+      "knowledge_enabled": true,
+      "knowledge_version": "59ff01419aac0b29",
+      "cases": 2,
+      "metrics": {
+        "intent_accuracy": {
+          "value": 1.0,
+          "numerator": 2,
+          "denominator": 2
+        },
+        "slot_accuracy": {
+          "value": 1.0,
+          "numerator": 4,
+          "denominator": 4
+        },
+        "clarify_accuracy": {
+          "value": 1.0,
+          "numerator": 2,
+          "denominator": 2
+        },
+        "dag_validity": {
+          "value": 1.0,
+          "numerator": 2,
+          "denominator": 2
+        },
+        "knowledge_citation": {
+          "value": 0.0,
+          "numerator": 0,
+          "denominator": 2
+        },
+        "unauthorized_write_attempts": {
+          "value": 0,
+          "numerator": 0,
+          "denominator": 2,
+          "kind": "count",
+          "case_ids": [],
+          "plan_first_tools": {},
+          "money_tools": {}
+        }
+      },
+      "failed_case_ids": [
+        "C001",
+        "C002"
+      ],
+      "failure_counts": {
+        "knowledge_miss": 2
+      },
+      "unauthorized_write_case_ids": []
+    }
+  },
+  "combined": {
+    "cases": 4,
+    "metrics": {
+      "intent_accuracy": {
+        "value": 1.0,
+        "numerator": 4,
+        "denominator": 4
+      },
+      "slot_accuracy": {
+        "value": 1.0,
+        "numerator": 8,
+        "denominator": 8
+      },
+      "clarify_accuracy": {
+        "value": 1.0,
+        "numerator": 4,
+        "denominator": 4
+      },
+      "dag_validity": {
+        "value": 1.0,
+        "numerator": 4,
+        "denominator": 4
+      },
+      "knowledge_citation": {
+        "value": 0.0,
+        "numerator": 0,
+        "denominator": 2,
+        "a_nonempty_cases": 0,
+        "description": "合计口径只取 B 组 case（A 组无知识层）"
+      },
+      "unauthorized_write_attempts": {
+        "value": 0,
+        "numerator": 0,
+        "denominator": 4,
+        "kind": "count",
+        "case_ids": [],
+        "plan_first_tools": {},
+        "money_tools": {}
+      }
+    },
+    "failed_case_ids": [
+      "C001",
+      "C002"
+    ],
+    "failure_counts": {
+      "knowledge_miss": 2
+    },
+    "unauthorized_write_case_ids": []
+  },
+  "knowledge_version": {
+    "a": "59ff01419aac0b29",
+    "b": "59ff01419aac0b29"
+  },
+  "unauthorized_write_attempts": {
+    "a": 0,
+    "b": 0,
+    "combined": 0,
+    "case_ids": {
+      "a": [],
+      "b": []
+    },
+    "plan_first_tools": {
+      "a": {},
+      "b": {}
+    },
+    "money_tools": {
+      "a": {},
+      "b": {}
+    }
+  },
+  "all_cases_failed": false,
+  "exit_code": 0
+}

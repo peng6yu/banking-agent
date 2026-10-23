@@ -40,9 +40,9 @@ make run     # 启动日志会打印一条带 ?token= 的地址，打开那一�
 |---|---|---|
 | 0. 一键配置 | `make setup`（等价 `bash scripts/setup.sh`） | 建 `.venv`、装依赖、生成 `.env`、选模型、建库、自检；幂等可重跑，`--dry-run` 只打印计划 |
 | 1. 起服务 | `make run`（等价 `python3.12 -m uvicorn app.main:app --port 8000`） | 启动日志打印 `http://127.0.0.1:8000/?token=…`；打开这条（令牌存 sessionStorage，之后同标签页可裸访问） |
-| 2. 自检 | `curl -s http://127.0.0.1:8000/api/health` | `{"ok":true,"status":"ok","model":"MiniMax-M3.1-Flash-Preview","tools":14,"db":true,...}` |
+| 2. 自检 | `curl -s -H "X-API-Token: $(cat data/api_token)" http://127.0.0.1:8000/api/health` | `{"ok":true,"status":"ok","model":"MiniMax-M3.1-Flash-Preview","tools":33,"db":true,...}` |
 | 3. 不配模型也要演 | `make setup ARGS="--mock"` | `MOCK_MODE=script` 离线协作桩：查余额、转账两种业务照演，其余照实反问 |
-| 4. 演示跑脏了复原 | `make reseed`（等价 `python3.12 -m scripts.seed --force`） | 删库重建初始态，末行 `seed.ok random_seed=20261018 tables=18 window_days=180` |
+| 4. 演示跑脏了复原 | `make reseed`（等价 `python3.12 -m scripts.seed --force`） | 删库重建初始态，末行 `seed.ok random_seed=… tables=22 window_days=180` |
 | 5. 换模型 / 换厂商 | 改 `.env` 三行 → `make smoke` | 4/4 PASS 才算配好，见下一节「模型配置」 |
 
 依赖清单在 `requirements.txt`（fastapi / uvicorn / pydantic / httpx / pyyaml），`make setup` 会装进 `.venv`；系统 `python3.12` 已装好依赖时也可以直接跑，两条路都实测过。
@@ -198,7 +198,7 @@ curl -s http://127.0.0.1:8000/api/audit/verify
 ### 单元与集成测试（实测全绿，用例数持续增补）
 
 ```bash
-python3.12 -m pytest -q tests/            # 904 passed, 4 skipped（2026-10-23 实测；用例会随增补变化，复跑以实测为准）
+python3.12 -m pytest -q tests/            # 1080 passed, 4 skipped（2026-10-23 实测；用例会随增补变化，复跑以实测为准）
 ```
 
 ### 前端合规自检（实测 66 项全过）
@@ -265,15 +265,15 @@ python3.12 -m app.smoke                    # 实测 4/4 PASS，主脑延迟约 1
 | `app/planner/` | 意图识别、DAG 规划、事件定义、执行器（只认令牌） |
 | `app/policy/` | 裁决引擎与 12 条规则 R01–R12（纯函数，无网络无模型） |
 | `app/security/` | 入口访问令牌、能力令牌、签名信封、注入扫描、熔断器 |
-| `app/tools/` | 26 个工具：查人、查余额、账单、卡片、订阅、转账、资金冻结等 |
-| `app/api/` | 10 个 HTTP 端点 + 根页面 |
+| `app/tools/` | 33 个工具：查人、查余额、账单、卡片、订阅、转账、资金冻结 + 7 个主动财务（只读/需确认，无动钱语义） |
+| `app/api/` | 17 个 HTTP 端点 + 根页面（新增 7 个储蓄目标/主动提醒/模拟流水端点） |
 | `web/index.html` | 单文件前端（原生 JS，无框架、无 CDN、零外链） |
-| `tests/` | pytest 用例集（904 passed / 4 skipped，2026-10-23 实测）+ 43 条红队 YAML |
+| `tests/` | pytest 用例集（1080 passed / 4 skipped，2026-10-23 实测）+ 43 条红队 YAML + `tests/eval/` 80 例 A/B 评估集 |
 | `scripts/` | 种子脚本、前端合规检查器 |
-| `docs/` | 交接规格书 00—10（写代码前必读）+ 答辩与演示交付件 |
+| `docs/` | 交接规格书 00—10（改造前基线，写代码前必读）+ 11—15 改造设计与验收 + 答辩与演示交付件 |
 | `规划/` | 前期选型与模型实测记录 |
 
-> 工具数以 `app/tools/registry.py` 注册表为准（14 个）；策略层 `KNOWN_TOOLS=20` 是名字白名单（含未实现名），不是工具数。
+> 工具数以 `app/tools/registry.py` 注册表为准（33 个：原有 26 + 主动财务管理 7）；策略层 `KNOWN_TOOLS=37` 是名字白名单（含未实现名），不是工具数。
 
 ## 常用命令
 
@@ -282,7 +282,7 @@ python3.12 -m app.smoke                    # 实测 4/4 PASS，主脑延迟约 1
 | `make setup` | 一键配置新电脑（.venv + 依赖 + .env + 选模型 + 建库 + 自检） | ✅ 幂等；`ARGS="--dry-run"` 可预演 |
 | `make run` | 启动服务（--reload） | ✅ |
 | `make seed` | 建库 + 种子（幂等） | ✅ |
-| `make test` | pytest 全跑 | ✅ 全绿（904 passed / 4 skipped，2026-10-23 实测） |
+| `make test` | pytest 全跑 | ✅ 全绿（1080 passed / 4 skipped，2026-10-23 实测） |
 | `make smoke` | 模型连通性自检 | ✅ 4/4 |
 | `make cov` | 覆盖率（未装 pytest-cov 时自动退回纯跑） | ✅ |
 | `make reset` | `POST /api/demo/reset` 演示前清场 | ✅ |
@@ -312,6 +312,21 @@ python3.12 -m app.smoke                    # 实测 4/4 PASS，主脑延迟约 1
 | [docs/技术文档.md](docs/技术文档.md) | **技术文档**：面向评审、可独立阅读的整合版技术说明（模块职责、关键数据结构与接口） |
 | [docs/提交物对照表.md](docs/提交物对照表.md) | **提交前自检**：赛题要求 ↔ 仓库产物逐条对照，✅/🟡/⛔ 状态与缺口说明 |
 | [docs/作品简介.md](docs/作品简介.md) | 200 字以内作品简介 |
+| [docs/benchmark/final_acceptance_report.md](docs/benchmark/final_acceptance_report.md) | **最终验收报告**：逐项标「已完成/测试不足/部分实现/未实现/环境受限」，附最终实测命令与数字 |
+| [docs/15_竞赛总报告.md](docs/15_竞赛总报告.md) | **竞赛总报告（8 问）**：AIR 启示、补强能力、知识层、主动财务、测试变化、安全边界、缺失项、启动演示 |
+
+**改造交付材料**（对标 AIR + 知识层 + 主动财务）：
+
+| 文件 | 用途 |
+|---|---|
+| [docs/benchmark/revolut_air_research.md](docs/benchmark/revolut_air_research.md) | AIR 官方资料研究：11 维能力矩阵，每条带 URL 与证据状态 |
+| [docs/benchmark/air_vs_banking_agent.md](docs/benchmark/air_vs_banking_agent.md) | AIR ↔ 本项目差距矩阵（含代码位置、测试证据、优先级） |
+| [docs/benchmark/implementation_priorities.md](docs/benchmark/implementation_priorities.md) | P0/P1/P2 取舍与 1 主 2 辅演示故事 |
+| [docs/11_知识层设计.md](docs/11_知识层设计.md) | 知识层三条硬边界、数据文件、kb_bridge 三件事、四个接线点 |
+| [docs/12_主动财务管理设计.md](docs/12_主动财务管理设计.md) | 确定性计算、四张表、监测闭环与边界 |
+| [docs/13_竞赛演示手册.md](docs/13_竞赛演示手册.md) | 三段演示逐步脚本与预期输出 |
+| [docs/14_安全回归报告.md](docs/14_安全回归报告.md) | 知识层/主动服务攻击测试、修复记录、残余风险 |
+| [tests/eval/evaluation_report.md](tests/eval/evaluation_report.md) | A/B 实验：指标、失败案例、未授权专项、四轮结果 |
 
 **过程材料**（写代码与排练用）：
 
@@ -330,7 +345,7 @@ python3.12 -m app.smoke                    # 实测 4/4 PASS，主脑延迟约 1
 docs/00_总纲.md                  ← 十条铁律 + 里程碑 DoD
 docs/01_架构与数据流.md           ← 三段论与不变量
 docs/02_目录结构与文件职责.md     ← 每个文件干什么
-docs/03_数据库与种子数据.md       ← 18 张表 DDL
+docs/03_数据库与种子数据.md       ← 18 张表 DDL（改造前基线；新增 4 张见 docs/12_主动财务管理设计.md）
 docs/04_核心模块实现规格.md       ← 逐函数分支表
 docs/05_安全层实现规格.md         ← 12 条规则 R01–R12 + 令牌七步 ★最重要
 docs/06_工具层与场景实现规格.md   ← 19 工具 + 6 场景分支

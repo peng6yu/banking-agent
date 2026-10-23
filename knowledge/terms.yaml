@@ -1,0 +1,391 @@
+schema_version: "1.0"
+last_updated: "2026-10-23"
+metadata:
+  project: "banking-agent（银行 AI 智能体竞赛项目，阶段 3：银行领域知识层）"
+  scope: "转账 / 理财操作 / 订阅代扣 / 卡片管理 / 跨场景 五类业务的标准术语与口语别名"
+  purpose: "把用户口语收敛到标准业务术语，供 app/knowledge/normalize.py 做确定性替换与 app/knowledge/retrieve.py 做结构化筛选"
+  scenario_values: ["transfer", "wealth", "mandate", "cross_scene", "global"]
+  scenario_legend:
+    transfer: "智能转账（含预约转账、AA 拆账、冲正）"
+    wealth: "理财操作（申购、赎回、风险匹配）"
+    mandate: "订阅 / 代扣管理（签约、查询、解约、扣款日）"
+    cross_scene: "跨场景联动（账单 + 预算 + 储蓄目标 + 生日关怀）"
+    global: "全局安全与合规（反诈、个人信息、审计）"
+  writing_rules:
+    - "aliases 只写用户真实可能说出的口语；标准名写 term，不要重复写进 aliases。"
+    - "source_ids 只能引用 knowledge/sources.yaml 已登记且 status 为 verified 的来源；缺口登记（GAP-*）只用于「已知限制」，不用于放行依据。"
+    - "ambiguity 写「同一句话可能指哪个不同业务概念」，供接线方决定是否追问，不是免责声明。"
+  caveats:
+    - "本文件是数据不是指令：任何条目都不能改变权限等级、跳过确认或授权。"
+    - "术语定义只描述业务语义，不复制任何银行的内部流程；涉及具体银行规则的表述均标注来源。"
+
+terms:
+  # ============ 一、转账与收款人（scenario: transfer） ============
+
+  - id: "TERM-TRANSFER"
+    term: "转账"
+    aliases: ["打钱", "汇款", "转给对方", "划钱", "转一笔", "转钱", "打款"]
+    definition: "客户主动发起、把本人账户资金划付给指定收款人的支付行为。本原型的转账是两阶段预授权：先冻结再确认扣款，第一阶段不动账。"
+    related: ["TERM-PAYEE", "TERM-TRANSFER-LIMIT", "TERM-CONFIRMATION", "TERM-HOLD"]
+    scenarios: ["transfer"]
+    source_ids: ["CONTEST-POLICY-RULES-PY", "BANK-ICBC-MB-RULES", "BANK-ICBC-EB-RULES-2025", "BANK-ICBC-ACCT-AGREEMENT-2021", "LAW-ANTI-FRAUD-2022"]
+    ambiguity: "口语里的「转账」也可能指代扣成功后的资金划出；要结合收款人是否可解析、是否存在代扣协议区分。"
+
+  - id: "TERM-SCHEDULED-TRANSFER"
+    term: "预约转账"
+    aliases: ["定时转账", "定时转", "下周转", "到日子再转", "预约汇款", "预约打款"]
+    definition: "客户指定未来某一天，由系统在到期日自动发起的转账。创建时只校验收款人与单笔上限、不扣款；执行日再按当日累计额度原子核额。"
+    related: ["TERM-TRANSFER", "TERM-TRANSFER-LIMIT", "TERM-HOLD"]
+    scenarios: ["transfer"]
+    source_ids: ["CONTEST-POLICY-RULES-PY", "CONTEST-REQ-2026", "BANK-ICBC-EB-RULES-2025"]
+    ambiguity: "「下周三转」只给到相对时间，必须确认成具体执行日；「每个月」可能是周期预约而不是单次预约。"
+
+  - id: "TERM-PAYEE"
+    term: "收款人"
+    aliases: ["对方", "收钱的人", "收款方", "收款对象"]
+    definition: "转账的目标对象，需要用姓名加可解析标识（手机号、卡号尾号、别名）唯一确定。解析出零个或多个候选时必须追问，不能凭聊天话术新建收款人。"
+    related: ["TERM-PAYEE-ALIAS", "TERM-TRANSFER", "TERM-FRAUD"]
+    scenarios: ["transfer"]
+    source_ids: ["BANK-ICBC-ALIAS-REMIT", "BANK-ICBC-CROSSBANK-GZ", "BANK-ICBC-REMIT-QH", "LAW-ANTI-FRAUD-2022"]
+    ambiguity: "「对方」在多人对话里可能指不同的人，必须结合上下文或追问确认。"
+
+  - id: "TERM-PAYEE-ALIAS"
+    term: "收款人别名"
+    aliases: ["别名", "收款别名", "手机号别名", "邮箱别名"]
+    definition: "银行给收款人绑定的可解析标识（手机号、E-mail 别名等），汇款时可用别名代替卡号；绑定与解绑都需要独立的确认动作。"
+    related: ["TERM-PAYEE", "TERM-CONFIRMATION"]
+    scenarios: ["transfer"]
+    source_ids: ["BANK-ICBC-ALIAS-REMIT"]
+    ambiguity: "别名相同不代表同一人；不同银行的别名体系互不通用。"
+
+  - id: "TERM-TRANSFER-LIMIT"
+    term: "转账限额"
+    aliases: ["限额", "单笔限额", "日累计限额", "转账额度", "额度上限"]
+    definition: "银行对转账设置的金额与笔数上限，分渠道限额与认证介质限额两层，并可按客户、场景个性化设置。它是银行规则，不是法规阈值。"
+    related: ["TERM-TRANSFER", "TERM-AUTH-MEDIUM", "TERM-AML-LARGE-TX"]
+    scenarios: ["transfer"]
+    source_ids: ["BANK-ICBC-EB-RULES-2025", "BANK-ICBC-MB-RULES", "BANK-ABC-TRANSFER-LIMITS", "BANK-ICBC-FAQ-CORP-LIMIT"]
+    ambiguity: "「限额」可能指单笔、日累计、月累计或年累计，也可能是认证介质限额而不是账户额度。"
+
+  - id: "TERM-AUTH-MEDIUM"
+    term: "认证介质"
+    aliases: ["U盾", "电子密码器", "口令卡", "动态口令", "认证方式", "数字证书"]
+    definition: "客户办理电子银行业务时用于身份认证的物理或数字凭据，如 U 盾、电子密码器、电子银行口令卡；不同介质对应不同的转账限额。"
+    related: ["TERM-TRANSFER-LIMIT", "TERM-MULTI-FACTOR"]
+    scenarios: ["transfer", "global"]
+    source_ids: ["BANK-ICBC-MB-RULES", "BANK-ICBC-EB-RULES-2025", "BANK-ABC-TRANSFER-LIMITS"]
+    ambiguity: "「认证方式」既可能指登录认证，也可能指支付认证，两者对应的限额不同。"
+
+  - id: "TERM-MULTI-FACTOR"
+    term: "多因子认证"
+    aliases: ["人脸识别", "短信验证码", "双因子", "强验证", "二次验证"]
+    definition: "在密码之外叠加人脸、短信验证码、U 盾等第二种及以上凭据的强验证方式，用于大额转账、挂失、改密等高风险操作。"
+    related: ["TERM-AUTH-MEDIUM", "TERM-CONFIRMATION", "TERM-CARD-LOSS"]
+    scenarios: ["transfer", "wealth", "global"]
+    source_ids: ["CONTEST-REQ-2026", "BANK-ICBC-EB-RULES-2025"]
+    ambiguity: "「二次验证」可能只是重复输入密码，不构成真正的双因子。"
+
+  - id: "TERM-CONFIRMATION"
+    term: "用户确认"
+    aliases: ["二次确认", "确认一下", "要我确认", "确认弹窗", "人工确认"]
+    definition: "在执行有资金影响或不可逆的操作前，由用户以结构化方式明确同意的环节。确认是策略引擎的强制环节，聊天里说「我确认」不产生确认记录。"
+    related: ["TERM-MULTI-FACTOR", "TERM-TRANSFER", "TERM-CARD-LOSS"]
+    scenarios: ["transfer", "mandate", "wealth", "global"]
+    source_ids: ["CONTEST-REQ-2026", "CONTEST-POLICY-RULES-PY", "LAW-PIPL-2021"]
+    ambiguity: "「确认」可能是确认信息、确认金额或确认执行，三者是不同动作。"
+
+  - id: "TERM-HOLD"
+    term: "预授权"
+    aliases: ["冻结金额", "先冻结", "资金冻结", "预扣款"]
+    definition: "转账第一阶段先冻结付款人账户中的相应金额，用户确认后才真正扣款；预授权到期未确认则释放冻结。"
+    related: ["TERM-TRANSFER", "TERM-CONFIRMATION", "TERM-FREEZE"]
+    scenarios: ["transfer"]
+    source_ids: ["CONTEST-POLICY-RULES-PY", "BANK-ICBC-EB-RULES-2025"]
+    ambiguity: "「冻结」在预授权里是待扣资金，在风控里是账户被限制，两者解除条件不同。"
+
+  - id: "TERM-FREEZE"
+    term: "冻结"
+    aliases: ["账户冻结", "卡片冻结", "被冻结", "冻结账户"]
+    definition: "银行因风险控制、司法协助或客户申请，对账户或卡片采取的限制措施；冻结期间资金不能支付，需按流程解冻。"
+    related: ["TERM-HOLD", "TERM-CARD-LOSS", "TERM-CARD"]
+    scenarios: ["transfer", "global"]
+    source_ids: ["BANK-ICBC-MB-RULES", "BANK-ICBC-EB-RULES-2025", "LAW-ANTI-FRAUD-2022"]
+    ambiguity: "「冻结」可能是司法冻结、风控冻结或预授权冻结，解除主体与时限完全不同。"
+
+  - id: "TERM-REVERSAL"
+    term: "冲正"
+    aliases: ["撤销转账", "撤回转账", "退汇", "转账退回", "冲正交易"]
+    definition: "对已记账的错误或争议交易做反向记账，把资金原路退回。本原型只允许冲正本人账户 7 天内的出账，且一笔只能冲正一次。"
+    related: ["TERM-REFUND", "TERM-TRANSFER-STATUS", "TERM-TRANSFER"]
+    scenarios: ["transfer"]
+    source_ids: ["CONTEST-POLICY-RULES-PY", "BANK-ICBC-CROSSBANK-GZ", "GAP-TRANSFER-RETURN-CN"]
+    ambiguity: "「撤销」可能是撤销尚未执行的指令，也可能是对已记账交易冲正，处理路径不同。"
+
+  - id: "TERM-TRANSFER-STATUS"
+    term: "转账状态"
+    aliases: ["处理中", "已退回", "已撤销", "交易状态", "到账状态"]
+    definition: "一笔转账在执行链路上的状态，如处理中、成功、已退回、已撤销。状态是银行返回的事实记录，不能由模型推测。"
+    related: ["TERM-TRANSFER", "TERM-REVERSAL", "TERM-REFUND"]
+    scenarios: ["transfer"]
+    source_ids: ["GAP-TRANSFER-STATUS-CODE", "BANK-ICBC-CROSSBANK-GZ"]
+    ambiguity: "「处理中」不承诺到账时间，「已退回」也不等于资金已入账，以银行返回状态为准。"
+
+  - id: "TERM-AML-LARGE-TX"
+    term: "大额交易报告"
+    aliases: ["大额交易", "大额报告", "5万元以上现金", "反洗钱报告"]
+    definition: "反洗钱口径下的报告触发线（现金 5 万元、自然人境内划转 50 万元等），是金融机构向监管报告的义务线，不是银行给客户设置的转账限额。"
+    related: ["TERM-TRANSFER-LIMIT", "TERM-TRANSFER"]
+    scenarios: ["transfer", "mandate", "global"]
+    source_ids: ["REG-LARGE-TX-2016-03", "REG-PBC-2025-10", "LAW-AML-2024", "REG-AML-CDD-2025-11"]
+    ambiguity: "「大额」在反洗钱、银行风控与竞赛规则里是三个不同阈值，不能互相替代。"
+
+  # ============ 二、理财操作（scenario: wealth） ============
+
+  - id: "TERM-PURCHASE"
+    term: "申购"
+    aliases: ["买入", "买基金", "认购", "买理财", "申购基金"]
+    definition: "客户用本人账户买入理财产品或基金。成交前通常需要通过风险测评与适当性匹配，禁止向风险等级不匹配的客户销售。"
+    related: ["TERM-REDEEM", "TERM-RISK-TOLERANCE", "TERM-PRODUCT-RISK-LEVEL", "TERM-SUITABILITY"]
+    scenarios: ["wealth"]
+    source_ids: ["BANK-ABC-PS-2016", "REG-SUITABILITY-2025-07", "BANK-ICBC-PR-2016"]
+    ambiguity: "「买入」也可能指买外汇、贵金属或保险，不能一律按理财申购处理。"
+
+  - id: "TERM-REDEEM"
+    term: "赎回"
+    aliases: ["卖出", "赎回基金", "取出来", "赎回来", "赎回理财"]
+    definition: "客户把持有的理财产品或基金份额卖出，资金按产品说明书的赎回到账规则返回本人账户。开放时段外的赎回通常转为预约，下一开放日处理。"
+    related: ["TERM-REDEMPTION-ARRIVAL", "TERM-OPEN-HOURS", "TERM-PURCHASE", "TERM-BALANCE"]
+    scenarios: ["wealth"]
+    source_ids: ["BANK-ABC-PS-2016", "BANK-ABC-EWEALTH-PRODUCT-PAGE"]
+    ambiguity: "「取出来」也可能指从活期账户取现或转账，不一定触发理财赎回。"
+
+  - id: "TERM-FUND-PRODUCT"
+    term: "理财"
+    aliases: ["理财产品", "基金", "理财基金", "开放式理财"]
+    definition: "银行或理财公司发行、由客户出资购买并承担相应风险的资管产品。风险等级、开放时段、赎回到账规则因产品而异。"
+    related: ["TERM-PURCHASE", "TERM-REDEEM", "TERM-PRODUCT-RISK-LEVEL", "TERM-SUITABILITY"]
+    scenarios: ["wealth"]
+    source_ids: ["BANK-ABC-PS-2016", "BANK-ICBC-WEALTH-INDEX", "BANK-ABC-EWEALTH-PRODUCT-PAGE"]
+    ambiguity: "「理财」口语里也泛指基金、保险、信托等投资品，不能一律按同一产品规则处理。"
+
+  - id: "TERM-PRODUCT-RISK-LEVEL"
+    term: "产品风险等级"
+    aliases: ["产品风险", "风险评级", "产品风险评级", "风险级别"]
+    definition: "发行方对产品本金损失可能性的评级（如 R1–R5 或低/中/高风险），必须与客户风险承受能力匹配后才能销售。"
+    related: ["TERM-RISK-TOLERANCE", "TERM-SUITABILITY", "TERM-PURCHASE"]
+    scenarios: ["wealth"]
+    source_ids: ["REG-SUITABILITY-2025-07", "BANK-ICBC-WEALTH-INDEX", "BANK-ABC-EWEALTH-PRODUCT-PAGE"]
+    ambiguity: "各家银行的产品评级体系不统一，跨行比较风险等级没有可比性。"
+
+  - id: "TERM-RISK-TOLERANCE"
+    term: "风险承受能力"
+    aliases: ["风险等级", "能承受多大风险", "风险测评", "风险偏好", "风险承受等级"]
+    definition: "客户在风险测评中表现出的风险偏好与损失承受水平，是适当性匹配的客户侧依据；测评结果有有效期，过期需要重测。"
+    related: ["TERM-PRODUCT-RISK-LEVEL", "TERM-SUITABILITY", "TERM-PURCHASE"]
+    scenarios: ["wealth"]
+    source_ids: ["REG-SUITABILITY-2025-07", "BANK-ABC-PS-2016"]
+    ambiguity: "「风险等级」既可能指客户风险承受等级，也可能指产品风险等级，方向相反，必须问清是哪一侧。"
+
+  - id: "TERM-SUITABILITY"
+    term: "适当性管理"
+    aliases: ["风险匹配", "适当性", "匹配风险", "产品适配"]
+    definition: "金融机构按产品风险与客户风险承受能力做匹配、提示与限制交易的义务；不得向客户销售风险等级高于其承受能力的产品。"
+    related: ["TERM-RISK-TOLERANCE", "TERM-PRODUCT-RISK-LEVEL", "TERM-PURCHASE"]
+    scenarios: ["wealth"]
+    source_ids: ["REG-SUITABILITY-2025-07", "BANK-ICBC-WEALTH-INDEX"]
+    ambiguity: "「风险匹配」既可能指产品与客户匹配，也可能指产品与销售渠道匹配。"
+
+  - id: "TERM-REDEMPTION-ARRIVAL"
+    term: "赎回到账"
+    aliases: ["到账时间", "多久到账", "什么时候到账", "几天到账", "赎回多久到账"]
+    definition: "赎回资金从产品回到客户账户的时间规则。开放时段内通常当日实时到账；时段外或非工作日转为预约，下一开放日处理。"
+    related: ["TERM-REDEEM", "TERM-OPEN-HOURS", "TERM-BALANCE"]
+    scenarios: ["wealth"]
+    source_ids: ["BANK-ABC-PS-2016", "BANK-ABC-EWEALTH-PRODUCT-PAGE"]
+    ambiguity: "「T+1 到账」是估值确认口径，不等于资金已可用，需区分确认日与到账日。"
+
+  - id: "TERM-OPEN-HOURS"
+    term: "开放时段"
+    aliases: ["交易时间", "申购时间", "赎回时间", "开放时间", "办理时间"]
+    definition: "产品允许申购、赎回等操作的时段；时段外的请求转为预约，按下一开放日处理。各产品与各渠道的开放时段不同。"
+    related: ["TERM-PURCHASE", "TERM-REDEEM", "TERM-REDEMPTION-ARRIVAL"]
+    scenarios: ["wealth"]
+    source_ids: ["BANK-ABC-PS-2016", "BANK-ICBC-WEALTH-INDEX"]
+    ambiguity: "「交易时间」既可能指银行营业时间，也可能指产品开放时段，周末与节假日规则不同。"
+
+  # ============ 三、订阅与代扣（scenario: mandate） ============
+
+  - id: "TERM-MANDATE"
+    term: "代扣协议"
+    aliases: ["自动扣款", "自动续费", "免密支付", "连续包月", "代扣", "委托代扣", "代扣服务", "扣费协议"]
+    definition: "客户与收费商户事先约定，由银行按协议在约定时间从指定账户划扣费用的授权协议。签约时必须阅读协议并填写商户分配的协议编号；银行侧签约不等于商户侧服务已生效。"
+    related: ["TERM-CANCEL-MANDATE", "TERM-SUBSCRIPTION", "TERM-DEDUCT-DATE"]
+    scenarios: ["mandate"]
+    source_ids: ["BANK-ICBC-MANDATE-BIZ", "BANK-ICBC-MANDATE-SIGN", "BANK-CCB-MANDATE-API", "BANK-CCB-CHARGE"]
+    ambiguity: "「免密支付」是第三方支付侧的表述，与银行代扣协议不是同一份授权，不能互相替代。"
+
+  - id: "TERM-CANCEL-MANDATE"
+    term: "解约"
+    aliases: ["取消自动续费", "关掉代扣", "退订", "解约代扣", "取消代扣", "终止代扣", "取消订阅"]
+    definition: "客户撤销已签订的代扣或缴费协议，使银行侧不再按该协议扣款。银行侧解约不等于商户侧停止扣费或退订服务，客户仍需向商户另行取消。"
+    related: ["TERM-MANDATE", "TERM-SUBSCRIPTION"]
+    scenarios: ["mandate"]
+    source_ids: ["BANK-ICBC-MANDATE-CANCEL", "BANK-ICBC-MANDATE-QUERY", "GAP-MANDATE-TERMINATION-LIMITS"]
+    ambiguity: "「退订」可能指银行侧解约，也可能指商户侧取消服务；只解约不通知商户，商户仍可能继续计费。"
+
+  - id: "TERM-SUBSCRIPTION"
+    term: "订阅"
+    aliases: ["包月服务", "会员服务", "订阅服务", "自动扣费服务", "连续订阅"]
+    definition: "客户在商户侧订购的周期性服务，通常通过代扣协议按期扣费。取消订阅是商户侧动作，与银行侧解约是两件事。"
+    related: ["TERM-MANDATE", "TERM-CANCEL-MANDATE", "TERM-DEDUCT-DATE"]
+    scenarios: ["mandate"]
+    source_ids: ["BANK-ICBC-MANDATE-BIZ", "BANK-CCB-CHARGE", "BANK-ICBC-MANDATE-CANCEL"]
+    ambiguity: "「会员」可能是银行权益会员，也可能是商户会员，扣费主体不同。"
+
+  - id: "TERM-DEDUCT-DATE"
+    term: "扣款日"
+    aliases: ["扣费日", "下次扣款", "扣款时间", "扣费日期"]
+    definition: "代扣协议约定的扣费日期或周期。扣费失败通常有重试规则，用户应关注账户余额与协议状态。"
+    related: ["TERM-MANDATE", "TERM-SUBSCRIPTION"]
+    scenarios: ["mandate"]
+    source_ids: ["BANK-ICBC-MANDATE-SIGN", "BANK-ICBC-MANDATE-QUERY", "GAP-MANDATE-TERMINATION-LIMITS"]
+    ambiguity: "「下次扣款」可能指协议约定日，也可能指商户发起的实际扣款请求日。"
+
+  # ============ 四、卡片管理（scenario: transfer / global） ============
+
+  - id: "TERM-CARD"
+    term: "银行卡"
+    aliases: ["卡片", "借记卡", "储蓄卡"]
+    definition: "客户在银行开立的借记卡或信用卡介质，是账户的载体。卡片操作包括限额调整、冻结、挂失、换卡与销卡。"
+    related: ["TERM-CARD-LOSS", "TERM-FREEZE", "TERM-CARD-LIMIT"]
+    scenarios: ["transfer", "global"]
+    source_ids: ["CONTEST-REQ-2026", "BANK-ICBC-ACCT-AGREEMENT-2021", "BANK-ICBC-EB-RULES-2025"]
+    ambiguity: "「卡」有时指银行卡，有时指信用卡或虚拟卡，权限与限额不同。"
+
+  - id: "TERM-CARD-LOSS"
+    term: "挂失"
+    aliases: ["卡丢了", "卡不见了", "报失", "卡片丢失"]
+    definition: "客户银行卡或卡片介质丢失、被盗后向银行申报作废，防止他人继续使用。挂失属于不可逆的高风险操作，需要强验证并留痕。"
+    related: ["TERM-CARD", "TERM-FREEZE", "TERM-MULTI-FACTOR"]
+    scenarios: ["transfer", "global"]
+    source_ids: ["CONTEST-REQ-2026", "BANK-ICBC-EB-RULES-2025"]
+    ambiguity: "「卡丢了」也可能只是暂时找不到卡、想临时冻结，不一定要求永久挂失。"
+
+  - id: "TERM-VIRTUAL-CARD"
+    term: "虚拟卡"
+    aliases: ["虚拟银行卡", "虚拟信用卡", "网络虚拟卡"]
+    definition: "银行发行的无实体介质卡片（如虚拟借记卡、虚拟信用卡），用于线上支付；申请属于需用户确认的低风险操作。"
+    related: ["TERM-CARD", "TERM-CARD-LIMIT", "TERM-CONFIRMATION"]
+    scenarios: ["transfer", "global"]
+    source_ids: ["CONTEST-REQ-2026", "BANK-ICBC-EB-RULES-2025"]
+    ambiguity: "虚拟卡与实体卡共用账户额度还是独立额度，各家银行不同。"
+
+  - id: "TERM-CARD-LIMIT"
+    term: "卡片限额"
+    aliases: ["卡片额度", "消费限额", "单日消费限额"]
+    definition: "对单张卡片设置的消费或取现上限，与账户转账限额是两套口径；本原型的卡片限额调整上限为 5000 元。"
+    related: ["TERM-CARD", "TERM-VIRTUAL-CARD", "TERM-TRANSFER-LIMIT"]
+    scenarios: ["transfer", "global"]
+    source_ids: ["CONTEST-REQ-2026", "BANK-ICBC-EB-RULES-2025"]
+    ambiguity: "「额度」可能指卡片限额、信用额度或转账限额，调整入口不同。"
+
+  - id: "TERM-PIN"
+    term: "密码"
+    aliases: ["支付密码", "交易密码", "取款密码", "银行卡密码"]
+    definition: "用于身份认证的秘密信息，包括登录密码与支付密码（交易密码）。连续输错会触发冻结或锁定，需按流程解锁。"
+    related: ["TERM-AUTH-MEDIUM", "TERM-MULTI-FACTOR", "TERM-FREEZE"]
+    scenarios: ["global"]
+    source_ids: ["BANK-ICBC-MB-RULES", "BANK-ICBC-EB-RULES-2025"]
+    ambiguity: "「密码」可能指登录密码或支付密码，权限不同不能混用。"
+
+  # ============ 五、安全、合规与跨场景 ============
+
+  - id: "TERM-FRAUD"
+    term: "电信诈骗"
+    aliases: ["诈骗", "被骗", "骗子", "反诈"]
+    definition: "通过电话、短信、网络等方式冒充身份、编造紧急事由诱导转账的违法犯罪行为。反诈提示、风险核实与必要时的延迟处置是银行法定义务。"
+    related: ["TERM-TRANSFER", "TERM-PAYEE", "TERM-CONFIRMATION"]
+    scenarios: ["transfer", "global"]
+    source_ids: ["LAW-ANTI-FRAUD-2022", "LAW-PIPL-2021"]
+    ambiguity: "用户自称「被骗」不等于交易可撤销，仍需按冲正与报案流程处理。"
+
+  - id: "TERM-PERSONAL-INFO"
+    term: "个人信息"
+    aliases: ["隐私信息", "身份证号", "敏感信息", "个人信息保护"]
+    definition: "能够识别特定自然人的信息。金融账户信息属于敏感个人信息，处理需最小必要、取得单独同意，并做影响评估。"
+    related: ["TERM-AUDIT", "TERM-CONFIRMATION"]
+    scenarios: ["global", "cross_scene"]
+    source_ids: ["LAW-PIPL-2021", "LAW-DSL-2021", "BANK-ICBC-ACCT-AGREEMENT-2021"]
+    ambiguity: "「个人信息」在不同法规里范围略有差异，本项目按《个人信息保护法》口径。"
+
+  - id: "TERM-AUDIT"
+    term: "审计日志"
+    aliases: ["审计", "操作留痕", "留痕", "日志", "操作记录"]
+    definition: "只增不改的操作与裁决记录，用于事后追溯。金额、知识条目 id 与来源 id 都要能回指到具体条目。"
+    related: ["TERM-PERSONAL-INFO", "TERM-CONFIRMATION"]
+    scenarios: ["global", "cross_scene"]
+    source_ids: ["CONTEST-REQ-2026", "LAW-PIPL-2021", "LAW-DSL-2021"]
+    ambiguity: "「日志」可能指开发者日志，也可能指审计日志；前者可改，后者只增不改。"
+
+  - id: "TERM-BILL"
+    term: "账单"
+    aliases: ["消费记录", "流水账", "花销", "支出明细", "流水", "消费明细"]
+    definition: "按时间或类别汇总的消费与收支明细，用于消费结构分析。账单是展示与统计口径，不改变交易事实。"
+    related: ["TERM-BALANCE", "TERM-AUDIT", "TERM-BUDGET"]
+    scenarios: ["transfer", "global"]
+    source_ids: ["BANK-ICBC-ACCT-AGREEMENT-2021", "LAW-PIPL-2021"]
+    ambiguity: "「流水」既可能指银行交易流水，也可能指商户侧账单，两者口径不同。"
+
+  - id: "TERM-BALANCE"
+    term: "账户余额"
+    aliases: ["余额", "卡里还有多少钱", "还有多少钱", "卡余额", "账上还有多少"]
+    definition: "本人名下账户当前可用的资金总额（单位：分）。余额查询是只读操作，不需要用户确认，也不允许查询他人账户。"
+    related: ["TERM-TRANSFER", "TERM-BILL", "TERM-REDEEM"]
+    scenarios: ["transfer", "global"]
+    source_ids: ["CONTEST-REQ-2026", "BANK-ICBC-ACCT-AGREEMENT-2021"]
+    ambiguity: "「还有多少钱」有时指可用余额，有时指理财持仓市值，需区分账户口径。"
+
+  - id: "TERM-SAVINGS-GOAL"
+    term: "储蓄目标"
+    aliases: ["攒钱目标", "存钱目标", "存款目标", "攒钱", "存钱", "储蓄计划"]
+    definition: "客户为某个用途设定的目标金额与期限，用于攒钱计划与进度追踪。只做计划与提醒，不直接动账。"
+    related: ["TERM-BUDGET", "TERM-BALANCE"]
+    scenarios: ["global", "cross_scene"]
+    source_ids: ["CONTEST-REQ-2026", "LAW-PIPL-2021"]
+    ambiguity: "「存钱」可能指活期存款、定期存款或理财买入，不能一律当成储蓄目标。"
+
+  - id: "TERM-BUDGET"
+    term: "预算"
+    aliases: ["每月预算", "花钱上限", "预算上限", "月预算", "开支上限"]
+    definition: "客户为某段时间或某类消费设定的金额上限，用于超支提醒与消费建议。预算不改变支付权限，也不能替代限额规则。"
+    related: ["TERM-SAVINGS-GOAL", "TERM-BILL"]
+    scenarios: ["global", "cross_scene"]
+    source_ids: ["CONTEST-REQ-2026", "CONTEST-POLICY-RULES-PY"]
+    ambiguity: "「预算」既有月度预算，也有单次活动预算，周期不同不能合并计算。"
+
+  - id: "TERM-SPLIT-BILL"
+    term: "AA 拆账"
+    aliases: ["AA制", "AA 制", "各付各的", "平摊", "分摊"]
+    definition: "把一笔共同消费按人数或份额拆成多笔转账，由参与者分别承担。每笔都要单独确认，合计金额不得超过实付金额。"
+    related: ["TERM-TRANSFER", "TERM-PAYEE", "TERM-CONFIRMATION"]
+    scenarios: ["transfer", "cross_scene"]
+    source_ids: ["CONTEST-REQ-2026", "CONTEST-POLICY-RULES-PY"]
+    ambiguity: "「平摊」可能含发起人自己，也可能只让其他人分摊，人数口径必须先确认。"
+
+  - id: "TERM-REFUND"
+    term: "退款"
+    aliases: ["退钱", "钱退回来", "退款到账", "原路退回"]
+    definition: "商户或银行把已扣款项原路退回付款人账户。退款到账时间取决于商户与渠道，不改变原交易记录。"
+    related: ["TERM-REVERSAL", "TERM-BILL", "TERM-BALANCE"]
+    scenarios: ["transfer", "mandate", "cross_scene"]
+    source_ids: ["BANK-CCB-CHARGE", "GAP-TRANSFER-RETURN-CN", "BANK-ICBC-CROSSBANK-GZ"]
+    ambiguity: "「退款」可能是商户主动退，也可能是银行冲正，二者在审计里是不同事件。"
+
+  - id: "TERM-BIRTHDAY"
+    term: "生日"
+    aliases: ["过生日", "生日礼物", "生日关怀"]
+    definition: "客户档案中的生日信息，可用于生日关怀与礼物预算。该用途属于营销类用途，客户可以拒绝，拒绝不影响业务办理提醒。"
+    related: ["TERM-BUDGET", "TERM-CONFIRMATION", "TERM-PERSONAL-INFO"]
+    scenarios: ["cross_scene", "global"]
+    source_ids: ["CONTEST-REQ-2026", "LAW-PIPL-2021", "BANK-ICBC-ACCT-AGREEMENT-2021"]
+    ambiguity: "「生日」可能指客户本人或亲友，送礼对象不同，预算与确认要求不同。"

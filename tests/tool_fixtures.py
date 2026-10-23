@@ -48,6 +48,12 @@ MINIMAL_PARAMS: dict[str, dict[str, Any]] = {
     "close_card": {"card_tail": "1234"},
     "change_card_pin": {"card_tail": "1234", "pin": "123456"},
     "reverse_transfer": {"txn_id": "t_ghost"},
+    # 阶段 5：主动财务管理四件套。目标/提醒用不存在的 id，令牌闸门在碰库前就拦住。
+    "create_savings_goal": {"name": "年终奖存钱", "target_fen": 3_000_000,
+                            "target_date": "2026-12-31"},
+    "update_savings_goal": {"goal_id": "sg_ghost"},
+    "resolve_proactive_alert": {"alert_id": "pa_ghost", "action": "ignore"},
+    "run_proactive_monitor": {},
 }
 
 

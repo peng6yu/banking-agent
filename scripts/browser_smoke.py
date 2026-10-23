@@ -32,6 +32,7 @@ import subprocess
 import sys
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from pathlib import Path
 from typing import Any
@@ -191,6 +192,22 @@ def secret_from_env_file() -> str:
         key, val = line.split("=", 1)
         if key.strip() == "CAPABILITY_SECRET":
             return val.strip().strip('"').strip("'")
+    return ""
+
+
+def read_api_token(sandbox: Path) -> str:
+    """读沙箱后端的 API 令牌。
+
+    后端除首页与 /api/health 外都要求令牌（app/security/api_auth.py：环境变量
+    API_TOKEN 优先，否则 data/api_token 首次启动自动生成）。前端只在地址里
+    出现 ?token= 时才把令牌存进 sessionStorage，所以脚本必须把令牌带进 URL，
+    否则页面能打开但每一次请求都是 401，聊天区永远等不到助手气泡。
+    """
+    if os.environ.get("API_TOKEN"):
+        return os.environ["API_TOKEN"].strip()
+    path = sandbox / "data" / "api_token"
+    if path.exists():
+        return path.read_text(encoding="utf-8").strip()
     return ""
 
 
@@ -422,7 +439,13 @@ def run(args: argparse.Namespace) -> int:
             context = browser.new_context(viewport={"width": 1440, "height": 960}, locale="zh-CN")
             context.add_init_script(PROBE_JS)
             page = context.new_page()
-            page.base_url = base_url  # type: ignore[attr-defined]
+            token = read_api_token(sandbox)
+            page_url = f"{base_url}/?token={urllib.parse.quote(token)}" if token else base_url
+            page.base_url = page_url  # type: ignore[attr-defined]
+            if token:
+                print("[后端] 已把 API 令牌带进页面地址（?token=…），否则页面能开但请求全 401")
+            else:
+                print("[后端] 没读到 API 令牌；如果后端要求鉴权，下面的场景会卡在等助手气泡")
             errors: list[str] = []
             page.on("pageerror", lambda exc: errors.append(f"pageerror: {exc}"))
             shots = Path(args.shot_dir)
