@@ -85,6 +85,8 @@ LAYERS: dict[str, int] = {
     "app.planner.split_plan": 4,
     "app.planner.ticker": 4,
     "app.api.routes": 5,
+    # 只读业务视图（2026-10-23 六区信息架构）：与路由同层，可复用路由的鉴权依赖
+    "app.api.business": 5,
     "app.api.schemas": 5,
     "app.main": 5,
     # 包本身没有逻辑，聚合再导出不算越层
@@ -117,6 +119,15 @@ ALLOWED: dict[str, frozenset[str]] = {
         "app.proactive",
         "app.security",
         "app.tools.registry",
+    }),
+    "app.api.business": frozenset({
+        "app.api.routes",
+        "app.clock",
+        "app.money",
+        "app.planner",
+        "app.tools",
+        "app.tools.base",
+        "app.tools.bill",
     }),
     "app.api.schemas": frozenset(),
     "app.audit": frozenset({

@@ -67,23 +67,48 @@ async def tick_forever(interval_ms: int) -> None:
             log.exception("ticker.tick_failed")
 
 
+#: 当前后台节拍任务。保存它只为一件事：让 /api/business/plans 能如实回答
+#: 「预约转账现在到底有没有人在推进」。没有这个句柄时，界面只能靠环境变量猜，
+#: 猜错就会出现「显示已安排、其实没人执行」——那是最坏的一种谎报。
+_TASK: asyncio.Task[None] | None = None
+
+
 def start() -> asyncio.Task[None] | None:
     """起后台节拍；SCHEDULED_TICK_MS=0 时不起，返回 None。"""
+    global _TASK
     interval = tick_interval_ms()
     if interval == TICK_OFF:
         return None
-    return asyncio.create_task(tick_forever(interval))
+    _TASK = asyncio.create_task(tick_forever(interval))
+    return _TASK
+
+
+def is_started() -> bool:
+    """后台节拍是否真的在跑（任务已起且尚未结束）。"""
+    return _TASK is not None and not _TASK.done()
 
 
 async def stop(task: asyncio.Task[None] | None) -> None:
     """关掉后台节拍，吞掉取消异常。"""
-    if task is None:
+    global _TASK
+    target = task if task is not None else _TASK
+    if target is None:
         return
-    task.cancel()
+    target.cancel()
     try:
-        await task
+        await target
     except asyncio.CancelledError:
         pass
+    if _TASK is target:
+        _TASK = None
 
 
-__all__ = ["TICK_ENV", "run_due_once", "start", "stop", "tick_forever", "tick_interval_ms"]
+__all__ = [
+    "TICK_ENV",
+    "is_started",
+    "run_due_once",
+    "start",
+    "stop",
+    "tick_forever",
+    "tick_interval_ms",
+]

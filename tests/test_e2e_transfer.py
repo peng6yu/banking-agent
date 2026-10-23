@@ -68,8 +68,15 @@ def transfer_call() -> dict[str, Any]:
 
 def speak(text: str, *, approve: bool = True) -> list[tuple[str, dict[str, Any]]]:
     """从一句用户输入跑到收尾，返回整轮事件。"""
+    return speak_as(text, transfer_call(), approve=approve)
+
+
+def speak_as(
+    text: str, call: dict[str, Any], *, approve: bool = True
+) -> list[tuple[str, dict[str, Any]]]:
+    """同 speak，但让用例自己决定模型给出的结构化意图（换收款人、制造歧义）。"""
     async def main() -> list[tuple[str, dict[str, Any]]]:
-        parsed = await intent.parse(text, [], adapter=Scripted([transfer_call()]))
+        parsed = await intent.parse(text, [], adapter=Scripted([call]))
         assert parsed.question is None
         built = planner_dag.build_or_single({"intent": parsed.intent, "slots": parsed.slots})
         events: list[tuple[str, dict[str, Any]]] = []
@@ -245,3 +252,66 @@ def test_events_never_leak_internals(bank: Path) -> None:
     blob = json.dumps(events, ensure_ascii=False)
     for needle in ("Traceback", "Exception", "sqlite3", ".py", "KeyError"):
         assert needle not in blob
+
+def test_confirm_card_carries_what_a_normal_user_needs(bank: Path) -> None:
+    """确认卡片的九个字段必须由后端下发，而不是前端拼猜测。
+
+    普通用户要在这一屏决定「要不要给这个人这笔钱」，所以收款人、转出账户、
+    手续费口径、权限等级、验证步骤缺一不可；没有可信数据时写明「不算」，不能编。
+    """
+    confirm = payload(speak(TEXT), "confirm")[0]
+
+    source = confirm["source_account"]
+    assert source["tail"] == "1234"
+    assert source["balance_fen"] == SEED_BALANCE_FEN
+    assert "不是扣款后" in source["note"]
+
+    payee = confirm["payee"]
+    assert payee["name"] == "李静"
+    assert payee["bank"]
+    assert payee["phone_masked"] is None or "****" in payee["phone_masked"]
+
+    # 本演示环境没有资费表：宁可说不知道，也不能写 0 或猜一个数。
+    assert confirm["fee"]["known"] is False
+    assert confirm["fee"]["amount_fen"] is None
+    assert "不计算手续费" in confirm["fee"]["text"]
+
+    verification = confirm["verification"]
+    assert verification["level"] == "yellow"
+    assert verification["level_label"] == "中"
+    assert isinstance(verification["steps"], list) and verification["steps"]
+    for step in verification["steps"]:
+        assert {"id", "label", "required"} <= set(step)
+
+    assert confirm["tool_name"] and confirm["method"] and confirm["arrival"]
+    # 立即执行也要有这个键，前端才能一律按「预约时间」渲染，而不是两种卡片。
+    assert "scheduled_for" in confirm
+
+
+def test_ambiguous_payee_returns_structured_candidates_and_picks_nothing(bank: Path) -> None:
+    """两个「张三」时：给前端结构化候选，绝不替用户挑第一个。"""
+    call = {
+        "intent": "transfer",
+        "payee_name": "张三",
+        "amount_fen": AMOUNT_FEN,
+        "missing": [],
+        "confidence": 0.95,
+    }
+    events = speak_as("给张三转 500 元", call)
+
+    done = payload(events, "done")[-1]
+    clar = done["clarification"]
+    assert clar["kind"] == "payee"
+    assert clar["count"] == 2
+    tails = [candidate["card_tail"] for candidate in clar["candidates"]]
+    assert set(tails) == {"4417", "6620"}
+    assert all(candidate["name"] == "张三" for candidate in clar["candidates"])
+    assert all("phone_masked" in candidate for candidate in clar["candidates"])
+    assert "4417" in clar["question"] and "6620" in clar["question"]
+    assert clar["note"]
+
+    # 一句「张三」不能变成任何一笔钱：n3 根本没跑，余额没动。
+    assert not [data for data in payload(events, "tool") if data["node_id"] == "n3"]
+    assert not payload(events, "confirm")
+    assert balance() == SEED_BALANCE_FEN
+

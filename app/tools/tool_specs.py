@@ -536,7 +536,7 @@ TOOL_SPECS: Final[tuple[ToolSpec, ...]] = (
     ),
     ToolSpec(
         name='reverse_transfer',
-        description='冲正一笔已经转出去的钱，把钱退回原账户。只能冲正 7 天内、自己账户的出账，且一笔只能冲一次。',
+        description='冲正一笔已经转出去的钱：在自己的账本上做反向记账，把这笔钱记回原账户。只能冲正 7 天内、自己账户的出账，且一笔只能冲一次。这是本地账务处理，不代表能从对方追回资金。',
         params={
             "type": "object",
             "properties": {

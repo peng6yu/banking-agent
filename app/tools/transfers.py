@@ -53,7 +53,16 @@ MERCHANT_WHITELIST: Final[dict[str, str]] = {
 
 HELD_TEXT: Final[str] = "钱已经锁定，还没有扣款。"
 COMMITTED_TEXT: Final[str] = "钱已经转出去了。"
-UNSETTLED_TEXT: Final[str] = "钱已经锁定，但扣款没成功，稍后我会重试。"
+#: 未结算时用户看到的原话。系统里没有任何重试 worker，所以不能写"稍后补偿"：
+#: hold 到期（HOLD_TTL_MS）后会自动释放，钱回到可用余额，需要用户重新发起。
+UNSETTLED_TEXT: Final[str] = (
+    "钱已经锁定，但扣款没成功。系统不会自动重试：这笔锁定 5 分钟后自动释放，"
+    "钱回到可用余额；要转的话需要我重新发起一次。"
+)
+REVERSAL_SCOPE_TEXT: Final[str] = (
+    "这是本地的账务冲正（反向记账），不是把已经到对方账上的钱追回来；"
+    "真实跨行退汇要走争议流程，本演示环境不具备该能力。"
+)
 DAILY_LIMIT_TEXT: Final[str] = "今天已经花过日限额了，这笔没转出去。"
 NOT_OWNED_TEXT: Final[str] = "通讯录里没有属于你的这个收款人。"
 
@@ -275,7 +284,9 @@ def reverse_transfer(ctx: ToolContext, params: dict[str, Any], token: str | None
             'amount_yuan': fen_to_yuan_str(amount_fen),
             'balance_after_fen': int(outcome['balance_after_fen']),
             'idempotent': bool(outcome['idempotent']),
-            'summary': f'已经把 {fen_to_yuan_str(amount_fen)} 元退回你的账户。',
+            'summary': f'已经做了账务冲正：{fen_to_yuan_str(amount_fen)} 元记回你的账户。',
+            'scope': 'local_reversal',
+            'boundary': REVERSAL_SCOPE_TEXT,
         }
     )
 

@@ -8,500 +8,910 @@
      两条后端文本渲染路径：innerHTML 模板里的每个后端值都过 escapeHtml；
      textContent 路径由浏览器按纯文本处理，本身不解析 HTML，无需转义。 -->
 <style>
+
+  /* ============================================================
+     设计系统 · 变量层
+     一处定义，全站引用：颜色、字号、间距、圆角、阴影、控件高度。
+     业务状态色只有四档（成功/警告/危险/中性），页面之间不允许各自另起一套。
+     ============================================================ */
   :root {
+    /* 品牌与状态色（三色常量被脚本与自检脚本共同引用，不要改名） */
     --green: #16a34a;
     --amber: #d97706;
     --red: #dc2626;
-    --bg: #0d1117;
-    --bg-2: #10161f;
-    --panel: #161b22;
-    --panel-2: #1b2230;
-    --line: #2a3441;
-    --text: #e6edf3;
-    --muted: #8c9bad;
-    --blue: #388bfd;
+    --brand: #1e6fd9;
+    --blue: var(--brand);
+
+    /* 背景与表面 */
+    --bg: #f4f6fa;
+    --bg-2: #eef1f6;
+    --panel: #ffffff;
+    --panel-2: #f8fafc;
+    --surface: var(--panel);
+    --surface-2: var(--panel-2);
+    --line: #e2e7ef;
+    --line-strong: #cfd7e3;
+
+    /* 文字 */
+    --text: #0f172a;
+    --text-2: #33415c;
+    --muted: #62708a;
+
+    /* 状态底纹 */
+    --green-soft: #ecfdf3;
+    --amber-soft: #fffaeb;
+    --red-soft: #fef3f2;
+    --blue-soft: #eff5ff;
+
+    /* 字号 / 字重 */
+    --fs-xs: 11px;
+    --fs-sm: 12.5px;
+    --fs-md: 14px;
+    --fs-lg: 17px;
+    --fs-xl: 22px;
+    --fs-2xl: 30px;
+    --fw-reg: 400;
+    --fw-med: 500;
+    --fw-semi: 600;
+    --fw-bold: 700;
+
+    /* 间距 */
+    --s-1: 4px;
+    --s-2: 8px;
+    --s-3: 12px;
+    --s-4: 16px;
+    --s-5: 24px;
+    --s-6: 32px;
+
+    /* 圆角 / 阴影 */
+    --r-sm: 8px;
+    --r-md: 12px;
+    --r-lg: 16px;
+    --r-pill: 999px;
+    --sh-1: 0 1px 2px rgba(15, 23, 42, .06);
+    --sh-2: 0 4px 16px rgba(15, 23, 42, .08);
+    --sh-focus: 0 0 0 3px rgba(30, 111, 217, .18);
+
+    /* 控件 */
+    --h-btn: 38px;
+    --h-input: 38px;
+    --h-nav: 56px;
+
+    /* 等级色（复用三色，语义不变） */
     --lv: var(--muted);
   }
 
   * { box-sizing: border-box; }
 
-  html, body { height: 100%; margin: 0; }
+  html, body { min-height: 100%; margin: 0; }
 
   body {
     background: var(--bg);
     color: var(--text);
-    font: 14px/1.65 "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Segoe UI", system-ui, sans-serif;
+    font: var(--fs-md)/1.6 "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Segoe UI", system-ui, sans-serif;
     display: flex;
     flex-direction: column;
+    -webkit-font-smoothing: antialiased;
   }
 
+  h1, h2, h3, h4 { margin: 0; font-weight: var(--fw-semi); }
+  a { color: var(--brand); }
+
+  :focus-visible { outline: none; box-shadow: var(--sh-focus); border-radius: var(--r-sm); }
+
+  /* ---------------------------------------------------------- 顶栏 + 主导航 */
   .topbar {
     display: flex;
     align-items: center;
-    gap: 12px;
-    padding: 10px 18px;
+    gap: var(--s-3);
+    padding: 0 var(--s-5);
+    min-height: var(--h-nav);
+    background: var(--panel);
     border-bottom: 1px solid var(--line);
-    background: var(--bg-2);
-    flex: 0 0 auto;
+    position: sticky;
+    top: 0;
+    z-index: 20;
   }
-  .topbar h1 { font-size: 16px; margin: 0; letter-spacing: .5px; }
-  .topbar .tagline { color: var(--muted); font-size: 12px; }
-  .topbar .spacer { flex: 1; }
-  .lamps { display: flex; gap: 8px; }
-  .lamp {
-    display: inline-flex;
+  .brand { display: flex; align-items: center; gap: 10px; }
+  .brand-mark {
+    width: 30px; height: 30px; border-radius: 9px;
+    background: linear-gradient(160deg, var(--brand), #4b8ee6);
+    color: #fff; font-size: 15px; font-weight: var(--fw-bold);
+    display: grid; place-items: center;
+  }
+  .brand-text { display: flex; flex-direction: column; line-height: 1.2; }
+  .brand-name { font-size: var(--fs-md); font-weight: var(--fw-semi); }
+  .brand-sub { font-size: var(--fs-xs); color: var(--muted); }
+  .topbar .spacer { flex: 1 1 auto; }
+
+  .nav {
+    display: flex;
+    gap: var(--s-1);
+    overflow-x: auto;
+    scrollbar-width: none;
     align-items: center;
-    gap: 6px;
-    font-size: 12px;
+  }
+  .nav::-webkit-scrollbar { display: none; }
+  .nav-tab {
+    appearance: none;
+    border: 1px solid transparent;
+    background: transparent;
     color: var(--muted);
-    padding: 3px 9px;
-    border: 1px solid var(--line);
-    border-radius: 999px;
+    font: inherit;
+    font-size: var(--fs-sm);
+    font-weight: var(--fw-med);
+    padding: 7px 12px;
+    border-radius: var(--r-pill);
+    cursor: pointer;
+    white-space: nowrap;
   }
-  .lamp .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
-
-  .stage {
-    flex: 1 1 auto;
-    min-height: 0;
-    display: grid;
-    grid-template-columns: 55fr 45fr;
+  .nav-tab:hover { color: var(--text); background: var(--bg); }
+  .nav-tab[aria-selected="true"] {
+    background: var(--blue-soft);
+    border-color: #c7dcff;
+    color: var(--brand);
+    font-weight: var(--fw-semi);
+  }
+  .nav-tab .nav-dot {
+    display: inline-block; width: 6px; height: 6px; border-radius: 50%;
+    background: var(--amber); margin-left: 5px; vertical-align: middle;
   }
 
-  .col-left {
-    min-width: 0;
+  .lamps { display: flex; gap: 6px; }
+  .lamp {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-size: var(--fs-xs); color: var(--muted);
+    padding: 3px 9px; border: 1px solid var(--line);
+    border-radius: var(--r-pill); background: var(--panel-2);
+  }
+  .lamp .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--muted); }
+
+  /* ---------------------------------------------------------- 视图容器 */
+  .views { flex: 1 1 auto; min-height: 0; }
+  .view { display: none; }
+  .view.active { display: block; }
+  .view-inner {
+    max-width: 1240px;
+    margin: 0 auto;
+    padding: var(--s-5);
     display: flex;
     flex-direction: column;
-    border-right: 1px solid var(--line);
+    gap: var(--s-4);
   }
-  .col-right {
-    min-width: 0;
-    overflow-y: auto;
-    padding: 12px;
-    display: flex;
-    flex-direction: column;
-    gap: 12px;
-    background: var(--bg-2);
-  }
+  .view-head { display: flex; flex-direction: column; gap: 2px; }
+  .view-title { font-size: var(--fs-xl); font-weight: var(--fw-semi); }
+  .view-sub { font-size: var(--fs-sm); color: var(--muted); }
 
-  .chat-log {
-    flex: 1 1 auto;
-    min-height: 0;
-    overflow-y: auto;
-    padding: 16px;
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-  }
-  .bubble { max-width: 88%; border-radius: 10px; padding: 9px 12px; border: 1px solid var(--line); }
-  .bubble-user { align-self: flex-end; background: #1f6feb22; border-color: #1f6feb66; }
-  .bubble-agent { align-self: flex-start; background: var(--panel-2); }
-  .bubble-sys { align-self: flex-start; background: #d977061a; border-color: #d9770655; }
-  .bubble-role { font-size: 11px; color: var(--muted); margin-bottom: 3px; }
-  .bubble-body { white-space: pre-wrap; word-break: break-word; }
-  .bubble-tag { font-size: 11px; color: var(--muted); margin-top: 4px; }
+  /* ---------------------------------------------------------- 卡片 / 统计 */
+  .grid { display: grid; gap: var(--s-4); }
+  .grid-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .grid-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .grid-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 
-  .caps { flex: 0 0 auto; padding: 0 16px 6px; }
-  .caps-title { font-size: 11px; color: var(--muted); margin-bottom: 4px; }
-  .cap-chips { display: flex; flex-wrap: wrap; gap: 6px; }
-  .cap-chip {
-    font-size: 11px;
-    border: 1px solid var(--line);
-    border-radius: 6px;
-    padding: 2px 7px;
-    color: var(--muted);
-  }
-
-  .composer {
-    flex: 0 0 auto;
-    display: flex;
-    gap: 8px;
-    padding: 12px 16px;
-    border-top: 1px solid var(--line);
-    background: var(--bg-2);
-  }
-  #chat-input {
-    flex: 1 1 auto;
+  .card {
     background: var(--panel);
     border: 1px solid var(--line);
-    border-radius: 8px;
-    color: var(--text);
-    padding: 9px 12px;
-    font-size: 14px;
-    outline: none;
+    border-radius: var(--r-lg);
+    box-shadow: var(--sh-1);
+    padding: var(--s-4);
+    min-width: 0;
   }
-  #chat-input:focus { border-color: var(--blue); }
+  .card.tight { padding: var(--s-3); }
+  .card-head {
+    display: flex; align-items: center; gap: var(--s-2);
+    margin-bottom: var(--s-3);
+  }
+  .card-head h3 { font-size: var(--fs-md); font-weight: var(--fw-semi); }
+  .card-head .spacer { flex: 1 1 auto; }
+  .card-note { font-size: var(--fs-xs); color: var(--muted); margin-top: var(--s-2); line-height: 1.55; }
 
-  .btn {
+  .stat-label { font-size: var(--fs-xs); color: var(--muted); margin-bottom: 2px; }
+  .stat-value {
+    font-size: var(--fs-2xl); font-weight: var(--fw-semi);
+    font-variant-numeric: tabular-nums; letter-spacing: -.5px;
+  }
+  .stat-value.sm { font-size: var(--fs-xl); }
+  .stat-delta { font-size: var(--fs-xs); color: var(--muted); margin-top: 2px; }
+  .stat-delta.up { color: var(--green); }
+  .stat-delta.down { color: var(--red); }
+
+  /* 标签：任务状态、权限、证据等级共用一套 */
+  .tag {
+    display: inline-flex; align-items: center; gap: 4px;
+    font-size: var(--fs-xs); font-weight: var(--fw-med);
+    padding: 2px 8px; border-radius: var(--r-pill);
+    border: 1px solid var(--line-strong); color: var(--muted);
+    background: var(--panel-2); white-space: nowrap;
+  }
+  .tag.ok { color: var(--green); border-color: #b7e4c7; background: var(--green-soft); }
+  .tag.warn { color: var(--amber); border-color: #f2d09a; background: var(--amber-soft); }
+  .tag.bad { color: var(--red); border-color: #f6c2c0; background: var(--red-soft); }
+  .tag.info { color: var(--brand); border-color: #c7dcff; background: var(--blue-soft); }
+
+  .notice {
     border: 1px solid var(--line);
+    border-left: 3px solid var(--muted);
+    border-radius: var(--r-md);
     background: var(--panel-2);
-    color: var(--text);
-    border-radius: 8px;
-    padding: 8px 14px;
-    font-size: 13px;
-    cursor: pointer;
+    padding: var(--s-3);
+    font-size: var(--fs-sm);
+    color: var(--text-2);
   }
-  .btn:disabled { opacity: .45; cursor: not-allowed; }
-  .btn-green { border-color: var(--green); color: var(--green); }
-  .btn-amber { border-color: var(--amber); color: var(--amber); font-weight: 600; }
-  .btn-red { border-color: var(--red); color: var(--red); }
-  .btn-ghost { background: transparent; }
-  .btn-mini { padding: 3px 9px; font-size: 11px; }
+  .notice.warn { border-left-color: var(--amber); background: var(--amber-soft); }
+  .notice.bad { border-left-color: var(--red); background: var(--red-soft); }
+  .notice.info { border-left-color: var(--brand); background: var(--blue-soft); }
+  .notice strong { color: var(--text); }
 
+  .empty {
+    border: 1px dashed var(--line-strong);
+    border-radius: var(--r-md);
+    padding: var(--s-4);
+    text-align: center;
+    color: var(--muted);
+    font-size: var(--fs-sm);
+    background: var(--panel-2);
+  }
+  .empty .empty-title { color: var(--text-2); font-weight: var(--fw-med); margin-bottom: 2px; }
+
+  .skeleton {
+    border-radius: var(--r-sm);
+    background: linear-gradient(90deg, var(--bg-2) 25%, #e7ecf3 37%, var(--bg-2) 63%);
+    background-size: 400% 100%;
+    animation: shimmer 1.2s ease-in-out infinite;
+    height: 14px;
+  }
+  @keyframes shimmer { 0% { background-position: 100% 0; } 100% { background-position: 0 0; } }
+
+  .bar { height: 8px; border-radius: var(--r-pill); background: var(--bg-2); overflow: hidden; }
+  .bar-fill { height: 100%; background: var(--brand); border-radius: var(--r-pill); }
+  .bar-fill.ok { background: var(--green); }
+  .bar-fill.warn { background: var(--amber); }
+  .bar-fill.bad { background: var(--red); }
+
+  .list { display: flex; flex-direction: column; gap: var(--s-2); }
+  .row {
+    display: flex; align-items: flex-start; gap: var(--s-2);
+    padding: var(--s-2) 0; border-bottom: 1px dashed var(--line);
+  }
+  .row:last-child { border-bottom: none; }
+  .row-main { flex: 1 1 auto; min-width: 0; }
+  .row-title { font-size: var(--fs-sm); font-weight: var(--fw-med); word-break: break-word; }
+  .row-sub { font-size: var(--fs-xs); color: var(--muted); word-break: break-word; }
+  .row-amount { font-variant-numeric: tabular-nums; font-weight: var(--fw-semi); white-space: nowrap; }
+
+  .kv { display: flex; gap: var(--s-2); padding: 3px 0; border-bottom: 1px dashed var(--line); }
+  .kv:last-child { border-bottom: none; }
+  .kv-key { flex: 0 0 84px; color: var(--muted); font-size: var(--fs-sm); }
+  .kv-val { flex: 1 1 auto; word-break: break-word; font-size: var(--fs-sm); }
+  .kv-val.mono { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: var(--fs-xs); }
+
+  /* ---------------------------------------------------------- 按钮 / 输入 */
+  .btn {
+    border: 1px solid var(--line-strong);
+    background: var(--panel);
+    color: var(--text);
+    border-radius: var(--r-sm);
+    min-height: var(--h-btn);
+    padding: 0 var(--s-4);
+    font: inherit; font-size: var(--fs-sm); font-weight: var(--fw-med);
+    cursor: pointer;
+    display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+    white-space: nowrap; /* 窄容器里「发送/中断」不许被挤成竖排两行 */
+    transition: background .12s ease, border-color .12s ease;
+  }
+  .btn:hover:not(:disabled) { background: var(--bg); }
+  .btn:disabled { opacity: .5; cursor: not-allowed; }
+  .btn-green { border-color: var(--green); color: #fff; background: var(--green); }
+  .btn-green:hover:not(:disabled) { background: #128a3f; }
+  .btn-amber { border-color: var(--amber); color: var(--amber); background: var(--amber-soft); font-weight: var(--fw-semi); }
+  .btn-red { border-color: var(--red); color: var(--red); background: var(--red-soft); }
+  .btn-red:hover:not(:disabled) { background: #fde7e6; }
+  .btn-primary { border-color: var(--brand); color: #fff; background: var(--brand); }
+  .btn-primary:hover:not(:disabled) { background: #1a5fbb; }
+  .btn-ghost { background: transparent; }
+  .btn-mini { min-height: 26px; padding: 0 9px; font-size: var(--fs-xs); border-radius: 6px; }
+  .btn-block { width: 100%; }
+
+  input[type="text"], input[type="number"], input[type="date"], select, textarea {
+    min-height: var(--h-input);
+    border: 1px solid var(--line-strong);
+    border-radius: var(--r-sm);
+    background: var(--panel);
+    color: var(--text);
+    padding: 0 var(--s-3);
+    font: inherit;
+    font-size: var(--fs-sm);
+    outline: none;
+    width: 100%;
+  }
+  input:focus, select:focus, textarea:focus { border-color: var(--brand); box-shadow: var(--sh-focus); }
+  input:disabled, select:disabled { background: var(--bg-2); color: var(--muted); cursor: not-allowed; }
+  .field { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+  .field-label { font-size: var(--fs-xs); color: var(--muted); }
+  .field-hint { font-size: var(--fs-xs); color: var(--muted); }
+
+  /* ---------------------------------------------------------- 助手视图 */
+  .stage {
+    display: grid;
+    grid-template-columns: minmax(0, 58fr) minmax(0, 42fr);
+    gap: var(--s-4);
+    max-width: 1240px;
+    margin: 0 auto;
+    padding: var(--s-4) var(--s-5) var(--s-5);
+    align-items: start;
+  }
+  .col-left, .col-right { min-width: 0; display: flex; flex-direction: column; gap: var(--s-3); }
+  .col-right { position: sticky; top: calc(var(--h-nav) + var(--s-3)); }
+
+  .chat-shell {
+    display: flex; flex-direction: column;
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: var(--r-lg);
+    box-shadow: var(--sh-1);
+    overflow: hidden;
+    min-height: 62vh;
+    max-height: calc(100vh - var(--h-nav) - 90px);
+  }
+  .chat-log {
+    flex: 1 1 auto; min-height: 0; overflow-y: auto;
+    padding: var(--s-4); display: flex; flex-direction: column; gap: var(--s-2);
+    background: var(--panel);
+  }
+  .bubble { max-width: 92%; border-radius: var(--r-md); padding: 9px 12px; border: 1px solid var(--line); background: var(--panel-2); }
+  .bubble-user { align-self: flex-end; background: var(--blue-soft); border-color: #c7dcff; }
+  .bubble-agent { align-self: flex-start; }
+  .bubble-sys { align-self: flex-start; background: var(--amber-soft); border-color: #f2d09a; }
+  .bubble-role { font-size: var(--fs-xs); color: var(--muted); margin-bottom: 3px; }
+  .bubble-body { white-space: pre-wrap; word-break: break-word; font-size: var(--fs-sm); }
+  .bubble-tag { font-size: var(--fs-xs); color: var(--muted); margin-top: 4px; }
+
+  .caps { flex: 0 0 auto; padding: 0 var(--s-4) var(--s-2); }
+  .caps[open] { padding-bottom: var(--s-3); }
+  .caps-title {
+    font-size: var(--fs-xs);
+    color: var(--muted);
+    margin-bottom: var(--s-1);
+    cursor: pointer;
+    list-style: none;
+  }
+  .caps-title::-webkit-details-marker { display: none; }
+  .caps-title::before { content: '▸ '; color: var(--muted); }
+  .caps[open] .caps-title::before { content: '▾ '; }
+  .caps-hint { font-size: var(--fs-xs); color: var(--muted); margin: 0 0 var(--s-2); }
+  .cap-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+  .cap-chip {
+    font-size: var(--fs-xs); border: 1px solid var(--line); border-radius: var(--r-pill);
+    padding: 2px 9px; color: var(--muted); background: var(--panel-2);
+  }
+  .cap-chip.action { cursor: pointer; color: var(--brand); border-color: #c7dcff; background: var(--blue-soft); }
+  .cap-chip.action:hover { background: #e3eeff; }
+
+  .composer {
+    flex: 0 0 auto; display: flex; gap: var(--s-2);
+    padding: var(--s-3) var(--s-4);
+    border-top: 1px solid var(--line);
+    background: var(--panel-2);
+  }
+  #chat-input { flex: 1 1 auto; }
+
+  /* 面板：默认折叠，展开才是技术细节 */
   .panel {
     background: var(--panel);
     border: 1px solid var(--line);
     border-left: 3px solid var(--lv);
-    border-radius: 10px;
+    border-radius: var(--r-md);
+    box-shadow: var(--sh-1);
     overflow: hidden;
   }
   .panel-head {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 9px 12px;
-    border-bottom: 1px solid var(--line);
+    display: flex; align-items: center; gap: var(--s-2);
+    padding: 9px var(--s-3);
     background: var(--panel-2);
+    cursor: pointer;
+    list-style: none;
   }
-  .panel-head h2 { font-size: 13px; margin: 0; letter-spacing: .5px; }
-  .panel-head .spacer { flex: 1; }
-  .panel-badge { font-size: 11px; color: var(--muted); }
-  .panel-body { padding: 10px 12px; font-size: 13px; }
-  .panel-body:empty::after { content: "等待事件…"; color: var(--muted); font-size: 12px; }
+  .panel-head::-webkit-details-marker { display: none; }
+  .panel-head h2 { font-size: var(--fs-sm); font-weight: var(--fw-semi); }
+  .panel-head .spacer { flex: 1 1 auto; }
+  .panel-badge { font-size: var(--fs-xs); color: var(--muted); }
+  .panel-body { padding: var(--s-3); font-size: var(--fs-sm); }
+  .panel-body:empty::after { content: "等待事件…"; color: var(--muted); font-size: var(--fs-xs); }
+  .panel[open] > .panel-head { border-bottom: 1px solid var(--line); }
 
   .lv-green { --lv: var(--green); }
   .lv-amber { --lv: var(--amber); }
   .lv-red { --lv: var(--red); }
   .lv-unknown { --lv: var(--muted); }
 
-  @keyframes flash {
-    0% { background: #388bfd33; }
-    100% { background: var(--panel); }
-  }
-  .panel.flash .panel-body { animation: flash 480ms ease-out; }
+  @keyframes flash { 0% { background: var(--blue-soft); } 100% { background: var(--panel); } }
+  .panel.flash .panel-body { animation: flash 520ms ease-out; }
 
-  .kv { display: flex; gap: 8px; padding: 3px 0; border-bottom: 1px dashed #223; }
-  .kv:last-child { border-bottom: none; }
-  .kv-key { flex: 0 0 76px; color: var(--muted); }
-  .kv-val { flex: 1 1 auto; word-break: break-word; }
-  .kv-val.mono { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12px; }
   .slot-grid { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
-  .slot {
-    font-size: 12px;
-    border: 1px solid var(--line);
-    border-radius: 6px;
-    padding: 2px 7px;
-  }
-  .slot b { color: var(--blue); font-weight: 600; }
+  .slot { font-size: var(--fs-xs); border: 1px solid var(--line); border-radius: 6px; padding: 2px 7px; background: var(--panel-2); }
+  .slot b { color: var(--brand); font-weight: var(--fw-semi); }
   .warn { color: var(--amber); }
 
-  .lamp-big {
-    display: inline-flex;
-    align-items: center;
-    gap: 10px;
-    font-size: 15px;
-    font-weight: 600;
-    color: var(--lv);
-  }
-  .lamp-big .bulb {
-    width: 16px; height: 16px; border-radius: 50%;
-    background: var(--lv);
-    box-shadow: 0 0 10px var(--lv);
-  }
+  .lamp-big { display: inline-flex; align-items: center; gap: 10px; font-size: var(--fs-md); font-weight: var(--fw-semi); color: var(--lv); }
+  .lamp-big .bulb { width: 14px; height: 14px; border-radius: 50%; background: var(--lv); box-shadow: 0 0 0 4px rgba(0,0,0,.04); }
 
   .plan-list { list-style: none; margin: 0; padding: 0; }
-  .plan-item {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 5px 0;
-    border-bottom: 1px dashed #223;
-  }
+  .plan-item { display: flex; align-items: center; gap: var(--s-2); padding: 5px 0; border-bottom: 1px dashed var(--line); }
+  ul.assumptions { margin: 0 0 var(--s-2) 18px; padding: 0; color: var(--text-2); font-size: var(--fs-sm); }
+  ul.assumptions li { margin: 2px 0; }
   .plan-item:last-child { border-bottom: none; }
-  .plan-node { font-family: ui-monospace, Menlo, Consolas, monospace; color: var(--muted); flex: 0 0 34px; }
-  .plan-tool { flex: 1 1 auto; }
-  .plan-status { font-size: 11px; color: var(--muted); }
+  .plan-node { font-family: ui-monospace, Menlo, Consolas, monospace; color: var(--muted); flex: 0 0 34px; font-size: var(--fs-xs); }
+  .plan-tool { flex: 1 1 auto; font-size: var(--fs-sm); }
+  .plan-status { font-size: var(--fs-xs); color: var(--muted); }
 
-  .audit-list { display: flex; flex-direction: column; gap: 3px; max-height: 230px; overflow-y: auto; }
-  .audit-row {
-    display: flex;
-    align-items: baseline;
-    gap: 8px;
-    font-family: ui-monospace, Menlo, Consolas, monospace;
-    font-size: 11.5px;
-    padding: 2px 0;
-  }
+  .audit-list { display: flex; flex-direction: column; gap: 3px; max-height: 320px; overflow-y: auto; }
+  .audit-row { display: flex; align-items: baseline; gap: var(--s-2); font-family: ui-monospace, Menlo, Consolas, monospace; font-size: var(--fs-xs); padding: 2px 0; }
   .audit-seq { color: var(--muted); flex: 0 0 46px; }
   .audit-type { flex: 1 1 auto; color: var(--text); word-break: break-all; }
-  .audit-hash { color: var(--blue); flex: 0 0 auto; }
-  .audit-head { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; }
-  .audit-head .spacer { flex: 1; }
-
-  .confirm-card {
-    align-self: flex-start;
-    width: 100%;
-    max-width: 92%;
-    border: 1px solid var(--amber);
-    border-left-width: 4px;
-    border-radius: 10px;
-    padding: 12px;
-    background: #d9770612;
-  }
-  .confirm-head { font-weight: 700; color: var(--amber); margin-bottom: 8px; font-size: 14px; }
-  .confirm-row { display: flex; gap: 10px; padding: 4px 0; border-bottom: 1px dashed #d9770644; }
-  .confirm-row:last-of-type { border-bottom: none; }
-  .confirm-key { flex: 0 0 108px; color: var(--muted); font-size: 12px; }
-  .confirm-val { flex: 1 1 auto; word-break: break-all; }
-  .confirm-amount { font-weight: 700; color: var(--amber); }
-  .confirm-payee { font-weight: 700; color: var(--text); }
-  .confirm-action { color: var(--text); }
-  .confirm-actions { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
-  .confirm-timer { font-size: 11px; color: var(--muted); margin-top: 6px; }
-
-  .factor-list { list-style: none; margin: 0 0 8px; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; }
-  .factor-item {
-    font-size: 12px;
-    border: 1px solid var(--red);
-    color: var(--red);
-    border-radius: 6px;
-    padding: 2px 8px;
-  }
-  .factor-input {
-    width: 100%;
-    background: var(--panel-2);
-    border: 1px solid var(--line);
-    border-radius: 8px;
-    color: var(--text);
-    padding: 8px 10px;
-    font-size: 13px;
-    outline: none;
-    margin-bottom: 8px;
-  }
-  .factor-actions { display: flex; gap: 8px; flex-wrap: wrap; }
-
+  .audit-hash { color: var(--brand); flex: 0 0 auto; }
+  .audit-head { display: flex; align-items: center; gap: 6px; margin-bottom: var(--s-2); }
+  .audit-head .spacer { flex: 1 1 auto; }
   .side-actions { display: flex; gap: 6px; }
 
-  /* ---------------- 主动财务面板：复用上面的变量 / .btn / .kv / .panel 体系 ---------------- */
-  /* 右栏是 flex 列且可滚动，子面板默认会 flex-shrink 到可视高度、内容被 overflow:hidden 裁掉；
-     主动财务面板内容高，固定为不收缩，让 .col-right 自己滚动，避免列表/提醒被截断。 */
-  #panel-proactive { flex: 0 0 auto; }
-  .pf-block { margin-bottom: 12px; }
-  .pf-block:last-child { margin-bottom: 0; }
-  .pf-title {
-    display: flex; align-items: center; gap: 6px;
-    font-size: 12.5px; font-weight: 600; color: var(--text); margin-bottom: 6px;
+  /* ---------------------------------------------------------- 确认卡片 */
+  .confirm-card {
+    align-self: flex-start; width: 100%; max-width: 100%;
+    border: 1px solid var(--amber);
+    border-left-width: 4px;
+    border-radius: var(--r-md);
+    padding: var(--s-3);
+    background: var(--amber-soft);
   }
-  .pf-sub { font-weight: 400; color: var(--muted); font-size: 11px; }
-  .pf-note { font-size: 11px; color: var(--muted); line-height: 1.55; margin: 4px 0 0; }
+  .confirm-head { font-weight: var(--fw-bold); color: var(--amber); margin-bottom: var(--s-2); font-size: var(--fs-md); }
+  .confirm-row { display: flex; gap: var(--s-2); padding: 4px 0; border-bottom: 1px dashed #f2d09a; }
+  .confirm-row:last-of-type { border-bottom: none; }
+  .confirm-key { flex: 0 0 96px; color: var(--muted); font-size: var(--fs-xs); }
+  .confirm-val { flex: 1 1 auto; word-break: break-all; font-size: var(--fs-sm); }
+  .confirm-amount { font-weight: var(--fw-bold); color: var(--amber); font-variant-numeric: tabular-nums; }
+  .confirm-payee { font-weight: var(--fw-semi); color: var(--text); }
+  .confirm-action { color: var(--text); }
+  .confirm-actions { display: flex; gap: var(--s-2); margin-top: var(--s-3); flex-wrap: wrap; }
+  .confirm-timer { font-size: var(--fs-xs); color: var(--muted); margin-top: 6px; }
+  .confirm-steps { display: flex; flex-wrap: wrap; gap: 6px; }
+
+  .factor-list { list-style: none; margin: 0 0 var(--s-2); padding: 0; display: flex; flex-wrap: wrap; gap: 6px; }
+  .factor-item { font-size: var(--fs-xs); border: 1px solid var(--red); color: var(--red); border-radius: 6px; padding: 2px 8px; background: var(--red-soft); }
+  .factor-input { width: 100%; margin-bottom: var(--s-2); }
+  .factor-actions { display: flex; gap: var(--s-2); flex-wrap: wrap; }
+
+  /* 收款人候选 */
+  .pick-list { display: flex; flex-direction: column; gap: var(--s-2); margin: var(--s-2) 0; }
+  .pick {
+    display: flex; align-items: center; gap: var(--s-2);
+    border: 1px solid var(--line-strong); border-radius: var(--r-md);
+    padding: var(--s-2) var(--s-3); background: var(--panel); cursor: pointer;
+  }
+  .pick:hover { border-color: var(--brand); background: var(--blue-soft); }
+  .pick-name { font-weight: var(--fw-semi); }
+  .pick-meta { font-size: var(--fs-xs); color: var(--muted); }
+
+  /* ---------------------------------------------------------- 主动财务面板 */
+  #panel-proactive { flex: 0 0 auto; }
+  .pf-block { margin-bottom: var(--s-3); }
+  .pf-block:last-child { margin-bottom: 0; }
+  .pf-title { display: flex; align-items: center; gap: 6px; font-size: var(--fs-sm); font-weight: var(--fw-semi); color: var(--text); margin-bottom: 6px; }
+  .pf-sub { font-weight: var(--fw-reg); color: var(--muted); font-size: var(--fs-xs); }
+  .pf-note { font-size: var(--fs-xs); color: var(--muted); line-height: 1.55; margin: 4px 0 0; }
   .pf-form { display: flex; flex-direction: column; gap: 6px; }
   .pf-row { display: flex; gap: 6px; flex-wrap: wrap; }
-  .pf-field { display: flex; flex-direction: column; gap: 2px; flex: 1 1 92px; min-width: 0; }
+  .pf-field { display: flex; flex-direction: column; gap: 2px; flex: 1 1 110px; min-width: 0; }
   .pf-field-wide { flex: 1 1 100%; }
   .pf-in {
-    width: 100%; box-sizing: border-box;
-    background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px;
-    color: var(--text); padding: 5px 7px; font-size: 12px; outline: none;
+    width: 100%; min-height: 32px;
+    background: var(--panel); border: 1px solid var(--line-strong); border-radius: 6px;
+    color: var(--text); padding: 4px 7px; font-size: var(--fs-sm); outline: none;
   }
-  .pf-in:focus { border-color: var(--blue); }
+  .pf-in:focus { border-color: var(--brand); box-shadow: var(--sh-focus); }
   .pf-in:disabled { opacity: .55; }
-  .pf-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-  .pf-actions .btn { padding: 4px 10px; font-size: 12px; border-radius: 6px; }
-  .pf-hint { font-size: 11px; color: var(--muted); word-break: break-all; }
+  .pf-actions { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+  .pf-actions .btn { min-height: 30px; padding: 0 10px; font-size: var(--fs-xs); border-radius: 6px; }
+  .pf-hint { font-size: var(--fs-xs); color: var(--muted); word-break: break-all; }
   .pf-hint.bad { color: var(--amber); }
   .pf-hint.good { color: var(--green); }
-  .pf-list { display: flex; flex-direction: column; gap: 8px; }
-  .pf-card {
-    border: 1px solid var(--line); border-radius: 8px;
-    padding: 8px 10px; background: var(--panel-2);
-  }
-  .pf-card.sel { border-color: var(--blue); }
+  .pf-list { display: flex; flex-direction: column; gap: 6px; }
+  .pf-card { border: 1px solid var(--line); border-radius: var(--r-sm); padding: var(--s-2) 10px; background: var(--panel-2); }
+  .pf-card.sel { border-color: var(--brand); box-shadow: var(--sh-focus); }
   .pf-card-head { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-bottom: 4px; }
-  .pf-card-name { font-weight: 600; word-break: break-all; }
-  .pf-chip {
-    font-size: 10.5px; border: 1px solid var(--line); border-radius: 999px;
-    padding: 1px 7px; color: var(--muted); white-space: nowrap;
-  }
-  .pf-chip.ok { color: var(--green); border-color: var(--green); }
-  .pf-chip.warn { color: var(--amber); border-color: var(--amber); }
-  .pf-chip.bad { color: var(--red); border-color: var(--red); }
-  .pf-bar { height: 8px; border-radius: 999px; background: var(--line); overflow: hidden; margin: 6px 0; }
-  .pf-bar-fill { height: 100%; width: 0; background: var(--green); border-radius: 999px; }
+  .pf-card-name { font-weight: var(--fw-semi); word-break: break-all; }
+  .pf-chip { font-size: var(--fs-xs); border: 1px solid var(--line-strong); border-radius: var(--r-pill); padding: 1px 7px; color: var(--muted); white-space: nowrap; background: var(--panel); }
+  .pf-chip.ok { color: var(--green); border-color: #b7e4c7; background: var(--green-soft); }
+  .pf-chip.warn { color: var(--amber); border-color: #f2d09a; background: var(--amber-soft); }
+  .pf-chip.bad { color: var(--red); border-color: #f6c2c0; background: var(--red-soft); }
+  .pf-bar { height: 8px; border-radius: var(--r-pill); background: var(--bg-2); overflow: hidden; margin: 6px 0; }
+  .pf-bar-fill { height: 100%; width: 0; background: var(--green); border-radius: var(--r-pill); }
   .pf-bar-fill.warn { background: var(--amber); }
   .pf-bar-fill.bad { background: var(--red); }
-  .pf-empty { font-size: 12px; color: var(--muted); padding: 4px 0; }
+  .pf-empty { font-size: var(--fs-sm); color: var(--muted); padding: 4px 0; }
   .pf-actions-row { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px; }
-  .pf-actions-row .btn { padding: 3px 9px; font-size: 11px; border-radius: 6px; }
-  .pf-evidence { margin-top: 6px; border-top: 1px dashed #223; padding-top: 5px; }
-  .pf-list-tight { margin: 3px 0 0; padding-left: 18px; font-size: 11.5px; line-height: 1.6; }
+  .pf-actions-row .btn { min-height: 26px; padding: 0 9px; font-size: var(--fs-xs); border-radius: 6px; }
+  .pf-evidence { margin-top: 6px; border-top: 1px dashed var(--line); padding-top: 5px; }
+  .pf-list-tight { margin: 3px 0 0; padding-left: 18px; font-size: var(--fs-xs); line-height: 1.6; }
   .pf-warnlist { color: var(--amber); }
   .pf-assume { color: var(--muted); }
   .pf-divider { border: none; border-top: 1px dashed var(--line); margin: 10px 0; }
-  .pf-mono { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 11.5px; }
-</style>
+  .pf-mono { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: var(--fs-xs); }
+
+  /* 异常卡片 */
+  .anomaly { border: 1px solid var(--line); border-left: 3px solid var(--amber); border-radius: var(--r-md); padding: var(--s-3); background: var(--panel); }
+  .anomaly-head { display: flex; align-items: center; gap: var(--s-2); flex-wrap: wrap; margin-bottom: 4px; }
+  .anomaly-title { font-weight: var(--fw-semi); font-size: var(--fs-sm); }
+  .anomaly-actions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: var(--s-2); }
+
+  .table { width: 100%; border-collapse: collapse; font-size: var(--fs-sm); }
+  .table th, .table td { text-align: left; padding: 6px var(--s-2); border-bottom: 1px solid var(--line); }
+  .table th { font-size: var(--fs-xs); color: var(--muted); font-weight: var(--fw-med); }
+  .table td.num { text-align: right; font-variant-numeric: tabular-nums; }
+
+  /* ---------------------------------------------------------- 响应式 */
+  @media (max-width: 1080px) {
+    .grid-4 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .stage { grid-template-columns: minmax(0, 1fr); }
+    .col-right { position: static; }
+    .chat-shell { max-height: none; min-height: 56vh; }
+  }
+  @media (max-width: 760px) {
+    .topbar { padding: 0 var(--s-3); flex-wrap: wrap; min-height: auto; gap: 6px; padding-top: 8px; padding-bottom: 8px; }
+    .brand-sub { display: none; }
+    .lamps { display: none; }
+    .nav { width: 100%; }
+    .view-inner { padding: var(--s-3); gap: var(--s-3); }
+    .stage { padding: var(--s-3); }
+    .grid-2, .grid-3, .grid-4 { grid-template-columns: minmax(0, 1fr); }
+    .stat-value { font-size: var(--fs-xl); }
+    .confirm-row { flex-direction: column; gap: 0; }
+    .confirm-key { flex: 0 0 auto; }
+    .composer { flex-wrap: wrap; }
+    #chat-input { flex: 1 1 100%; }
+    .composer .btn { flex: 1 1 auto; min-width: 84px; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    * { animation: none !important; transition: none !important; }
+  }
+  </style>
 </head>
 <body>
 <header class="topbar">
-  <h1>银行 AI 智能体 · 决策剧场</h1>
-  <span class="tagline">左栏对话，右栏实时展示意图、计划、权限灯、多因子与审计链</span>
+  <div class="brand">
+    <span class="brand-mark" aria-hidden="true">银</span>
+    <span class="brand-text">
+      <span class="brand-name">银行 AI 智能体</span>
+      <span class="brand-sub">受控执行 · 可解释裁决</span>
+    </span>
+  </div>
+
+  <nav class="nav" id="nav" role="tablist" aria-label="主导航">
+    <button class="nav-tab" type="button" role="tab" data-view="overview" aria-selected="true">财务总览</button>
+    <button class="nav-tab" type="button" role="tab" data-view="assistant" aria-selected="false">AI 助手</button>
+    <button class="nav-tab" type="button" role="tab" data-view="bill" aria-selected="false">账单分析</button>
+    <button class="nav-tab" type="button" role="tab" data-view="plans" aria-selected="false">计划与提醒</button>
+    <button class="nav-tab" type="button" role="tab" data-view="manage" aria-selected="false">业务管理</button>
+    <button class="nav-tab" type="button" role="tab" data-view="security" aria-selected="false">执行记录与安全</button>
+  </nav>
+
   <span class="spacer"></span>
-  <div class="lamps" aria-label="三色图例">
+  <div class="lamps" aria-label="三色权限图例">
     <span class="lamp"><span class="dot" style="background: var(--green)"></span>绿灯直接放行</span>
     <span class="lamp"><span class="dot" style="background: var(--amber)"></span>黄灯需确认</span>
     <span class="lamp"><span class="dot" style="background: var(--red)"></span>红灯需多因子</span>
   </div>
 </header>
 
-<main class="stage">
-  <section class="col-left">
-    <div id="chat-log" class="chat-log" role="log" aria-live="polite"></div>
+<main class="views">
+  <!-- ============ 1. 财务总览 ============ -->
+  <section class="view active" id="view-overview" role="tabpanel" aria-label="财务总览">
+    <div class="view-inner">
+      <div class="view-head">
+        <div class="view-title">财务总览</div>
+        <div class="view-sub">全部数字来自后端只读接口；取不到的数据显示「暂不可用」，不补样例数据。</div>
+      </div>
 
-    <div class="caps">
-      <div class="caps-title">我能做什么</div>
-      <div id="cap-list" class="cap-chips"><span class="cap-chip">工具清单加载中…</span></div>
+      <div class="grid grid-3" id="ov-balance"></div>
+
+      <div class="grid grid-2">
+        <div class="card">
+          <div class="card-head"><h3>近期收支</h3><span class="spacer"></span><span class="tag" id="ov-month-tag">—</span></div>
+          <div id="ov-flow"></div>
+        </div>
+        <div class="card">
+          <div class="card-head"><h3>主要支出类别</h3></div>
+          <div id="ov-cats"></div>
+          <div class="card-note">占比是占本月「全部支出」的比例，含转账、理财这类账户内部搬运，和上面的支出总数同一口径。</div>
+        </div>
+      </div>
+
+      <div class="grid grid-2">
+        <div class="card">
+          <div class="card-head"><h3>需要核实的异常</h3><span class="spacer"></span><span class="tag warn">待核实 ≠ 欺诈认定</span></div>
+          <div id="ov-anomalies"></div>
+        </div>
+        <div class="card">
+          <div class="card-head"><h3>待处理的授权</h3><span class="spacer"></span><span class="tag info">只有你确认才会执行</span></div>
+          <div id="ov-pending"></div>
+        </div>
+      </div>
+
+      <div class="grid grid-2">
+        <div class="card">
+          <div class="card-head"><h3>储蓄目标</h3><span class="spacer"></span>
+            <button class="btn btn-mini" type="button" data-goto="plans">去计划中心</button>
+          </div>
+          <div id="ov-goals"></div>
+        </div>
+        <div class="card">
+          <div class="card-head"><h3>近期计划与提醒</h3></div>
+          <div id="ov-plans"></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-head"><h3>让 AI 助手来做</h3><span class="spacer"></span><span class="tag">点一下填入输入框</span></div>
+        <div id="ov-actions" class="cap-chips"></div>
+        <div class="card-note" id="ov-note">快捷入口只负责把话填好，真正的执行仍然要走权限判定与确认。</div>
+      </div>
     </div>
-
-    <form id="chat-form" class="composer" autocomplete="off">
-      <input id="chat-input" type="text" maxlength="500" placeholder="例如：帮我给张三转 800 元" />
-      <button id="chat-send" class="btn btn-green" type="submit">发送</button>
-      <button id="chat-cancel" class="btn btn-red" type="button" disabled>中断</button>
-    </form>
   </section>
 
-  <section class="col-right">
-    <section class="panel lv-unknown" id="panel-intent">
-      <div class="panel-head"><h2>意图</h2><span class="spacer"></span><span class="panel-badge" data-role="badge">等待</span></div>
-      <div class="panel-body" data-role="body"></div>
-    </section>
-
-    <section class="panel lv-unknown" id="panel-plan">
-      <div class="panel-head"><h2>计划</h2><span class="spacer"></span><span class="panel-badge" data-role="badge">0 个节点</span></div>
-      <div class="panel-body" data-role="body"></div>
-    </section>
-
-    <section class="panel lv-unknown" id="panel-policy">
-      <div class="panel-head"><h2>权限灯</h2><span class="spacer"></span><span class="panel-badge" data-role="badge">等待</span></div>
-      <div class="panel-body" data-role="body"></div>
-    </section>
-
-    <section class="panel lv-unknown" id="panel-factor">
-      <div class="panel-head"><h2>多因子验证</h2><span class="spacer"></span><span class="panel-badge" data-role="badge">未触发</span></div>
-      <div class="panel-body" data-role="body"></div>
-    </section>
-
-    <section class="panel lv-unknown" id="panel-audit">
-      <div class="panel-head"><h2>审计链</h2><span class="spacer"></span>
-        <div class="side-actions">
-          <button id="btn-audit-pull" class="btn btn-mini" type="button">拉取审计链</button>
-          <button id="btn-audit-verify" class="btn btn-mini" type="button">校验</button>
-        </div>
-        <span class="panel-badge" data-role="badge">0 条</span>
-      </div>
-      <div class="panel-body" data-role="body"></div>
-    </section>
-
-    <section class="panel lv-unknown" id="panel-proactive">
-      <div class="panel-head"><h2>主动财务（模拟数据）</h2><span class="spacer"></span>
-        <div class="side-actions">
-          <button id="btn-pf-refresh" class="btn btn-mini" type="button">刷新</button>
-          <button id="btn-pf-monitor" class="btn btn-mini btn-green" type="button">立即运行监测（手动触发）</button>
-        </div>
-        <span class="panel-badge" data-role="badge">未加载</span>
-      </div>
-      <div class="panel-body" data-role="body">
-        <div class="pf-note">所有数字都来自后端接口：金额在后端用整数分计算，模型只做解释，这里只做展示换算。监测只在你点按钮时手动跑一次，不会在后台自动运行。</div>
-
-        <div class="pf-block">
-          <div class="pf-title">储蓄目标 <span class="pf-sub">元为单位输入，提交时用整数运算换算成分</span></div>
-          <form id="pf-goal-form" class="pf-form" autocomplete="off">
-            <label class="pf-field"><span class="field-label">目标名</span>
-              <input id="pf-name" class="pf-in" type="text" maxlength="40" placeholder="例如：日本旅行基金" />
-            </label>
-            <div class="pf-row">
-              <label class="pf-field"><span class="field-label">目标金额（元）</span>
-                <input id="pf-target-yuan" class="pf-in" type="text" inputmode="decimal" placeholder="30000.00" />
-              </label>
-              <label class="pf-field"><span class="field-label">已存（元）</span>
-                <input id="pf-saved-yuan" class="pf-in" type="text" inputmode="decimal" placeholder="5000.00" />
-              </label>
-              <label class="pf-field"><span class="field-label">目标日期</span>
-                <input id="pf-target-date" class="pf-in" type="date" />
-              </label>
-            </div>
-            <div class="pf-row">
-              <label class="pf-field"><span class="field-label">每期预算（元，可空）</span>
-                <input id="pf-budget-yuan" class="pf-in" type="text" inputmode="decimal" placeholder="4000.00" />
-              </label>
-              <label class="pf-field"><span class="field-label">进度容差（%，可空）</span>
-                <input id="pf-tolerance" class="pf-in" type="number" min="1" max="100" step="1" placeholder="10" />
-              </label>
-              <label class="pf-field"><span class="field-label">周期</span>
-                <select id="pf-period" class="pf-in">
-                  <option value="monthly">每月</option>
-                  <option value="weekly">每周</option>
-                </select>
-              </label>
-            </div>
-            <div class="pf-actions">
-              <button id="pf-goal-submit" class="btn btn-green" type="submit">创建目标</button>
-              <button id="pf-goal-cancel" class="btn btn-mini" type="button" hidden>取消编辑</button>
-              <span id="pf-goal-hint" class="pf-hint"></span>
-            </div>
+  <!-- ============ 2. AI 助手 ============ -->
+  <section class="view" id="view-assistant" role="tabpanel" aria-label="AI 助手">
+    <div class="stage">
+      <section class="col-left">
+        <div class="chat-shell">
+          <div id="chat-log" class="chat-log" role="log" aria-live="polite"></div>
+          <details class="caps" id="caps-box">
+            <summary class="caps-title">常见操作与工具清单（技术细节，点开看）</summary>
+            <div class="caps-hint">下面是当前会话可用的全部工具。普通转账、查账单、定储蓄目标不需要看这块。</div>
+            <div id="cap-list" class="cap-chips"><span class="cap-chip">工具清单加载中…</span></div>
+          </details>
+          <form id="chat-form" class="composer" autocomplete="off">
+            <input id="chat-input" type="text" maxlength="500" placeholder="例如：帮我给张三转 800 元" />
+            <button id="chat-send" class="btn btn-green" type="submit">发送</button>
+            <button id="chat-cancel" class="btn btn-red" type="button" disabled>中断</button>
           </form>
         </div>
+      </section>
 
-        <div class="pf-block">
-          <div class="pf-title">目标列表 <span id="pf-goal-count" class="pf-sub">未加载</span></div>
-          <div id="pf-goal-list" class="pf-list"></div>
+      <section class="col-right">
+        <details class="panel lv-unknown" id="panel-intent">
+          <summary class="panel-head"><h2>意图解析</h2><span class="spacer"></span><span class="panel-badge" data-role="badge">等待</span></summary>
+          <div class="panel-body" data-role="body"></div>
+        </details>
+
+        <details class="panel lv-unknown" id="panel-plan">
+          <summary class="panel-head"><h2>任务计划</h2><span class="spacer"></span><span class="panel-badge" data-role="badge">0 个节点</span></summary>
+          <div class="panel-body" data-role="body"></div>
+        </details>
+
+        <details class="panel lv-unknown" id="panel-policy">
+          <summary class="panel-head"><h2>权限裁决</h2><span class="spacer"></span><span class="panel-badge" data-role="badge">等待</span></summary>
+          <div class="panel-body" data-role="body"></div>
+        </details>
+
+        <details class="panel lv-unknown" id="panel-factor">
+          <summary class="panel-head"><h2>多因子验证</h2><span class="spacer"></span><span class="panel-badge" data-role="badge">未触发</span></summary>
+          <div class="panel-body" data-role="body"></div>
+        </details>
+
+        <div class="card tight">
+          <div class="card-note">右侧四块是技术透明度，默认折叠。审计链在「执行记录与安全」。确认卡片只会出现在对话里；点了确认也要等后端返回最终结果，才可能显示成功。</div>
         </div>
+      </section>
+    </div>
+  </section>
 
-        <div class="pf-block">
-          <div class="pf-title">计划与计算依据 <span class="pf-sub">公式口径逐项列出</span></div>
-          <div id="pf-plan" class="pf-list"></div>
+  <!-- ============ 3. 账单分析 ============ -->
+  <section class="view" id="view-bill" role="tabpanel" aria-label="账单分析">
+    <div class="view-inner">
+      <div class="view-head">
+        <div class="view-title">账单分析</div>
+        <div class="view-sub">规则命中只是线索。每条异常都会列出规则、时间窗口、涉及流水、误报可能，以及你可以采取的动作。</div>
+      </div>
+
+      <div class="card">
+        <div class="card-head"><h3>统计区间</h3><span class="spacer"></span>
+          <div class="side-actions">
+            <button class="btn btn-mini" type="button" data-bill-period="month">本月</button>
+            <button class="btn btn-mini" type="button" data-bill-period="year">本年</button>
+            <button class="btn btn-mini" type="button" id="bill-refresh">刷新</button>
+          </div>
         </div>
+        <div class="grid grid-3" id="bill-summary"></div>
+      </div>
 
-        <div class="pf-block">
-          <div class="pf-title">提醒 <span id="pf-alert-count" class="pf-sub">未加载</span></div>
-          <div id="pf-alert-list" class="pf-list"></div>
+      <div class="grid grid-2">
+        <div class="card"><div class="card-head"><h3>分类支出</h3></div><div id="bill-cats"></div></div>
+        <div class="card"><div class="card-head"><h3>月度趋势</h3><span class="spacer"></span><span class="tag">支出合计</span></div><div id="bill-trend"></div></div>
+      </div>
+
+      <div class="card"><div class="card-head"><h3>异常与依据</h3><span class="spacer"></span><span class="tag warn">发现异常 / 建议核实</span></div><div id="bill-anomalies"></div></div>
+
+      <div class="card"><div class="card-head"><h3>相关流水</h3></div><div id="bill-tx"></div><div class="card-note" id="bill-note"></div></div>
+    </div>
+  </section>
+
+  <!-- ============ 4. 计划与提醒 ============ -->
+  <section class="view" id="view-plans" role="tabpanel" aria-label="计划与提醒">
+    <div class="view-inner">
+      <div class="view-head">
+        <div class="view-title">计划与提醒</div>
+        <div class="view-sub">「计划已保存」「任务已安排」「任务正在执行」「任务已完成」是四个不同状态，只有后端真的持久化并且有调度器在跑，才会显示成已安排。</div>
+      </div>
+
+      <div id="plan-banner"></div>
+
+      <div class="grid grid-2">
+        <div class="card">
+          <div class="card-head"><h3>储蓄目标</h3><span class="spacer"></span><span class="tag" id="plan-goal-tag">—</span></div>
+          <div id="plan-goals"></div>
         </div>
-
-        <div class="pf-block">
-          <div class="pf-title">最近一次监测 <span class="pf-sub">仅手动触发</span></div>
-          <div id="pf-run" class="pf-list"></div>
-        </div>
-
-        <div class="pf-block">
-          <div class="pf-title">注入模拟支出 <span class="pf-sub">竞赛演示数据，不对应任何真实支付</span></div>
-          <form id="pf-sim-form" class="pf-form" autocomplete="off">
-            <div class="pf-row">
-              <label class="pf-field"><span class="field-label">金额（元）</span>
-                <input id="pf-sim-amount" class="pf-in" type="text" inputmode="decimal" placeholder="88.00" />
-              </label>
-              <label class="pf-field"><span class="field-label">商户</span>
-                <input id="pf-sim-merchant" class="pf-in" type="text" maxlength="40" placeholder="楼下咖啡" />
-              </label>
-              <label class="pf-field"><span class="field-label">分类</span>
-                <select id="pf-sim-category" class="pf-in">
-                  <option value="餐饮">餐饮</option>
-                  <option value="交通">交通</option>
-                  <option value="购物">购物</option>
-                  <option value="生活缴费">生活缴费</option>
-                  <option value="娱乐">娱乐</option>
-                  <option value="医疗">医疗</option>
-                  <option value="订阅">订阅</option>
-                </select>
-              </label>
-            </div>
-            <label class="pf-field"><span class="field-label">备注（可空）</span>
-              <input id="pf-sim-note" class="pf-in" type="text" maxlength="60" placeholder="演示：再加一笔餐饮" />
-            </label>
-            <div class="pf-actions">
-              <button id="pf-sim-submit" class="btn btn-amber" type="submit">注入模拟支出</button>
-              <span id="pf-sim-hint" class="pf-hint"></span>
-            </div>
-            <div id="pf-sim-result" class="pf-hint"></div>
-          </form>
+        <div class="card">
+          <div class="card-head"><h3>预约与已保存的计划</h3></div>
+          <div id="plan-tasks"></div>
         </div>
       </div>
-    </section>
+
+      <div class="card"><div class="card-head"><h3>提醒</h3><span class="spacer"></span><span class="tag" id="plan-alert-tag">—</span></div><div id="plan-alerts"></div></div>
+
+      <details class="panel lv-unknown" id="panel-proactive">
+        <summary class="panel-head"><h2>主动财务演练（模拟数据）</h2><span class="spacer"></span>
+          <span class="side-actions">
+            <button id="btn-pf-refresh" class="btn btn-mini" type="button">刷新</button>
+            <button id="btn-pf-monitor" class="btn btn-mini btn-green" type="button">立即运行监测（手动触发）</button>
+          </span>
+          <span class="panel-badge" data-role="badge">未加载</span>
+        </summary>
+        <div class="panel-body" data-role="body">
+          <div class="pf-note">所有数字都来自后端接口：金额在后端用整数分计算，模型只做解释，这里只做展示换算。监测只在你点按钮时手动跑一次，不会在后台自动运行。</div>
+
+          <div class="pf-block">
+            <div class="pf-title">储蓄目标 <span class="pf-sub">元为单位输入，提交时用整数运算换算成分</span></div>
+            <form id="pf-goal-form" class="pf-form" autocomplete="off">
+              <label class="pf-field"><span class="field-label">目标名</span>
+                <input id="pf-name" class="pf-in" type="text" maxlength="40" placeholder="例如：日本旅行基金" />
+              </label>
+              <div class="pf-row">
+                <label class="pf-field"><span class="field-label">目标金额（元）</span>
+                  <input id="pf-target-yuan" class="pf-in" type="text" inputmode="decimal" placeholder="30000.00" />
+                </label>
+                <label class="pf-field"><span class="field-label">已存（元）</span>
+                  <input id="pf-saved-yuan" class="pf-in" type="text" inputmode="decimal" placeholder="5000.00" />
+                </label>
+                <label class="pf-field"><span class="field-label">目标日期</span>
+                  <input id="pf-target-date" class="pf-in" type="date" />
+                </label>
+              </div>
+              <div class="pf-row">
+                <label class="pf-field"><span class="field-label">每期预算（元，可空）</span>
+                  <input id="pf-budget-yuan" class="pf-in" type="text" inputmode="decimal" placeholder="4000.00" />
+                </label>
+                <label class="pf-field"><span class="field-label">进度容差（%，可空）</span>
+                  <input id="pf-tolerance" class="pf-in" type="number" min="1" max="100" step="1" placeholder="10" />
+                </label>
+                <label class="pf-field"><span class="field-label">周期</span>
+                  <select id="pf-period" class="pf-in">
+                    <option value="monthly">每月</option>
+                    <option value="weekly">每周</option>
+                  </select>
+                </label>
+              </div>
+              <div class="pf-actions">
+                <button id="pf-goal-submit" class="btn btn-green" type="submit">创建目标</button>
+                <button id="pf-goal-cancel" class="btn btn-mini" type="button" hidden>取消编辑</button>
+                <span id="pf-goal-hint" class="pf-hint"></span>
+              </div>
+            </form>
+          </div>
+
+          <div class="pf-block">
+            <div class="pf-title">目标列表 <span id="pf-goal-count" class="pf-sub">未加载</span></div>
+            <div id="pf-goal-list" class="pf-list"></div>
+          </div>
+
+          <div class="pf-block">
+            <div class="pf-title">计划与计算依据 <span class="pf-sub">公式口径逐项列出</span></div>
+            <div id="pf-plan" class="pf-list"></div>
+          </div>
+
+          <div class="pf-block">
+            <div class="pf-title">提醒 <span id="pf-alert-count" class="pf-sub">未加载</span></div>
+            <div id="pf-alert-list" class="pf-list"></div>
+          </div>
+
+          <div class="pf-block">
+            <div class="pf-title">最近一次监测 <span class="pf-sub">仅手动触发</span></div>
+            <div id="pf-run" class="pf-list"></div>
+          </div>
+
+          <div class="pf-block">
+            <div class="pf-title">注入模拟支出 <span class="pf-sub">竞赛演示数据，不对应任何真实支付</span></div>
+            <form id="pf-sim-form" class="pf-form" autocomplete="off">
+              <div class="pf-row">
+                <label class="pf-field"><span class="field-label">金额（元）</span>
+                  <input id="pf-sim-amount" class="pf-in" type="text" inputmode="decimal" placeholder="88.00" />
+                </label>
+                <label class="pf-field"><span class="field-label">商户</span>
+                  <input id="pf-sim-merchant" class="pf-in" type="text" maxlength="40" placeholder="楼下咖啡" />
+                </label>
+                <label class="pf-field"><span class="field-label">分类</span>
+                  <select id="pf-sim-category" class="pf-in">
+                    <option value="餐饮">餐饮</option>
+                    <option value="交通">交通</option>
+                    <option value="购物">购物</option>
+                    <option value="生活缴费">生活缴费</option>
+                    <option value="娱乐">娱乐</option>
+                    <option value="医疗">医疗</option>
+                    <option value="订阅">订阅</option>
+                  </select>
+                </label>
+              </div>
+              <label class="pf-field"><span class="field-label">备注（可空）</span>
+                <input id="pf-sim-note" class="pf-in" type="text" maxlength="60" placeholder="演示：再加一笔餐饮" />
+              </label>
+              <div class="pf-actions">
+                <button id="pf-sim-submit" class="btn btn-amber" type="submit">注入模拟支出</button>
+                <span id="pf-sim-hint" class="pf-hint"></span>
+              </div>
+              <div id="pf-sim-result" class="pf-hint"></div>
+            </form>
+          </div>
+        </div>
+      </details>
+    </div>
+  </section>
+
+  <!-- ============ 5. 业务管理 ============ -->
+  <section class="view" id="view-manage" role="tabpanel" aria-label="业务管理">
+    <div class="view-inner">
+      <div class="view-head">
+        <div class="view-title">业务管理</div>
+        <div class="view-sub">这里只做浏览和入口，真正的写操作仍然走 AI 助手的权限判定与确认流程，不绕过安全策略。</div>
+      </div>
+
+      <div class="grid grid-2">
+        <div class="card"><div class="card-head"><h3>银行卡</h3><span class="spacer"></span><span class="tag" id="mg-card-tag">—</span></div><div id="mg-cards"></div></div>
+        <div class="card"><div class="card-head"><h3>订阅与代扣</h3><span class="spacer"></span><span class="tag warn">仅银行侧代扣</span></div><div id="mg-subs"></div></div>
+      </div>
+
+      <div class="card"><div class="card-head"><h3>理财产品</h3><span class="spacer"></span><span class="tag bad" id="mg-fit">适当性：未评估</span></div><div id="mg-products"></div><div class="card-note" id="mg-fit-note"></div></div>
+
+      <div class="card"><div class="card-head"><h3>能力与边界</h3></div><div id="mg-caps"></div><div class="card-note" id="mg-note"></div></div>
+    </div>
+  </section>
+
+  <!-- ============ 6. 执行记录与安全中心 ============ -->
+  <section class="view" id="view-security" role="tabpanel" aria-label="执行记录与安全中心">
+    <div class="view-inner">
+      <div class="view-head">
+        <div class="view-title">执行记录与安全中心</div>
+        <div class="view-sub">默认只给业务状态与风险说明；意图、DAG、工具调用、策略裁决、能力令牌、审计链放在可展开的技术详情里。</div>
+      </div>
+
+      <div class="grid grid-3" id="sec-summary"></div>
+
+      <div class="card"><div class="card-head"><h3>最近的执行</h3><span class="spacer"></span><span class="tag" id="sec-session-tag">—</span></div><div id="sec-sessions"></div><div class="card-note">任务状态：草稿 / 等待补充信息 / 等待确认 / 等待验证 / 执行中 / 已成功 / 已失败 / 已取消 / 需要人工处理。</div></div>
+
+      <div class="card"><div class="card-head"><h3>被拒绝的操作</h3><span class="spacer"></span><span class="tag bad" id="sec-denial-tag">—</span></div><div id="sec-denials"></div></div>
+
+      <details class="panel lv-unknown" id="panel-audit">
+        <summary class="panel-head"><h2>审计链（哈希链，可校验）</h2><span class="spacer"></span>
+          <span class="side-actions">
+            <button id="btn-audit-pull" class="btn btn-mini" type="button">拉取审计链</button>
+            <button id="btn-audit-verify" class="btn btn-mini" type="button">校验</button>
+          </span>
+          <span class="panel-badge" data-role="badge">0 条</span>
+        </summary>
+        <div class="panel-body" data-role="body"></div>
+      </details>
+
+      <div class="card">
+        <div class="card-head"><h3>安全边界说明</h3></div>
+        <div id="sec-note"></div>
+      </div>
+    </div>
   </section>
 </main>
 
@@ -684,6 +1094,7 @@
   function flash(panelId) {
     const panel = panelOf(panelId);
     if (!panel) { return; }
+    if (panel.tagName === 'DETAILS') { panel.open = true; }
     panel.classList.remove('flash');
     void panel.offsetWidth;
     panel.classList.add('flash');
@@ -972,6 +1383,7 @@
   }
 
   function renderConfirm(data) {
+    data = data && typeof data === 'object' ? data : {};
     const cid = fieldVal(data, ['confirmation_id', 'id']);
     const actionText = fieldVal(data, ['action_text', 'action', 'summary']);
     const expiresRaw = fieldVal(data, ['expires_in_s', 'expires_in']);
@@ -983,18 +1395,22 @@
     const payeeText = payeeInfo.value ? payeeInfo.value : '见操作说明全文';
 
     const card = el('div', 'confirm-card');
-    const rows = [
-      ['金额（后端原文）', amountText, 'confirm-amount'],
-      ['收款人（后端原文）', payeeText, 'confirm-payee'],
-      ['操作说明（全文）', actionText, 'confirm-action'],
-      ['有效期', expiresRaw ? expiresRaw + ' 秒' : '以后端为准', 'confirm-expire']
-    ];
+    card.appendChild(el('div', 'confirm-head',
+      data.tool_name ? ('确认这笔操作：' + textOf(data.tool_name)) : '确认这笔操作'));
+
+    /* 收款人、转出账户、方式、预约时间、手续费、权限等级、验证步骤全部来自后端 describe_confirmation；
+       后端没给的项不写，避免把推测值摆成事实。 */
+    const rows = [['金额（后端原文）', amountText, 'confirm-amount']];
+    bxConfirmRows(data).forEach(function (row) { rows.push(row); });
+    rows.push(['操作说明（全文）', actionText, 'confirm-action']);
+    rows.push(['有效期', expiresRaw ? expiresRaw + ' 秒' : '以后端为准', 'confirm-expire']);
     rows.forEach(function (row) {
       const line = el('div', 'confirm-row');
       line.appendChild(el('span', 'confirm-key', row[0]));
       line.appendChild(el('span', 'confirm-val ' + row[2], row[1]));
       card.appendChild(line);
     });
+    card.appendChild(el('div', 'card-note', '点确认只是提交这次授权，不等于交易成功；最终状态以服务端执行结果为准。'));
 
     const actions = el('div', 'confirm-actions');
     const okBtn = el('button', 'btn btn-green', '确认：' + amountText + ' → ' + payeeText);
@@ -1029,6 +1445,7 @@
     }
 
     panelBadge('panel-factor', '等待确认');
+    setPanelLevel('panel-factor', 'yellow');
     flash('panel-factor');
   }
 
@@ -1041,15 +1458,22 @@
     host.appendChild(el('div', 'field-label', '这一步需要多因子验证'));
     const list = el('ul', 'factor-list');
     required.forEach(function (item) {
-      list.appendChild(el('li', 'factor-item', textOf(item)));
+      const key = textOf(item);
+      list.appendChild(el('li', 'factor-item', BX_FACTOR_TEXT[key] ? (BX_FACTOR_TEXT[key] + '（' + key + '）') : key));
     });
+    if (!required.length) {
+      list.appendChild(el('li', 'factor-item', '后端没有说明具体需要哪几步'));
+    }
     host.appendChild(list);
 
     const input = document.createElement('input');
     input.type = 'text';
     input.className = 'factor-input';
-    input.placeholder = '输入人脸 / 短信 / U盾 的验证结果';
+    input.placeholder = '填写验证结果（演示环境只做字段校验）';
     host.appendChild(input);
+    host.appendChild(el('div', 'card-note',
+      '能力边界：演示环境不会真的发短信、也不会真的采集人脸，这里填的内容只是「你声明验过了」，' +
+      '后端只检查字段是否齐全。真实银行必须把这一步换成行方验证服务。'));
 
     const actions = el('div', 'factor-actions');
     const okBtn = el('button', 'btn btn-red', '提交验证结果');
@@ -1085,16 +1509,50 @@
     renderPlan(data);
   }
 
+  /* 权限裁决面板当前是什么灯，就从类名读回来；读不到就说“未知”，不猜绿灯。 */
+  function policyLevelLabel() {
+    const panel = $('panel-policy');
+    if (!panel) { return '未知'; }
+    if (panel.classList.contains('lv-red')) { return '红灯'; }
+    /* LEVEL_CLASS 把 yellow 映射成 lv-amber（web/index.html:960），别只盯 lv-yellow */
+    if (panel.classList.contains('lv-amber') || panel.classList.contains('lv-yellow')) { return '黄灯'; }
+    if (panel.classList.contains('lv-green')) { return '绿灯'; }
+    return '未知';
+  }
+
   function renderDone(data) {
+    data = data && typeof data === 'object' ? data : {};
     const summary = fieldVal(data, ['summary']);
     const balance = fieldVal(data, ['balance_after_fen']);
-    const lines = [summary || '本次请求处理完毕。'];
-    if (balance) { lines.push('交易后余额（后端原文）：' + balance); }
-    appendBubble('agent', lines.join('\n'), 'done');
-    ['panel-intent', 'panel-plan', 'panel-policy'].forEach(function (id) {
-      panelBadge(id, '已完成');
+    const clar = data.clarification && typeof data.clarification === 'object' ? data.clarification : null;
+    /* tool 事件已经把这个节点的摘要单独推过一条气泡了；done 里再推一次就成了复读。
+       只在这一条确实不同的时候才追加。 */
+    const log = $('chat-log');
+    let repeated = false;
+    if (log) {
+      const bodies = log.querySelectorAll('.bubble-agent .bubble-body');
+      if (bodies.length) {
+        repeated = bodies[bodies.length - 1].textContent.trim() === textOf(summary).trim();
+      }
+    }
+    const lines = [];
+    if (summary && !repeated) { lines.push(summary); }
+    /* 原来这里把后端的分直接当元打印（1286050），还写成「交易后余额」——
+       歧义收口时根本没交易，说「交易后余额」是错的。统一按元展示并说清口径。 */
+    if (balance !== null && balance !== undefined && balance !== '') {
+      lines.push('账户当前余额（后端返回值）：' + pfYuanFromFen(balance) + ' 元');
+    }
+    if (!lines.length) { lines.push(summary || '本次请求处理完毕。'); }
+    /* 带 clarification 说明这一轮停在「等你补充信息」，不能标成已完成 */
+    appendBubble('agent', lines.join('\n'), clar ? 'need-info' : 'done');
+    ['panel-intent', 'panel-plan'].forEach(function (id) {
+      panelBadge(id, clar ? '等待补充信息' : '已完成');
     });
-    setPanelLevel('panel-policy', 'green');
+    /* 权限裁决那一块的徽标不能只剩「已完成」：黄灯/红灯本身就是结论，
+       抹成绿色会让“这笔其实需要你确认”这个事实消失。 */
+    panelBadge('panel-policy', clar ? '等待补充信息' : policyLevelLabel() + ' · 已完成');
+    if (clar) { setPanelLevel('panel-policy', 'yellow'); }
+    if (clar && clar.kind === 'payee') { bxRenderPayeePicker(clar); }
   }
 
   function renderError(data) {
@@ -1108,7 +1566,7 @@
 
   function onStart(data) {
     const sid = fieldVal(data, ['session_id', 'id']);
-    if (sid) { sessionId = sid; }
+    if (sid) { sessionId = sid; bxRememberSession(sid); }
     panelBadge('panel-audit', auditCount + ' 条');
     appendBubble('sys', '已建立会话：' + (sid || '未回传 session_id'), 'start');
     setBusy(streaming);
@@ -1183,6 +1641,7 @@
       approve: approve === true,
       factor: factor ? String(factor) : null
     };
+    let result = null;
     try {
       const response = await fetch(API_CONFIRM, {
         method: 'POST',
@@ -1193,10 +1652,45 @@
         await reportHttpError(response);
         return;
       }
-      appendBubble('sys', approve ? '已提交确认，后续步骤继续执行。' : '已拒绝，当前节点标记为跳过。');
+      result = await response.json();
     } catch (err) {
       appendBubble('sys', '提交确认失败：' + errorText(err) + '。请重试。');
+      return;
     }
+
+    /* 服务端只回传这一次确认的处理结果，执行进度要另外查：不然用户只会看到「已提交」而看不到结果 */
+    const status = textOf(result && result.status);
+    if (result && result.idempotent) {
+      appendBubble('sys', '这条确认后端已经处理过了（当前状态：' + (BX_TASK_LABEL[status] || status) + '）。重复提交不会产生第二次执行。');
+    } else if (status === 'waiting_factor') {
+      const need = asList(result && result.required).map(function (key) {
+        return BX_FACTOR_TEXT[textOf(key)] || textOf(key);
+      }).join('、');
+      appendBubble('sys', '这一步还需要验证：' + (need || '后端没有说明具体步骤') + '。右边「多因子验证」里填。');
+      renderFactor({ confirmation_id: confirmationId, required: result ? result.required : [] });
+      return;
+    } else if (status === 'rejected') {
+      appendBubble('sys', '已经拒绝，这一轮不会继续执行，后面没有执行的节点会标成跳过。');
+    } else if (status === 'approved') {
+      appendBubble('sys', approve ? '后端已批准这次授权，正在执行。执行结果以服务端会话状态为准。' : '已提交。');
+    } else if (status) {
+      appendBubble('sys', '后端返回状态：' + (BX_TASK_LABEL[status] || status) + '。');
+    }
+
+    panelBadge('panel-factor', '已提交');
+    if (!approve) {
+      bxCacheDrop();
+      if (bxView !== 'assistant') { bxLoad(bxView, true); }
+      return;
+    }
+    if (streaming) {
+      /* 这一轮的 SSE 还开着：确认一落地，执行事件会继续从那条流里推过来。
+         这里如果再轮询一次，同一个节点结果会在聊天区出现两遍。 */
+      appendBubble('sys', '授权已通过，执行进度会继续从这条流里推过来。');
+      return;
+    }
+    appendBubble('sys', '这条流已经断了（可能刷新过页面），改为直接查服务端会话拿结果。');
+    await bxPollSession(sessionId, 8);
   }
 
   async function cancelSession() {
@@ -1293,9 +1787,10 @@
         const box = row && typeof row === 'object' ? row : { name: textOf(row) };
         const name = fieldVal(box, ['name', 'tool', 'title']);
         const desc = fieldVal(box, ['description', 'desc', 'summary']);
+        // 折叠区里只放工具名：展开时也不该把 33 段说明书铺满整屏，说明放 title。
         const chip = el('span', 'cap-chip');
-        chip.title = desc;
-        chip.textContent = desc ? (name + '：' + desc) : name;
+        chip.title = desc || name;
+        chip.textContent = name;
         host.appendChild(chip);
       });
     } catch (err) {
@@ -2098,10 +2593,1521 @@
     loadProactive();
   }
 
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', boot);
-  } else {
+  /* ============================================================ 六区业务视图
+     只读数据全部来自 /api/business/*；前端不做任何金额推算，
+     后端没给的字段一律渲染成「暂不可用」，绝不填样例值。 */
+  const BX_NA = '暂不可用';
+  const BX_API = {
+    overview: '/api/business/overview',
+    bill: '/api/business/bill',
+    plans: '/api/business/plans',
+    manage: '/api/business/management',
+    security: '/api/business/executions'
+  };
+  const BX_TASK_LABEL = {
+    draft: '草稿',
+    need_info: '等待补充信息',
+    waiting_confirm: '等待确认',
+    waiting_factor: '等待验证',
+    running: '执行中',
+    done: '已成功',
+    failed: '已失败',
+    cancelled: '已取消',
+    manual: '需要人工处理'
+  };
+  const BX_FACTOR_TEXT = {
+    sms: '短信验证码',
+    face: '人脸识别',
+    otp: '动态口令',
+    password: '交易密码'
+  };
+
+  /* 后端返回的是稳定枚举（active / feasible / monthly），界面必须翻成人话，
+     否则用户会看到 "可行性 feasible" 这种既不像中文也不像英文的字段值。 */
+  const BX_GOAL_STATUS = { active: '进行中', achieved: '已达成', cancelled: '已停止' };
+  const BX_FEASIBILITY = {
+    feasible: '按当前收支可行',
+    infeasible: '按当前收支有缺口',
+    achieved: '已经达成',
+    expired: '目标日已过',
+    unknown: '数据不足，无法判断'
+  };
+  const BX_PERIOD_UNIT = { month: '每月', weekly: '每周', week: '每周' };
+  const BX_SCHED_KIND = {
+    in_process_ticker: '应用内定时器（随服务进程启动/停止）',
+    external_cron: '外部定时任务',
+    none: '没有调度器'
+  };
+  const BX_RECURRENCE = { once: '一次性', monthly: '每月重复' };
+  const BX_ALERT_STATUS = { open: '待处理', ignored: '已忽略', resolved: '已处理' };
+  const BX_CAP_LABEL = {
+    transfer: '转账',
+    scheduled_transfer: '预约转账',
+    card: '卡片管理',
+    subscription: '订阅与代扣',
+    investment: '理财',
+    reversal: '冲正'
+  };
+  const BX_TOOL_PROMPT = {
+    freeze_card: '帮我把这张卡临时冻结一下',
+    unfreeze_card: '帮我解冻这张卡',
+    set_card_limit: '我想调整这张卡的限额',
+    report_card_loss: '我的卡丢了，帮我挂失',
+    apply_virtual_card: '我想申请一张虚拟卡',
+    cancel_subscription: '帮我把这个订阅的银行侧代扣停掉',
+    reverse_transfer: '帮我看看那笔转账能不能冲正',
+    buy_fund: '我想买一点理财产品',
+    redeem_fund: '我想赎回理财',
+    transfer: '帮我转 500 元给张三',
+    scheduled_transfer: '帮我预约下个月 1 号转 500 元给张三'
+  };
+  const BX_HOSTS = {
+    overview: ['ov-balance', 'ov-flow', 'ov-cats', 'ov-anomalies', 'ov-pending', 'ov-goals', 'ov-plans', 'ov-actions'],
+    bill: ['bill-summary', 'bill-cats', 'bill-trend', 'bill-anomalies', 'bill-tx'],
+    plans: ['plan-banner', 'plan-goals', 'plan-tasks', 'plan-alerts'],
+    manage: ['mg-cards', 'mg-subs', 'mg-products', 'mg-caps'],
+    security: ['sec-summary', 'sec-sessions', 'sec-denials', 'sec-note']
+  };
+
+  let bxView = 'overview';
+  let bxBillPeriod = 'month';
+  const bxCache = {};
+  const bxSeq = {};
+  const bxSeen = {};
+  let bxPolling = false;
+
+  /* -------------------------------------------------------- 视图基础小工具 */
+  function bxIsObj(value) {
+    return !!value && typeof value === 'object' && !Array.isArray(value);
+  }
+
+  function bxArr(value) {
+    return Array.isArray(value) ? value : [];
+  }
+
+  function bxNum(value) {
+    if (value === null || value === undefined || value === '') { return null; }
+    const n = typeof value === 'number' ? value : parseFloat(value);
+    return isFinite(n) ? n : null;
+  }
+
+  /* 后端同时给 xxx_fen 与格式化好的 xxx_yuan；优先用后端格式化串，避免前端二次计算 */
+  function bxMoney(obj, base) {
+    if (!bxIsObj(obj)) { return BX_NA; }
+    const yuan = obj[base + '_yuan'];
+    if (yuan !== undefined && yuan !== null && yuan !== '') { return textOf(yuan) + ' 元'; }
+    const fen = bxNum(obj[base + '_fen']);
+    if (fen === null) { return BX_NA; }
+    return pfYuanFromFen(Math.round(fen)) + ' 元';
+  }
+
+  function bxCount(value, unit) {
+    if (value === undefined || value === null || value === '') { return BX_NA; }
+    return textOf(value) + (unit || '');
+  }
+
+  function bxStatCard(label, value, note) {
+    const card = el('div', 'card tight');
+    card.appendChild(el('div', 'stat-label', label));
+    card.appendChild(el('div', 'stat-value', value));
+    if (note) { card.appendChild(el('div', 'card-note', note)); }
+    return card;
+  }
+
+  function bxRow(title, sub, amount) {
+    const row = el('div', 'row');
+    const main = el('div', 'row-main');
+    main.appendChild(el('div', 'row-title', title));
+    if (sub) { main.appendChild(el('div', 'row-sub', sub)); }
+    row.appendChild(main);
+    if (amount !== undefined && amount !== null && amount !== '') {
+      row.appendChild(el('div', 'row-amount', amount));
+    }
+    return row;
+  }
+
+  function bxBar(pct, cls) {
+    const bar = el('div', 'bar');
+    const fill = el('div', 'bar-fill' + (cls ? ' ' + cls : ''));
+    const width = bxNum(pct);
+    fill.style.width = Math.max(0, Math.min(100, width === null ? 0 : width)) + '%';
+    bar.appendChild(fill);
+    return bar;
+  }
+
+  function bxTable(headers, rows, numericCols) {
+    const table = el('table', 'table');
+    const head = document.createElement('thead');
+    const headRow = document.createElement('tr');
+    headers.forEach(function (text) { headRow.appendChild(el('th', '', text)); });
+    head.appendChild(headRow);
+    table.appendChild(head);
+    const body = document.createElement('tbody');
+    rows.forEach(function (cells) {
+      const tr = document.createElement('tr');
+      cells.forEach(function (cell, index) {
+        const num = (numericCols || []).indexOf(index) !== -1;
+        tr.appendChild(el('td', num ? 'num' : '', textOf(cell)));
+      });
+      body.appendChild(tr);
+    });
+    table.appendChild(body);
+    return table;
+  }
+
+  function bxLoading(host, lines) {
+    if (!host) { return; }
+    host.replaceChildren();
+    let i;
+    const total = lines || 3;
+    for (i = 0; i < total; i += 1) { host.appendChild(el('div', 'skeleton')); }
+  }
+
+  function bxEmpty(host, title, hint) {
+    if (!host) { return; }
+    host.replaceChildren();
+    const box = el('div', 'empty');
+    box.appendChild(el('div', 'empty-title', title || '暂时没有数据'));
+    if (hint) { box.appendChild(el('div', 'card-note', hint)); }
+    host.appendChild(box);
+  }
+
+  function bxError(host, err) {
+    if (!host) { return; }
+    host.replaceChildren();
+    const box = el('div', 'notice bad');
+    box.appendChild(el('strong', '', '这块没加载出来：'));
+    box.appendChild(el('div', '', errorText(err)));
+    host.appendChild(box);
+  }
+
+  function bxLoadingFor(view) {
+    bxArr(BX_HOSTS[view]).forEach(function (id) {
+      const two = id === 'ov-balance' || id === 'bill-summary' || id === 'sec-summary';
+      bxLoading($(id), two ? 2 : 3);
+    });
+  }
+
+  function bxErrorFor(view, err) {
+    bxArr(BX_HOSTS[view]).forEach(function (id) { bxError($(id), err); });
+  }
+
+  function bxCacheDrop(view) {
+    if (view) { delete bxCache[view]; return; }
+    Object.keys(bxCache).forEach(function (key) { delete bxCache[key]; });
+  }
+
+  function bxFlashCard(hostId) {
+    const host = $(hostId);
+    if (!host) { return; }
+    let card = host.closest ? host.closest('.card') : null;
+    if (!card) { card = host; }
+    card.classList.remove('flash');
+    void card.offsetWidth;
+    card.classList.add('flash');
+    if (card.scrollIntoView) { card.scrollIntoView({ block: 'center' }); }
+  }
+
+  /* -------------------------------------------------------------- 网络层 */
+  async function bxFetch(url) {
+    const response = await fetch(url, { method: 'GET', headers: { Accept: 'application/json' } });
+    if (!response.ok) {
+      let detail = '';
+      try {
+        const body = await response.json();
+        detail = textOf((body && (body.user_text || body.detail)) || '');
+      } catch (err) {
+        detail = '';
+      }
+      if (response.status === 401) {
+        throw new Error('接口鉴权没通过：请用带 ?token= 的链接打开页面，或先在页面里填好 API Token。');
+      }
+      throw new Error('后端返回 HTTP ' + response.status + (detail ? '：' + detail : ''));
+    }
+    return response.json();
+  }
+
+  function bxUrl(view) {
+    let url = BX_API[view] || '';
+    if (view === 'bill') {
+      url += '?period=' + encodeURIComponent(bxBillPeriod);
+    }
+    return url;
+  }
+
+  function bxLoad(view, force) {
+    if (!view || view === 'assistant' || !BX_API[view]) { return Promise.resolve(null); }
+    const now = Date.now();
+    const cached = bxCache[view];
+    if (!force && cached && (now - cached.at) < 15000) {
+      bxRender(view, cached.data);
+      return Promise.resolve(cached.data);
+    }
+    bxSeq[view] = (bxSeq[view] || 0) + 1;
+    const mine = bxSeq[view];
+    bxLoadingFor(view);
+    return bxFetch(bxUrl(view)).then(function (data) {
+      if (mine !== bxSeq[view]) { return data; }
+      bxCache[view] = { at: Date.now(), data: data };
+      bxRender(view, data);
+      return data;
+    }).catch(function (err) {
+      if (mine !== bxSeq[view]) { return null; }
+      bxErrorFor(view, err);
+      return null;
+    });
+  }
+
+  function bxRefresh() {
+    bxCacheDrop();
+    if (bxView !== 'assistant') { bxLoad(bxView, true); }
+    return bxLoad('overview', true);
+  }
+
+  function bxRender(view, data) {
+    if (view === 'overview') { bxRenderOverview(data); return; }
+    if (view === 'bill') { bxRenderBill(data); return; }
+    if (view === 'plans') { bxRenderPlans(data); return; }
+    if (view === 'manage') { bxRenderManage(data); return; }
+    if (view === 'security') { bxRenderSecurity(data); return; }
+  }
+
+  /* ----------------------------------------------------------- 导航切换 */
+  function bxSetView(name) {
+    if (!name || !BX_API[name] && name !== 'assistant') { return; }
+    bxView = name;
+    const tabs = document.querySelectorAll('#nav .nav-tab');
+    let i;
+    for (i = 0; i < tabs.length; i += 1) {
+      const on = tabs[i].getAttribute('data-view') === name;
+      tabs[i].setAttribute('aria-selected', on ? 'true' : 'false');
+    }
+    const views = document.querySelectorAll('main.views > .view');
+    for (i = 0; i < views.length; i += 1) {
+      views[i].classList.toggle('active', views[i].id === 'view-' + name);
+    }
+    if (name === 'assistant') { scrollChat(); return; }
+    bxLoad(name);
+  }
+
+  function bxAsk(prompt) {
+    if (!prompt) { return; }
+    bxSetView('assistant');
+    const input = $('chat-input');
+    if (!input) { return; }
+    if (streaming) {
+      input.value = prompt;
+      appendBubble('sys', '上一句还在跑，这句话已经填进输入框，等它结束再发送。');
+      return;
+    }
+    input.value = prompt;
+    appendBubble('sys', '按快捷入口发起：' + prompt + '（仍然要过权限判定与确认）', 'quick');
+    sendMessage();
+  }
+
+  function bxSendText(value) {
+    const input = $('chat-input');
+    if (!input || streaming) { return; }
+    input.value = value;
+    sendMessage();
+  }
+
+  /* --------------------------------------------------------- 异常卡片 */
+  function bxAnomalyCard(item, full) {
+    const box = el('div', 'anomaly');
+    const head = el('div', 'anomaly-head');
+    head.appendChild(el('span', 'anomaly-title', textOf(item.title) || '异常'));
+    head.appendChild(el('span', 'tag warn', textOf(item.status) || '发现异常'));
+    if (item.amount_yuan) { head.appendChild(el('span', 'tag', textOf(item.amount_yuan) + ' 元')); }
+    if (bxIsObj(item.rule) && item.rule.id) { head.appendChild(el('span', 'tag info', textOf(item.rule.id))); }
+    box.appendChild(head);
+    if (item.detail) { box.appendChild(el('div', 'card-note', textOf(item.detail))); }
+
+    if (full) {
+      const rule = bxIsObj(item.rule) ? item.rule : {};
+      if (rule.text) { box.appendChild(kvRow('规则依据', textOf(rule.text))); }
+      if (rule.confidence) { box.appendChild(kvRow('规则置信度', textOf(rule.confidence) + '（启发式，不是欺诈认定）')); }
+      if (item.window_text) { box.appendChild(kvRow('时间窗口', textOf(item.window_text))); }
+      const cmp = bxIsObj(item.comparison) ? item.comparison : null;
+      if (cmp) {
+        box.appendChild(kvRow('对比', textOf(cmp.previous_month) + ' ' + bxCount(cmp.previous_fen, ' 分') +
+          ' → ' + textOf(cmp.current_month) + ' ' + bxCount(cmp.current_fen, ' 分') +
+          '（涨幅 ' + bxCount(cmp.hike_pct, '%') + '）'));
+      }
+      if (item.occurrence_count) { box.appendChild(kvRow('涉及笔数', bxCount(item.occurrence_count, ' 笔'))); }
+      if (item.possible_false_positive) { box.appendChild(kvRow('误报可能', textOf(item.possible_false_positive))); }
+      if (item.status_note) { box.appendChild(kvRow('怎么理解', textOf(item.status_note))); }
+      const evidence = bxIsObj(item.evidence) ? item.evidence : {};
+      const txs = bxArr(evidence.transactions);
+      if (txs.length) {
+        box.appendChild(el('div', 'field-label', '涉及流水（' + txs.length + ' 笔）'));
+        box.appendChild(bxTable(
+          ['时间', '对手方', '分类', '方向', '金额'],
+          txs.map(function (tx) {
+            return [
+              textOf(tx.time_text),
+              textOf(tx.counterparty),
+              textOf(tx.category),
+              textOf(tx.direction) === 'in' ? '收入' : '支出',
+              textOf(tx.amount_yuan) + ' 元'
+            ];
+          }),
+          [4]
+        ));
+      }
+    }
+
+    const actions = bxArr(item.actions);
+    if (actions.length) {
+      const bar = el('div', 'anomaly-actions');
+      actions.forEach(function (act) {
+        const btn = el('button', 'btn btn-mini', textOf(act.label) || '处理');
+        btn.type = 'button';
+        btn.addEventListener('click', function () { bxRunAction(act); });
+        bar.appendChild(btn);
+      });
+      box.appendChild(bar);
+    }
+    return box;
+  }
+
+  function bxRunAction(act) {
+    if (!bxIsObj(act)) { return; }
+    const kind = textOf(act.kind);
+    if (kind === 'prompt' && act.prompt) { bxAsk(textOf(act.prompt)); return; }
+    if (kind === 'inspect') {
+      if (textOf(act.id) === 'open_subscriptions') { bxSetView('manage'); bxFlashCard('mg-subs'); return; }
+      bxSetView('bill');
+      bxFlashCard('bill-tx');
+      return;
+    }
+    if (kind === 'tool') {
+      const prompt = BX_TOOL_PROMPT[textOf(act.tool)] || ('帮我用一下「' + textOf(act.label) + '」这个能力');
+      bxAsk(prompt);
+      return;
+    }
+    if (act.prompt) { bxAsk(textOf(act.prompt)); return; }
+    appendBubble('sys', '这个入口还没接上具体动作。');
+  }
+
+  /* ------------------------------------------------------------- 财务总览 */
+  function bxRenderOverview(data) {
+    data = bxIsObj(data) ? data : {};
+    const month = bxIsObj(data.this_month) ? data.this_month : {};
+    const accounts = bxArr(data.accounts);
+    const main = bxIsObj(data.account) ? data.account : (accounts.length ? accounts[0] : null);
+
+    const balHost = $('ov-balance');
+    if (balHost) {
+      balHost.replaceChildren();
+      if (main) {
+        balHost.appendChild(bxStatCard(
+          '余额 · ' + textOf(main.name) + ' 尾号 ' + textOf(main.tail),
+          textOf(main.balance_yuan) + ' 元',
+          '接口返回的当前余额，不代表待执行操作后的余额。'
+        ));
+      } else {
+        balHost.appendChild(bxStatCard('账户余额', BX_NA, '后端没有返回账户'));
+      }
+      balHost.appendChild(bxStatCard('本月支出', month.total_out_yuan ? textOf(month.total_out_yuan) + ' 元' : BX_NA, bxCount(month.out_count, ' 笔')));
+      balHost.appendChild(bxStatCard('本月收入', month.total_in_yuan ? textOf(month.total_in_yuan) + ' 元' : BX_NA, bxCount(month.in_count, ' 笔')));
+    }
+    setText($('ov-month-tag'), data.month_label || '—');
+
+    const flowHost = $('ov-flow');
+    if (flowHost) {
+      flowHost.replaceChildren();
+      const list = el('div', 'list');
+      const window = bxIsObj(month.window) ? month.window : {};
+      list.appendChild(bxRow('收入', textOf(window.label) || textOf(month.label), bxMoney(month, 'total_in')));
+      list.appendChild(bxRow('支出', bxCount(month.out_count, ' 笔'), bxMoney(month, 'total_out')));
+      const trend = bxArr(data.trend);
+      const last = trend.length ? trend[trend.length - 1] : null;
+      if (bxIsObj(last)) {
+        /* 趋势口径不含转账与理财（账户内部搬运），和上面两行的"全部支出"不是一个口径，
+           所以标签里必须写明，否则同一个页面会出现两个对不上的结余。 */
+        list.appendChild(bxRow(
+          '结余·' + textOf(last.label) + '（不含转账/理财）',
+          last.partial ? '这个月还没过完' : '完整月',
+          textOf(last.net_yuan) + ' 元'
+        ));
+      }
+      flowHost.appendChild(list);
+      if (month.summary) { flowHost.appendChild(el('div', 'card-note', textOf(month.summary))); }
+    }
+
+    const catHost = $('ov-cats');
+    const cats = bxArr(month.by_category);
+    if (catHost) {
+      if (!cats.length) {
+        bxEmpty(catHost, '本期没有分类支出', '后端没有返回任何支出流水。');
+      } else {
+        catHost.replaceChildren();
+        const list = el('div', 'list');
+        cats.slice(0, 8).forEach(function (cat) {
+          list.appendChild(bxRow(
+            textOf(cat.category),
+            bxCount(cat.count, ' 笔') + ' · 占比 ' + bxCount(cat.pct, '%'),
+            bxMoney(cat, 'amount')
+          ));
+          list.appendChild(bxBar(cat.pct));
+        });
+        catHost.appendChild(list);
+      }
+    }
+
+    const anomalyHost = $('ov-anomalies');
+    const anomalyBlock = bxIsObj(data.anomalies) ? data.anomalies : {};
+    const anomalyItems = bxArr(anomalyBlock.items);
+    if (anomalyHost) {
+      if (!anomalyItems.length) {
+        bxEmpty(anomalyHost, textOf(anomalyBlock.state) || '本期没有命中任何规则', textOf(anomalyBlock.disclaimer));
+      } else {
+        anomalyHost.replaceChildren();
+        anomalyItems.slice(0, 3).forEach(function (item) { anomalyHost.appendChild(bxAnomalyCard(item, false)); });
+        if (anomalyBlock.more_count) {
+          anomalyHost.appendChild(el('div', 'card-note', '还有 ' + textOf(anomalyBlock.more_count) + ' 条在「账单分析」里。'));
+        }
+        if (anomalyBlock.disclaimer) { anomalyHost.appendChild(el('div', 'card-note', textOf(anomalyBlock.disclaimer))); }
+        const link = el('button', 'btn btn-mini', '去账单分析看依据');
+        link.type = 'button';
+        link.addEventListener('click', function () { bxSetView('bill'); });
+        anomalyHost.appendChild(link);
+      }
+    }
+
+    const pendingHost = $('ov-pending');
+    const pending = bxIsObj(data.pending_authorizations) ? data.pending_authorizations : {};
+    const pendingItems = bxArr(pending.items);
+    if (pendingHost) {
+      if (!pendingItems.length) {
+        bxEmpty(pendingHost, '没有待处理的授权', textOf(pending.empty_reason) || textOf(pending.source));
+      } else {
+        pendingHost.replaceChildren();
+        const list = el('div', 'list');
+        pendingItems.forEach(function (item) {
+          const expired = textOf(item.state_label).indexOf('过期') !== -1 || item.expired === true;
+          const row = bxRow(
+            (textOf(item.payee_name) || '操作') + ' · ' + (textOf(item.amount_yuan) || BX_NA) + ' 元',
+            textOf(item.created_text) + ' 发起 · ' + textOf(item.state_label),
+            item.stale ? '会话已失效' : ''
+          );
+          list.appendChild(row);
+          const bar = el('div', 'anomaly-actions');
+          const btn = el('button', 'btn btn-mini', expired ? '已过期，需要重新发起' : '去确认');
+          btn.type = 'button';
+          btn.disabled = expired;
+          btn.addEventListener('click', function () { bxAsk('我有一个待确认的操作，继续处理'); });
+          bar.appendChild(btn);
+          list.appendChild(bar);
+        });
+        pendingHost.appendChild(list);
+        pendingHost.appendChild(el('div', 'card-note', textOf(pending.source)));
+      }
+    }
+
+    const goalHost = $('ov-goals');
+    const savings = bxIsObj(data.savings_goals) ? data.savings_goals : {};
+    const goals = bxArr(savings.items);
+    if (goalHost) {
+      if (!goals.length) {
+        bxEmpty(goalHost, '还没有储蓄目标', textOf(savings.empty_reason));
+      } else {
+        goalHost.replaceChildren();
+        goals.slice(0, 3).forEach(function (goal) {
+          const plan = bxIsObj(goal.plan) ? goal.plan : null;
+          const pct = plan ? bxNum(plan.progress_pct) : null;
+          const list = el('div', 'list');
+          list.appendChild(bxRow(
+            textOf(goal.name),
+            textOf(goal.saved_yuan) + ' / ' + textOf(goal.target_yuan) + ' 元 · 目标日 ' + textOf(goal.target_date),
+            BX_GOAL_STATUS[textOf(goal.status)] || textOf(goal.status)
+          ));
+          if (pct !== null) { list.appendChild(bxBar(pct, pct >= 100 ? 'ok' : '')); }
+          const need = plan ? bxMoney(plan, 'required_per_period') : BX_NA;
+          const unit = plan ? (BX_PERIOD_UNIT[textOf(plan.period_unit)] || textOf(plan.period_unit)) : '';
+          list.appendChild(el('div', 'card-note', '按后端计划：' + unit + '需要 ' + need +
+            (plan && plan.feasibility ? '，' + (BX_FEASIBILITY[textOf(plan.feasibility)] || textOf(plan.feasibility)) : '')));
+          goalHost.appendChild(list);
+        });
+      }
+    }
+
+    const planHost = $('ov-plans');
+    const plans = bxIsObj(data.plans_and_reminders) ? data.plans_and_reminders : {};
+    if (planHost) {
+      planHost.replaceChildren();
+      const list = el('div', 'list');
+      const scheduled = bxIsObj(plans.scheduled) ? plans.scheduled : {};
+      const tasks = bxArr(scheduled.items);
+      if (!tasks.length) {
+        list.appendChild(el('div', 'card-note', '预约任务：' + (textOf(scheduled.empty_reason) || '没有已安排的任务。')));
+      } else {
+        tasks.slice(0, 3).forEach(function (task) {
+          list.appendChild(bxRow(
+            task.payee_name ? ('转给 ' + textOf(task.payee_name)) : '预约任务',
+            textOf(task.due_text) + ' · ' + textOf(task.state_label),
+            textOf(task.amount_yuan) + ' 元'
+          ));
+        });
+      }
+      const alerts = bxIsObj(plans.alerts) ? plans.alerts : {};
+      const alertItems = bxArr(alerts.items);
+      if (!alertItems.length) {
+        list.appendChild(el('div', 'card-note', '提醒：' + (textOf(alerts.empty_reason) || '没有新的提醒。')));
+      } else {
+        alertItems.slice(0, 2).forEach(function (alert) {
+          list.appendChild(bxRow(textOf(alert.reason_text), textOf(alert.goal_name), ''));
+        });
+      }
+      planHost.appendChild(list);
+      const scheduler = bxIsObj(plans.scheduler) ? plans.scheduler : null;
+      if (scheduler) {
+        const on = scheduler.enabled === true && scheduler.running === true;
+        const everySec = bxNum(scheduler.interval_ms) !== null ? Math.round(bxNum(scheduler.interval_ms) / 1000) : null;
+        planHost.appendChild(el('div', 'card-note',
+          '预约任务调度：' + (on
+            ? '应用内定时器在跑，每 ' + bxCount(everySec, ' 秒') + '检查一次到期任务'
+            : '没有在跑，只有点「立即执行到期任务」才会执行')));
+        if (scheduler.monitoring_scope) {
+          planHost.appendChild(el('div', 'card-note', '持续监测：' + textOf(scheduler.monitoring_scope)));
+        }
+      }
+    }
+
+    const actionHost = $('ov-actions');
+    const actions = bxArr(data.quick_actions);
+    if (actionHost) {
+      actionHost.replaceChildren();
+      actions.forEach(function (action) {
+        const chip = el('button', 'cap-chip action', textOf(action.label));
+        chip.type = 'button';
+        chip.addEventListener('click', function () { bxAsk(textOf(action.prompt)); });
+        actionHost.appendChild(chip);
+      });
+      if (!actions.length) { actionHost.appendChild(el('span', 'cap-chip', BX_NA)); }
+    }
+
+    const note = $('ov-note');
+    if (note) {
+      const parts = ['快捷入口只负责把话填好，真正的执行仍然要走权限判定与确认。'];
+      bxArr(data.unavailable).forEach(function (item) {
+        parts.push('暂不可用：' + textOf(item.section) + '（' + textOf(item.reason) + '）');
+      });
+      if (data.generated_text) { parts.push('数据生成时间：' + textOf(data.generated_text)); }
+      note.textContent = parts.join(' ');
+    }
+  }
+
+  /* ------------------------------------------------------------- 账单分析 */
+  function bxRenderBill(data) {
+    data = bxIsObj(data) ? data : {};
+    const range = bxIsObj(data.range) ? data.range : {};
+
+    const host = $('bill-summary');
+    if (host) {
+      host.replaceChildren();
+      host.appendChild(bxStatCard('支出合计', bxMoney(data, 'total_out'), textOf(range.label) + ' · ' + bxCount(data.out_count, ' 笔')));
+      host.appendChild(bxStatCard('收入合计', bxMoney(data, 'total_in'), bxCount(data.in_count, ' 笔')));
+      host.appendChild(bxStatCard('净结余',
+        (bxNum(data.total_in_fen) !== null && bxNum(data.total_out_fen) !== null)
+          ? pfYuanFromFen(Math.round(data.total_in_fen - data.total_out_fen)) + ' 元'
+          : BX_NA,
+        '按同区间收支相减，前端只做这一步减法'));
+    }
+
+    const catHost = $('bill-cats');
+    const cats = bxArr(data.by_category);
+    if (catHost) {
+      if (!cats.length) {
+        bxEmpty(catHost, '这个区间没有支出', '换个区间试试，或者确实没有花钱。');
+      } else {
+        catHost.replaceChildren();
+        const list = el('div', 'list');
+        cats.forEach(function (cat) {
+          list.appendChild(bxRow(textOf(cat.category), bxCount(cat.count, ' 笔') + ' · ' + bxCount(cat.pct, '%'), bxMoney(cat, 'amount')));
+          list.appendChild(bxBar(cat.pct));
+        });
+        catHost.appendChild(list);
+      }
+    }
+
+    const trendHost = $('bill-trend');
+    const trend = bxArr(data.trend);
+    if (trendHost) {
+      if (!trend.length) {
+        bxEmpty(trendHost, '没有趋势数据', '后端没有返回月份序列。');
+      } else {
+        trendHost.replaceChildren();
+        trendHost.appendChild(bxTable(
+          ['月份', '收入', '支出', '结余', '笔数'],
+          trend.map(function (row) {
+            return [
+              textOf(row.label) + (row.partial ? '（未完）' : ''),
+              textOf(row.income_yuan),
+              textOf(row.expense_yuan),
+              textOf(row.net_yuan),
+              textOf(row.transaction_count)
+            ];
+          }),
+          [1, 2, 3, 4]
+        ));
+      }
+    }
+
+    const anomalyHost = $('bill-anomalies');
+    const block = bxIsObj(data.anomalies) ? data.anomalies : {};
+    const items = bxArr(block.items);
+    if (anomalyHost) {
+      anomalyHost.replaceChildren();
+      if (!items.length) {
+        bxEmpty(anomalyHost, textOf(block.state) || '没有命中任何规则', textOf(block.disclaimer));
+      } else {
+        items.forEach(function (item) { anomalyHost.appendChild(bxAnomalyCard(item, true)); });
+        if (block.disclaimer) { anomalyHost.appendChild(el('div', 'notice info', textOf(block.disclaimer))); }
+      }
+      const rules = bxArr(block.rules);
+      if (rules.length) {
+        anomalyHost.appendChild(el('div', 'field-label', '判定规则（全部是启发式线索）'));
+        anomalyHost.appendChild(bxTable(
+          ['规则', '内容', '置信度'],
+          rules.map(function (rule) { return [textOf(rule.rule_id), textOf(rule.rule_text), textOf(rule.confidence)]; })
+        ));
+      }
+    }
+
+    const txHost = $('bill-tx');
+    const seen = {};
+    const txs = [];
+    items.forEach(function (item) {
+      const evidence = bxIsObj(item.evidence) ? item.evidence : {};
+      bxArr(evidence.transactions).forEach(function (tx) {
+        const key = textOf(tx.transaction_id) || (textOf(tx.ts_ms) + ':' + textOf(tx.counterparty));
+        if (seen[key]) { return; }
+        seen[key] = true;
+        txs.push(tx);
+      });
+    });
+    if (txHost) {
+      if (!txs.length) {
+        bxEmpty(txHost, '没有相关流水', '本区间没有命中的异常，或者后端没有回传流水明细。');
+      } else {
+        txs.sort(function (a, b) { return (bxNum(b.ts_ms) || 0) - (bxNum(a.ts_ms) || 0); });
+        txHost.replaceChildren();
+        txHost.appendChild(bxTable(
+          ['时间', '对手方', '分类', '备注', '方向', '金额'],
+          txs.map(function (tx) {
+            return [
+              textOf(tx.time_text),
+              textOf(tx.counterparty),
+              textOf(tx.category),
+              textOf(tx.note),
+              textOf(tx.direction) === 'in' ? '收入' : '支出',
+              textOf(tx.amount_yuan) + ' 元'
+            ];
+          }),
+          [5]
+        ));
+      }
+    }
+    const note = $('bill-note');
+    if (note) {
+      note.textContent = '这里只列规则命中的流水，不是完整对账单；导出完整流水不在本轮范围内。' +
+        (data.summary ? ' ' + textOf(data.summary) : '');
+    }
+  }
+
+  /* --------------------------------------------------------- 计划与提醒 */
+  function bxRenderScheduler(host, scheduler, extra) {
+    if (!host) { return; }
+    host.replaceChildren();
+    const on = bxIsObj(scheduler) && scheduler.enabled === true && scheduler.running === true;
+    const card = el('div', 'card tight');
+    const head = el('div', 'card-head');
+    head.appendChild(el('h3', '', '调度状态'));
+    head.appendChild(el('span', 'spacer'));
+    head.appendChild(el('span', 'tag ' + (on ? 'ok' : 'warn'), on ? '后台调度在跑' : '没有后台调度'));
+    card.appendChild(head);
+    const body = el('div', 'list');
+    if (bxIsObj(scheduler)) {
+      const kindText = BX_SCHED_KIND[textOf(scheduler.kind)] || textOf(scheduler.kind);
+      const everySec = bxNum(scheduler.interval_ms) !== null ? Math.round(bxNum(scheduler.interval_ms) / 1000) : null;
+      body.appendChild(bxRow('调度方式', kindText, ''));
+      body.appendChild(bxRow('多久检查一次', everySec === null ? BX_NA : bxCount(everySec, ' 秒'), ''));
+      if (scheduler.monitoring_scope) {
+        body.appendChild(bxRow('持续监测的范围', textOf(scheduler.monitoring_scope), ''));
+      }
+    }
+    card.appendChild(body);
+    if (bxIsObj(scheduler) && scheduler.note) { card.appendChild(el('div', 'card-note', textOf(scheduler.note))); }
+    if (bxIsObj(scheduler) && scheduler.manual_endpoint) {
+      card.appendChild(el('div', 'card-note',
+        '技术细节（普通使用不需要关心）：手动触发接口 ' + textOf(scheduler.manual_endpoint) +
+        '，也可以直接点下面的「立即执行到期任务」。'));
+    }
+    if (extra) { card.appendChild(el('div', 'card-note', extra)); }
+    host.appendChild(card);
+  }
+
+  function bxRunScheduledNow() {
+    const btn = $('plan-run-now');
+    if (btn) { btn.disabled = true; }
+    return fetch('/api/scheduled/run', { method: 'POST', headers: { Accept: 'application/json' } })
+      .then(function (response) {
+        if (!response.ok) { throw new Error('后端返回 HTTP ' + response.status); }
+        return response.json();
+      })
+      .then(function (json) {
+        appendBubble('sys', '手动触发了一次到期任务检查：执行 ' + textOf(json && json.executed) + ' 条。');
+        bxRefresh();
+      })
+      .catch(function (err) {
+        appendBubble('sys', '触发失败：' + errorText(err));
+      })
+      .finally(function () {
+        if (btn) { btn.disabled = false; }
+      });
+  }
+
+  function bxRenderPlans(data) {
+    data = bxIsObj(data) ? data : {};
+    const banner = $('plan-banner');
+    if (banner) {
+      bxRenderScheduler(banner, data.scheduler, '「计划已保存」只是存了参数；只有调度器在跑、并且任务状态是 scheduled，才算「任务已安排」。');
+      const btn = el('button', 'btn btn-mini', '立即执行到期任务');
+      btn.type = 'button';
+      btn.id = 'plan-run-now';
+      btn.addEventListener('click', bxRunScheduledNow);
+      banner.appendChild(btn);
+    }
+
+    const legend = bxArr(data.state_legend);
+    const goalHost = $('plan-goals');
+    const savings = bxIsObj(data.saved_plans) ? data.saved_plans : {};
+    const goals = bxArr(savings.items);
+    setText($('plan-goal-tag'), bxCount(savings.count, ' 个'));
+    if (goalHost) {
+      goalHost.replaceChildren();
+      if (legend.length) {
+        const row = el('div', 'cap-chips');
+        legend.forEach(function (item) {
+          const tag = el('span', 'tag ' + (textOf(item.state) === 'done' ? 'ok' : (textOf(item.state) === 'failed' ? 'bad' : 'info')), textOf(item.label));
+          tag.title = textOf(item.meaning);
+          row.appendChild(tag);
+        });
+        goalHost.appendChild(row);
+      }
+      if (!goals.length) {
+        bxEmpty(goalHost, '还没有保存的计划', textOf(savings.empty_reason));
+      } else {
+        goals.forEach(function (goal) {
+          const plan = bxIsObj(goal.plan) ? goal.plan : null;
+          const box = el('div', 'anomaly');
+          const head = el('div', 'anomaly-head');
+          head.appendChild(el('span', 'anomaly-title', textOf(goal.name)));
+          head.appendChild(el('span', 'tag ' + (textOf(goal.status) === 'achieved' ? 'ok' : (textOf(goal.status) === 'cancelled' ? 'bad' : 'info')), BX_GOAL_STATUS[textOf(goal.status)] || textOf(goal.status)));
+          box.appendChild(head);
+          box.appendChild(el('div', 'card-note',
+            '目标 ' + textOf(goal.target_yuan) + ' 元 · 已存 ' + textOf(goal.saved_yuan) + ' 元 · 目标日 ' + textOf(goal.target_date)));
+          if (plan) {
+            box.appendChild(bxBar(plan.progress_pct, bxNum(plan.progress_pct) >= 100 ? 'ok' : ''));
+            const unitText = BX_PERIOD_UNIT[textOf(plan.period_unit)] || textOf(plan.period_unit);
+            box.appendChild(kvRow('每期需要', bxMoney(plan, 'required_per_period') + '（' + unitText + ' × ' + bxCount(plan.periods_remaining) + ' 期）', true));
+            box.appendChild(kvRow('每期结余', bxMoney(plan, 'period_surplus')));
+            box.appendChild(kvRow('缺口', bxMoney(plan, 'total_gap')));
+            box.appendChild(kvRow('可行性', BX_FEASIBILITY[textOf(plan.feasibility)] || textOf(plan.feasibility)));
+            /* assumptions 是后端给的字符串数组，原来整段 JSON 直接糊在页面上，
+               用户看到的是一堆方括号和引号；这里拆成列表逐条渲染。 */
+            const assumptions = bxArr(plan.assumptions);
+            if (assumptions.length) {
+              box.appendChild(el('div', 'card-note', '计算依据（后端给出的假设）：'));
+              const ul = el('ul', 'assumptions');
+              assumptions.forEach(function (line) { ul.appendChild(el('li', '', textOf(line))); });
+              box.appendChild(ul);
+            }
+            bxArr(plan.warnings).forEach(function (warn) {
+              box.appendChild(el('div', 'notice warn', textOf(warn)));
+            });
+          } else if (goal.plan_error) {
+            box.appendChild(el('div', 'notice bad', textOf(goal.plan_error)));
+          } else {
+            box.appendChild(el('div', 'card-note', '后端没有返回计划计算结果。'));
+          }
+          const bar = el('div', 'anomaly-actions');
+          const edit = el('button', 'btn btn-mini', '修改');
+          edit.type = 'button';
+          edit.addEventListener('click', function () {
+            const panel = $('panel-proactive');
+            if (panel) { panel.open = true; }
+            pfStartEdit(goal);
+          });
+          bar.appendChild(edit);
+          const cancel = el('button', 'btn btn-mini', '停止计划');
+          cancel.type = 'button';
+          cancel.addEventListener('click', function () { bxCancelGoal(goal.goal_id, cancel); });
+          bar.appendChild(cancel);
+          box.appendChild(bar);
+          goalHost.appendChild(box);
+        });
+      }
+    }
+
+    const taskHost = $('plan-tasks');
+    const scheduled = bxIsObj(data.scheduled_tasks) ? data.scheduled_tasks : {};
+    const tasks = bxArr(scheduled.items);
+    if (taskHost) {
+      if (!tasks.length) {
+        bxEmpty(taskHost, '没有预约任务', textOf(scheduled.empty_reason));
+      } else {
+        taskHost.replaceChildren();
+        const list = el('div', 'list');
+        tasks.forEach(function (task) {
+          const cls = textOf(task.status) === 'scheduled' ? (task.overdue ? 'warn' : 'info') : (textOf(task.status) === 'failed' ? 'bad' : 'ok');
+          list.appendChild(bxRow(
+            (textOf(task.payee_name) || '预约任务') + (task.overdue ? ' · 已过期未执行' : ''),
+            textOf(task.due_text) + ' · ' + (BX_RECURRENCE[textOf(task.recurrence)] || textOf(task.recurrence)) + ' · ' + textOf(task.state_label),
+            textOf(task.amount_yuan) + ' 元'
+          ));
+          if (textOf(task.status) === 'scheduled') {
+            const bar = el('div', 'anomaly-actions');
+            const btn = el('button', 'btn btn-mini', '让助手撤销这笔预约');
+            btn.type = 'button';
+            btn.addEventListener('click', function () {
+              bxAsk('帮我撤销 ' + textOf(task.due_text) + ' 给 ' + (textOf(task.payee_name) || '收款人') + ' 转 ' + textOf(task.amount_yuan) + ' 元的那笔预约');
+            });
+            bar.appendChild(btn);
+            list.appendChild(bar);
+          }
+        });
+        taskHost.appendChild(list);
+      }
+    }
+
+    const alertHost = $('plan-alerts');
+    const alerts = bxIsObj(data.alerts) ? data.alerts : {};
+    const alertItems = bxArr(alerts.items);
+    setText($('plan-alert-tag'), bxCount(alerts.count, ' 条'));
+    if (alertHost) {
+      if (!alertItems.length) {
+        bxEmpty(alertHost, '没有需要处理的提醒', textOf(alerts.empty_reason));
+      } else {
+        alertHost.replaceChildren();
+        alertItems.forEach(function (alert) {
+          const box = el('div', 'anomaly');
+          const head = el('div', 'anomaly-head');
+          head.appendChild(el('span', 'anomaly-title', textOf(alert.reason_text) || textOf(alert.reason)));
+          head.appendChild(el('span', 'tag ' + (textOf(alert.status) === 'open' ? 'warn' : 'info'), BX_ALERT_STATUS[textOf(alert.status)] || textOf(alert.status)));
+          box.appendChild(head);
+          box.appendChild(el('div', 'card-note', textOf(alert.suggestion)));
+          box.appendChild(kvRow('相关计划', textOf(alert.goal_name)));
+          box.appendChild(kvRow('触发时间', textOf(alert.created_text)));
+          const bar = el('div', 'anomaly-actions');
+          const ignore = el('button', 'btn btn-mini', '忽略');
+          ignore.type = 'button';
+          ignore.addEventListener('click', function () {
+            pfResolveAlert(alert.alert_id, 'ignore').then(function () { bxRefresh(); });
+          });
+          bar.appendChild(ignore);
+          const resolve = el('button', 'btn btn-mini btn-green', '标记已处理');
+          resolve.type = 'button';
+          resolve.addEventListener('click', function () {
+            pfResolveAlert(alert.alert_id, 'resolve').then(function () { bxRefresh(); });
+          });
+          bar.appendChild(resolve);
+          box.appendChild(bar);
+          alertHost.appendChild(box);
+        });
+      }
+    }
+  }
+
+  function bxCancelGoal(goalId, btn) {
+    if (!goalId) { return Promise.resolve(null); }
+    if (btn && btn.getAttribute('data-armed') !== '1') {
+      if (btn) {
+        btn.setAttribute('data-armed', '1');
+        btn.textContent = '再点一次确认停止';
+        btn.className = 'btn btn-mini btn-red';
+      }
+      return Promise.resolve(null);
+    }
+    return pfRequest('/api/savings/goals/' + encodeURIComponent(goalId), {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status: 'cancelled' })
+    }).then(function () {
+      appendBubble('sys', '计划已停止（后端状态已改为 cancelled）。已经生成的提醒不受影响，可以单独处理。');
+      bxRefresh();
+    }).catch(function (err) {
+      pfFail(err, '停止计划失败');
+    });
+  }
+
+  /* ------------------------------------------------------------- 业务管理 */
+  function bxRenderManage(data) {
+    data = bxIsObj(data) ? data : {};
+
+    const cardHost = $('mg-cards');
+    const cards = bxArr(data.cards);
+    setText($('mg-card-tag'), bxCount(cards.length, ' 张'));
+    if (cardHost) {
+      if (!cards.length) {
+        bxEmpty(cardHost, '没有卡片', '后端没有返回任何卡。');
+      } else {
+        cardHost.replaceChildren();
+        cardHost.appendChild(bxTable(
+          ['卡种', '尾号', '所属账户', '状态', '单笔限额'],
+          cards.map(function (card) {
+            return [
+              textOf(card.kind_label) || textOf(card.kind),
+              textOf(card.tail),
+              textOf(card.account_name),
+              textOf(card.status_label) || textOf(card.status),
+              textOf(card.per_tx_limit_yuan) + ' 元'
+            ];
+          }),
+          [4]
+        ));
+        const bar = el('div', 'anomaly-actions');
+        ['freeze_card', 'set_card_limit', 'report_card_loss'].forEach(function (tool) {
+          const btn = el('button', 'btn btn-mini', BX_TOOL_PROMPT[tool]);
+          btn.type = 'button';
+          btn.addEventListener('click', function () { bxAsk(BX_TOOL_PROMPT[tool]); });
+          bar.appendChild(btn);
+        });
+        cardHost.appendChild(bar);
+        cardHost.appendChild(el('div', 'card-note', '卡片操作都需要你在 AI 助手里确认；本页没有直接生效的按钮，避免绕过权限判定。'));
+      }
+    }
+
+    const subHost = $('mg-subs');
+    const subs = bxIsObj(data.subscriptions) ? data.subscriptions : {};
+    const items = bxArr(subs.items);
+    if (subHost) {
+      if (!items.length) {
+        bxEmpty(subHost, '没有订阅代扣记录', textOf(subs.boundary));
+      } else {
+        subHost.replaceChildren();
+        const list = el('div', 'list');
+        items.forEach(function (sub) {
+          list.appendChild(bxRow(
+            textOf(sub.merchant),
+            textOf(sub.period_label) + ' · 下次扣费 ' + textOf(sub.next_charge_text) + ' · ' + textOf(sub.status_label),
+            textOf(sub.amount_yuan) + ' 元'
+          ));
+          list.appendChild(el('div', 'card-note', textOf(sub.boundary)));
+          if (textOf(sub.status) === 'active') {
+            const bar = el('div', 'anomaly-actions');
+            const btn = el('button', 'btn btn-mini', '停掉银行侧代扣');
+            btn.type = 'button';
+            btn.addEventListener('click', function () {
+              bxAsk('帮我把「' + textOf(sub.merchant) + '」的银行侧自动扣款停掉');
+            });
+            bar.appendChild(btn);
+            list.appendChild(bar);
+          }
+        });
+        subHost.appendChild(list);
+        subHost.appendChild(el('div', 'notice warn', textOf(subs.boundary) + ' 月合计 ' + bxCount(subs.monthly_active_fen, ' 分') + '。'));
+      }
+    }
+
+    const invest = bxIsObj(data.investments) ? data.investments : {};
+    const products = bxArr(invest.products);
+    const productHost = $('mg-products');
+    if (productHost) {
+      if (!products.length) {
+        bxEmpty(productHost, '没有产品数据', textOf(invest.summary));
+      } else {
+        productHost.replaceChildren();
+        productHost.appendChild(bxTable(
+          ['产品', '类别', '风险等级', '起购', '净值更新', '我的持仓'],
+          products.map(function (product) {
+            return [
+              textOf(product.name),
+              textOf(product.category),
+              'R' + textOf(product.risk_level),
+              textOf(product.min_buy_yuan) + ' 元',
+              textOf(product.nav_updated_text),
+              bxCount(product.holding_shares_milli, ' 份')
+            ];
+          }),
+          [3, 5]
+        ));
+        const bar = el('div', 'anomaly-actions');
+        ['buy_fund', 'redeem_fund'].forEach(function (tool) {
+          const btn = el('button', 'btn btn-mini', BX_TOOL_PROMPT[tool]);
+          btn.type = 'button';
+          btn.addEventListener('click', function () { bxAsk(BX_TOOL_PROMPT[tool]); });
+          bar.appendChild(btn);
+        });
+        productHost.appendChild(bar);
+      }
+    }
+    const fitTag = $('mg-fit');
+    if (fitTag) {
+      const ok = invest.suitability_assessed === true;
+      setText(fitTag, ok ? '适当性：已评估' : '适当性：未评估');
+      fitTag.className = 'tag ' + (ok ? 'ok' : 'bad');
+    }
+    const fitNote = $('mg-fit-note');
+    if (fitNote) {
+      fitNote.textContent = (invest.suitability_note ? textOf(invest.suitability_note) + ' ' : '') +
+        (invest.data_source ? '数据来源：' + textOf(invest.data_source) + '。' : '') +
+        (invest.summary ? textOf(invest.summary) : '');
+    }
+
+    const capHost = $('mg-caps');
+    const caps = bxIsObj(data.capabilities) ? data.capabilities : {};
+    if (capHost) {
+      capHost.replaceChildren();
+      const keys = Object.keys(caps);
+      if (!keys.length) {
+        bxEmpty(capHost, '没有能力说明', '后端没有返回 capabilities。');
+      } else {
+        keys.forEach(function (key) {
+          const cap = bxIsObj(caps[key]) ? caps[key] : {};
+          const box = el('div', 'anomaly');
+          const head = el('div', 'anomaly-head');
+          head.appendChild(el('span', 'anomaly-title', BX_CAP_LABEL[key] || key));
+          head.appendChild(el('span', 'tag ' + (cap.supported === true ? 'ok' : 'bad'), cap.supported === true ? '可用' : '不可用'));
+          if (cap.requires_authorization) { head.appendChild(el('span', 'tag warn', '需要授权')); }
+          box.appendChild(head);
+          if (cap.entry) { box.appendChild(kvRow('入口', textOf(cap.entry))); }
+          bxArr(cap.notes).forEach(function (note) {
+            box.appendChild(el('div', 'card-note', '· ' + textOf(note)));
+          });
+          capHost.appendChild(box);
+        });
+      }
+    }
+    const note = $('mg-note');
+    if (note) {
+      note.textContent = '写操作统一走 AI 助手 + 权限引擎 + 确认流程，本页只做浏览与入口，不提供绕过策略的直连按钮。';
+    }
+  }
+
+  /* --------------------------------------------------- 执行记录与安全中心 */
+  function bxRenderSecurity(data) {
+    data = bxIsObj(data) ? data : {};
+    const sessions = bxArr(data.sessions);
+    const denials = bxArr(data.denials);
+    const audit = bxIsObj(data.audit) ? data.audit : {};
+
+    const host = $('sec-summary');
+    if (host) {
+      host.replaceChildren();
+      host.appendChild(bxStatCard('最近会话', bxCount(sessions.length, ' 个'), '来自服务端会话表'));
+      host.appendChild(bxStatCard('被拒绝的操作', bxCount(denials.length, ' 次'), '授权缺失、策略拦截、注入命中'));
+      host.appendChild(bxStatCard('审计链', audit.chain_ok === true ? '校验通过' : (audit.chain_ok === false ? '校验失败' : BX_NA),
+        '共 ' + bxCount(audit.count, ' 条') + (audit.head ? ' · 链头 ' + shortHash(audit.head) : '')));
+    }
+
+    setText($('sec-session-tag'), bxCount(sessions.length, ' 个'));
+
+    const sessionHost = $('sec-sessions');
+    if (sessionHost) {
+      if (!sessions.length) {
+        bxEmpty(sessionHost, '还没有执行记录', textOf(data.empty_reason));
+      } else {
+        sessionHost.replaceChildren();
+        sessions.forEach(function (session) {
+          const box = el('div', 'anomaly');
+          const head = el('div', 'anomaly-head');
+          head.appendChild(el('span', 'anomaly-title', textOf(session.title) || textOf(session.session_id)));
+          head.appendChild(el('span', 'tag ' + (textOf(session.status) === 'done' ? 'ok' : (textOf(session.status) === 'cancelled' ? 'bad' : 'info')), textOf(session.status_label) || textOf(session.status)));
+          box.appendChild(head);
+          box.appendChild(kvRow('会话号', textOf(session.session_id), true));
+          box.appendChild(kvRow('时间', textOf(session.created_text) + ' → ' + textOf(session.last_text)));
+          const nodes = bxArr(session.nodes);
+          if (nodes.length) {
+            box.appendChild(bxTable(
+              ['节点', '工具', '状态', '裁决', '结果'],
+              nodes.map(function (node) {
+                return [
+                  textOf(node.node_id),
+                  textOf(node.tool),
+                  textOf(node.state_label) || BX_TASK_LABEL[textOf(node.state)] || textOf(node.state),
+                  node.level ? (levelText(node.level) + (node.rule_id ? ' · ' + textOf(node.rule_id) : '')) : '',
+                  textOf(node.summary)
+                ];
+              })
+            ));
+          } else {
+            box.appendChild(el('div', 'card-note', '这条会话没有节点记录。'));
+          }
+          const confs = bxArr(session.confirmations);
+          if (confs.length) {
+            box.appendChild(el('div', 'field-label', '确认卡片'));
+            const list = el('div', 'list');
+            confs.forEach(function (conf) {
+              list.appendChild(bxRow(
+                textOf(conf.node_id) + ' · ' + (textOf(conf.status_label) || textOf(conf.status)),
+                '创建 ' + textOf(conf.created_text) + ' · 到期 ' + textOf(conf.expires_text) + (conf.resolved_text ? ' · 处理 ' + textOf(conf.resolved_text) : ''),
+                ''
+              ));
+            });
+            box.appendChild(list);
+          }
+          const bar = el('div', 'anomaly-actions');
+          const auditBtn = el('button', 'btn btn-mini', '看这条会话的审计');
+          auditBtn.type = 'button';
+          auditBtn.addEventListener('click', function () { bxAuditFor(session.session_id); });
+          bar.appendChild(auditBtn);
+          box.appendChild(bar);
+          sessionHost.appendChild(box);
+        });
+        const labels = bxIsObj(data.state_labels) ? data.state_labels : {};
+        const legend = Object.keys(labels).map(function (key) { return textOf(key) + '=' + textOf(labels[key]); }).join(' / ');
+        if (legend) { sessionHost.appendChild(el('div', 'card-note', '任务状态口径：' + legend)); }
+      }
+    }
+
+    setText($('sec-denial-tag'), bxCount(denials.length, ' 次'));
+    const denialHost = $('sec-denials');
+    if (denialHost) {
+      if (!denials.length) {
+        bxEmpty(denialHost, '没有被拒绝的操作', '这个区间里没有触发防线。');
+      } else {
+        denialHost.replaceChildren();
+        denialHost.appendChild(bxTable(
+          ['时间', '原因', '会话'],
+          denials.map(function (item) { return [textOf(item.ts_text), textOf(item.reason), textOf(item.session_id)]; })
+        ));
+      }
+    }
+
+    const note = $('sec-note');
+    if (note) {
+      note.replaceChildren();
+      const lines = [
+        textOf(audit.append_only),
+        '所以链断了是能被发现的：任何人改了历史事件，后面的哈希都对不上。'
+      ];
+      lines.forEach(function (line) {
+        if (line) { note.appendChild(el('div', 'card-note', line)); }
+      });
+      note.appendChild(el('div', 'card-note',
+        '确认卡片与会话记录落在服务端表里，刷新页面不会丢；但正在推进的执行状态保存在进程内存里，服务重启后旧的确认无法继续，需要重新发起。'));
+    }
+  }
+
+  function bxAuditFor(sessionIdValue) {
+    if (!sessionIdValue) { return Promise.resolve(null); }
+    return bxFetch('/api/audit?session_id=' + encodeURIComponent(sessionIdValue)).then(function (json) {
+      const events = bxArr(json && json.events);
+      events.forEach(function (row) {
+        renderAudit({
+          seq: row.seq,
+          event_type: row.event_type,
+          hash: row.hash || (row.payload && row.payload.hash),
+          ts_ms: row.ts_ms
+        });
+      });
+      panelBadge('panel-audit', events.length + ' 条');
+      const panel = $('panel-audit');
+      if (panel) { panel.open = true; }
+      if (!events.length) { appendBubble('sys', '这条会话没有审计条目。'); }
+      return json;
+    }).catch(function (err) {
+      appendBubble('sys', '拉这条会话的审计失败：' + errorText(err));
+    });
+  }
+
+  /* ------------------------------------------------ 会话恢复与节点回填 */
+  const BX_SESSION_KEY = 'banking_session_id';
+
+  function bxRememberSession(sid) {
+    if (!sid) { return; }
+    try { window.sessionStorage.setItem(BX_SESSION_KEY, textOf(sid)); } catch (err) { return; }
+  }
+
+  function bxStoredSession() {
+    try { return textOf(window.sessionStorage.getItem(BX_SESSION_KEY)); } catch (err) { return ''; }
+  }
+
+  function bxMarkSeen(nodes) {
+    bxArr(nodes).forEach(function (node) {
+      bxSeen[textOf(node.node_id) + ':' + textOf(node.state)] = true;
+    });
+  }
+
+  function bxRenderPlanNodes(nodes) {
+    const host = panelBody('panel-plan');
+    if (!host) { return; }
+    host.replaceChildren();
+    const list = bxArr(nodes);
+    if (!list.length) {
+      host.appendChild(el('div', 'card-note', '还没有节点。'));
+      return;
+    }
+    list.forEach(function (node) {
+      const row = el('div', 'plan-node');
+      row.appendChild(el('span', 'plan-tool', textOf(node.node_id) + ' · ' + textOf(node.tool)));
+      row.appendChild(el('span', 'plan-status', textOf(node.state_label) || BX_TASK_LABEL[textOf(node.state)] || textOf(node.state)));
+      host.appendChild(row);
+      const decision = bxIsObj(node.decision) ? node.decision : null;
+      if (decision && decision.level) {
+        host.appendChild(kvRow('裁决', levelText(decision.level) + (decision.rule_id ? ' · ' + textOf(decision.rule_id) : '')));
+        if (decision.reason_text) { host.appendChild(el('div', 'card-note', textOf(decision.reason_text))); }
+      }
+      const result = bxIsObj(node.result) ? node.result : null;
+      if (result) {
+        const summary = textOf(result.summary || (bxIsObj(result.data) ? result.data.summary : '') || result.error_text);
+        if (summary) { host.appendChild(el('div', 'card-note', summary)); }
+      }
+    });
+  }
+
+  function bxRenderPendingCard(card) {
+    if (!bxIsObj(card)) { return; }
+    const box = el('div', 'notice warn');
+    box.appendChild(el('strong', '', '还有一个没处理完的确认'));
+    box.appendChild(el('div', '', '确认号 ' + textOf(card.confirmation_id) + ' · 节点 ' + textOf(card.node_id) +
+      '。刷新后服务端只回传确认号，金额与收款人以重新生成的卡片为准。'));
+    const btn = el('button', 'btn btn-mini', '把这条确认再提交一次');
+    btn.type = 'button';
+    btn.addEventListener('click', function () {
+      confirmAction(textOf(card.confirmation_id), true, factorValue());
+    });
+    box.appendChild(btn);
+    appendNode(box);
+  }
+
+  async function bxRestoreSession() {
+    const sid = bxStoredSession();
+    if (!sid) { return null; }
+    let data = null;
+    try {
+      data = await bxFetch('/api/session/' + encodeURIComponent(sid));
+    } catch (err) {
+      appendBubble('sys', '上次的会话读不出来（' + errorText(err) + '）。');
+      return null;
+    }
+    if (!bxIsObj(data) || data.found === false) {
+      appendBubble('sys', '上次的会话 ' + sid + ' 在服务端找不到了：执行状态在进程内存里，服务重启就会丢。重新说一句话就会开一轮新的。', 'restore');
+      return null;
+    }
+    sessionId = sid;
+    const nodes = bxArr(data.nodes);
+    const cards = bxArr(data.confirmations);
+    const waiting = cards.filter(function (card) { return textOf(card.status) === 'pending'; });
+    const finished = nodes.filter(function (node) { return textOf(node.state) === 'done'; }).length;
+    appendBubble('sys', '已接着上次的会话 ' + sid + '：' + nodes.length + ' 个节点，' + finished + ' 个已完成，' +
+      (waiting.length ? waiting.length + ' 个还在等你确认。' : '没有待确认的操作。'), 'restore');
+    bxRenderPlanNodes(nodes);
+    bxMarkSeen(nodes);
+    waiting.forEach(bxRenderPendingCard);
+    if (bxIsObj(data) && data.balance_fen !== undefined && data.balance_fen !== null) {
+      appendBubble('sys', '服务端当前余额：' + pfYuanFromFen(data.balance_fen) + ' 元（后端原文，不是前端推算）。');
+    }
+    return data;
+  }
+
+  async function bxPollSession(sid, tries) {
+    if (!sid || bxPolling) { return null; }
+    bxPolling = true;
+    let last = null;
+    try {
+      let i;
+      const total = tries || 8;
+      for (i = 0; i < total; i += 1) {
+        try {
+          last = await bxFetch('/api/session/' + encodeURIComponent(sid));
+        } catch (err) {
+          last = null;
+        }
+        if (last && (textOf(last.status) === 'done' || textOf(last.status) === 'cancelled')) { break; }
+        await new Promise(function (resolve) { setTimeout(resolve, 600); });
+      }
+    } finally {
+      bxPolling = false;
+    }
+    if (!bxIsObj(last)) {
+      appendBubble('sys', '没读到最新会话状态，去「执行记录与安全」手动刷新再看。');
+      return null;
+    }
+    bxRenderPlanNodes(last.nodes);
+    bxEmitNewNodeResults(last.nodes);
+    const status = textOf(last.status);
+    if (status === 'done') {
+      appendBubble('agent', '这一轮执行完毕（状态来自服务端会话）。余额：' + (last.balance_fen === null || last.balance_fen === undefined ? BX_NA : pfYuanFromFen(last.balance_fen) + ' 元'), 'done');
+    } else if (status === 'cancelled') {
+      appendBubble('sys', '这一轮已经被取消，未完成的占位会释放。', 'cancelled');
+    } else {
+      appendBubble('sys', '服务端还在处理（状态：' + (BX_TASK_LABEL[status] || status) + '）。可以过一会儿在「执行记录与安全」里刷新。');
+    }
+    bxCacheDrop();
+    if (bxView !== 'assistant') { bxLoad(bxView, true); }
+    return last;
+  }
+
+  function bxEmitNewNodeResults(nodes) {
+    bxArr(nodes).forEach(function (node) {
+      const state = textOf(node.state);
+      const key = textOf(node.node_id) + ':' + state;
+      if (bxSeen[key]) { return; }
+      bxSeen[key] = true;
+      const result = bxIsObj(node.result) ? node.result : null;
+      const summary = result ? textOf(result.summary || (bxIsObj(result.data) ? result.data.summary : '') || result.error_text) : '';
+      if (!summary) { return; }
+      const ok = result && result.ok === true;
+      appendBubble(ok ? 'agent' : 'sys', summary, textOf(node.tool));
+    });
+  }
+
+  /* ------------------------------------------------ 收款人消歧选择 */
+  function bxRenderPayeePicker(clar) {
+    const host = $('chat-log');
+    if (!host) { return; }
+    const list = el('div', 'pick-list');
+    list.appendChild(el('div', 'field-label', textOf(clar && clar.question) || '有多个候选，请选一个'));
+    const cands = bxArr(clar && clar.candidates);
+    cands.forEach(function (cand, index) {
+      const btn = el('button', 'pick');
+      btn.type = 'button';
+      const name = textOf(cand && cand.name);
+      const alias = textOf(cand && cand.alias);
+      btn.appendChild(el('span', 'pick-name', alias ? (name + '（' + alias + '）') : name));
+      const meta = [];
+      if (cand && cand.bank) { meta.push(textOf(cand.bank)); }
+      if (cand && cand.card_tail) { meta.push('尾号' + textOf(cand.card_tail)); }
+      if (cand && cand.phone_masked) { meta.push(textOf(cand.phone_masked)); }
+      meta.push('第 ' + (index + 1) + ' 位');
+      btn.appendChild(el('span', 'pick-meta', meta.join(' · ')));
+      btn.addEventListener('click', function () { bxPickPayee(cand, btn); });
+      list.appendChild(btn);
+    });
+    list.appendChild(el('div', 'card-note',
+      '选完会重新生成确认卡片。系统只认「尾号 4 位」或「第几个」这样的回答，不会自己挑第一个；' +
+      '收款人、金额任何一项变了，之前的授权都会作废。'));
+    host.appendChild(list);
+    scrollChat();
+  }
+
+  async function bxPickPayee(cand, btn) {
+    const tail = cand && cand.card_tail ? textOf(cand.card_tail) : '';
+    if (!tail) {
+      appendBubble('sys', '这个候选没有卡尾号，直接回复「第几个」也可以。');
+      return;
+    }
+    const log = $('chat-log');
+    if (log) {
+      const btns = log.querySelectorAll('.pick');
+      for (let i = 0; i < btns.length; i += 1) { btns[i].disabled = true; }
+    }
+    if (btn) { btn.classList.add('picked'); }
+    appendBubble('user', '尾号' + tail);
+    /* 后端 clarify.augment() 只认候选人的真实卡尾号或「第几个」，这里必须原样回传尾号 */
+    await bxSendText('尾号' + tail);
+  }
+
+  /* ------------------------------------------------ 确认卡片的信息补全 */
+  function bxConfirmRows(data) {
+    const rows = [];
+    const payee = bxIsObj(data.payee) ? data.payee : null;
+    const payeeName = payee ? textOf(payee.name) : fieldVal(data, PAYEE_KEYS);
+    const payeeBits = [];
+    if (payee) {
+      if (payee.bank) { payeeBits.push(textOf(payee.bank)); }
+      if (payee.card_tail) { payeeBits.push('尾号 ' + textOf(payee.card_tail)); }
+      if (payee.alias) { payeeBits.push(textOf(payee.alias)); }
+      if (payee.phone_masked) { payeeBits.push(textOf(payee.phone_masked)); }
+    }
+    if (payeeName) {
+      rows.push(['收款人', payeeName + (payeeBits.length ? '（' + payeeBits.join(' · ') + '）' : ''), 'confirm-payee']);
+    }
+
+    const account = bxIsObj(data.source_account) ? data.source_account : null;
+    if (account) {
+      const bits = [];
+      if (account.name) { bits.push(textOf(account.name)); }
+      if (account.tail) { bits.push('尾号 ' + textOf(account.tail)); }
+      if (account.balance_yuan) { bits.push('当前余额 ' + textOf(account.balance_yuan) + ' 元'); }
+      rows.push(['转出账户', bits.join(' · ') + (account.note ? '（' + textOf(account.note) + '）' : ''), 'confirm-source']);
+    }
+
+    if (data.tool_name || data.method || data.arrival) {
+      const bits = [];
+      if (data.tool_name) { bits.push(textOf(data.tool_name)); }
+      if (data.method) { bits.push(textOf(data.method)); }
+      if (data.arrival) { bits.push(textOf(data.arrival)); }
+      rows.push(['转账方式', bits.join(' · '), 'confirm-method']);
+    }
+
+    if (data.scheduled_for) {
+      rows.push(['预约时间', textOf(data.scheduled_for), 'confirm-time']);
+    } else if (data.tool === 'scheduled_transfer') {
+      rows.push(['预约时间', '后端没有回传执行时间', 'confirm-time']);
+    }
+
+    const fee = bxIsObj(data.fee) ? data.fee : null;
+    if (fee) {
+      rows.push(['手续费', fee.known === true ? (bxCount(fee.amount_fen, ' 分') + (fee.text ? ' · ' + textOf(fee.text) : '')) : (textOf(fee.text) || '本演示环境不计算手续费'), 'confirm-fee']);
+    }
+
+    const verify = bxIsObj(data.verification) ? data.verification : null;
+    if (verify) {
+      const steps = bxArr(verify.steps).map(function (step) {
+        return textOf(step.label) + (step.required === false ? '（可选）' : '');
+      });
+      rows.push(['权限等级', (textOf(verify.level_label) || levelText(verify.level)) + (verify.note ? ' · ' + textOf(verify.note) : ''), 'confirm-level']);
+      rows.push(['验证步骤', steps.length ? steps.join(' → ') : '不需要额外验证', 'confirm-steps']);
+    }
+    return rows;
+  }
+
+  function bxBindNav() {
+    const nav = $('nav');
+    if (nav) {
+      nav.addEventListener('click', function (ev) {
+        const btn = ev.target && ev.target.closest ? ev.target.closest('.nav-tab') : null;
+        if (!btn) { return; }
+        bxSetView(btn.getAttribute('data-view'));
+      });
+      nav.addEventListener('keydown', function (ev) {
+        if (ev.key !== 'ArrowRight' && ev.key !== 'ArrowLeft') { return; }
+        const tabs = Array.prototype.slice.call(nav.querySelectorAll('.nav-tab'));
+        const index = tabs.indexOf(document.activeElement);
+        if (index === -1) { return; }
+        ev.preventDefault();
+        const next = tabs[(index + (ev.key === 'ArrowRight' ? 1 : tabs.length - 1)) % tabs.length];
+        next.focus();
+        bxSetView(next.getAttribute('data-view'));
+      });
+    }
+    document.addEventListener('click', function (ev) {
+      const go = ev.target && ev.target.closest ? ev.target.closest('[data-goto]') : null;
+      if (!go) { return; }
+      bxSetView(go.getAttribute('data-goto'));
+    });
+    const billView = $('view-bill');
+    if (billView) {
+      billView.addEventListener('click', function (ev) {
+        const per = ev.target && ev.target.closest ? ev.target.closest('[data-bill-period]') : null;
+        if (!per) { return; }
+        bxBillPeriod = per.getAttribute('data-bill-period');
+        bxLoad('bill', true);
+      });
+    }
+    const refresh = $('bill-refresh');
+    if (refresh) {
+      refresh.addEventListener('click', function () { bxLoad('bill', true); });
+    }
+  }
+
+
+  function bootAll() {
     boot();
+    bxBindNav();
+    bxLoad('overview');
+    bxRestoreSession();
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', bootAll);
+  } else {
+    bootAll();
   }
 }());
 </script>

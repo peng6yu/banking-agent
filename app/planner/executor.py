@@ -8,7 +8,13 @@ from app import audit, clock, db, funds
 from app.clock import BankError, ValidationError
 from app.models import Action, Dag, Decision
 from app.planner import dag as planner_dag
-from app.planner.events import emit_event, prompt_event, prompt_payload, trace_event
+from app.planner.events import (
+    describe_confirmation,
+    emit_event,
+    prompt_event,
+    prompt_payload,
+    trace_event,
+)
 from app.planner.runner import execute_node, issue_token
 from app.planner.state import (
     BUSY_STATES,
@@ -379,7 +385,10 @@ async def _guard(
         return False, True
     # 确认卡的 future 在 new_confirmation 里就建好了：答案早到（程序化客户端收到帧就回）
     # 也能被接住，不会被 resolve_pending 丢掉后干等 120 秒。
-    await emit_event(emit, prompt_event(decision), prompt_payload(node, conf, decision))
+    # 确认卡片的字段在发事件这一刻从库里查，不在前端拼：来源账户、收款人、
+    # 手续费口径都必须可追溯到一行真实数据。
+    details = describe_confirmation(state.conn, action, decision, tool=node.tool)
+    await emit_event(emit, prompt_event(decision), prompt_payload(node, conf, decision, details))
     audit.append(
         state.conn,
         "confirm.requested",

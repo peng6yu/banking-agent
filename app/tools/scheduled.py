@@ -140,10 +140,15 @@ def list_scheduled(
     ctx: ToolContext, params: dict[str, Any], token: str | None = None
 ) -> ToolResult:
     """列出还没执行的预约转账。"""
+    # 必须按当前用户过滤：这张表跨用户，早先的 SQL 没有 user/account 条件，
+    # 会把别人名下的预约转账也列出来（越权读）。现在从当前账户反查 user_id。
+    acct = primary_account(ctx.conn, ctx.account_id)
     rows = ctx.conn.execute(
         "SELECT s.id, s.amount_fen, s.due_ms, s.recurrence, s.status, p.name AS payee"
         " FROM scheduled_transfers s JOIN payees p ON p.id = s.payee_id"
-        " WHERE s.status = 'scheduled' ORDER BY s.due_ms",
+        " JOIN accounts a ON a.id = s.account_id"
+        " WHERE s.status = 'scheduled' AND a.user_id = ? ORDER BY s.due_ms",
+        (str(acct["user_id"]),),
     ).fetchall()
     items = [
         {
@@ -179,7 +184,11 @@ def cancel_scheduled(
         return ok_result({"scheduled_id": row_id, "status": "cancelled", "idempotent": True,
                           "summary": "这条预约已经取消过了。"})
     if str(row["status"]) != "scheduled":
-        return fail_result("SCHEDULED_NOT_CANCELLABLE", "这笔预约已经执行过了，取消不了；需要的话我可以帮你冲正。")
+        return fail_result(
+            "SCHEDULED_NOT_CANCELLABLE",
+            "这笔预约已经执行过了，取消不了。已经出账的钱只能做账务冲正（本地反向记账），"
+            "这不是把钱从对方那里追回来。",
+        )
     with _tx(ctx.conn):
         ctx.conn.execute(
             "UPDATE scheduled_transfers SET status = 'cancelled' WHERE id = ? AND status = 'scheduled'",
@@ -277,6 +286,15 @@ def _execute_one(
             conn.execute(
                 "UPDATE scheduled_transfers SET status = 'failed', executed_ms = ? WHERE id = ?",
                 (stamp, sched_id),
+            )
+            # 失败也要进审计链：只把状态改成 failed 而不留痕，
+            # 事后既查不到原因，也和"审计覆盖所有资金动作"的承诺对不上。
+            audit.append(
+                conn,
+                "scheduled.failed",
+                {"scheduled_id": sched_id, "amount_fen": amount_fen,
+                 "error_code": type(exc).__name__, "error": str(exc)[:300]},
+                session_id=session_id,
             )
         return {"scheduled_id": sched_id, "status": "failed", "error": str(exc)}
 

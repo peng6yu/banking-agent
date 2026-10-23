@@ -227,6 +227,13 @@ def _payee_candidates(
     return []
 
 
+#: 视图构造器的公开别名。
+#: API 层的只读业务视图（app/api/business.py）直接复用同一份字段定义，
+#: 免得「工具返回的流水」和「账单页展示的流水」字段名慢慢长歪。
+account_view = _account_view
+tx_view = _tx_view
+
+
 def _filter_phone(rows: list[sqlite3.Row], phone: str) -> list[sqlite3.Row]:
     """显式给了手机号就只留对得上的；对不上一条都不留，不悄悄换人。"""
     digits = "".join(ch for ch in phone if ch.isdigit())

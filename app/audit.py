@@ -52,6 +52,9 @@ EVENT_TYPES: Final[frozenset[str]] = frozenset(
         "proactive.monitor_run",
         "proactive.alert_created",
         "proactive.alert_resolved",
+        # 到点执行真的失败了（钱没转出去）：必须留痕，否则库里只剩一个 failed 状态，
+        # 查不出是哪一步炸的，用户问"为什么没转"时答不上来。
+        "scheduled.failed",
         # 模拟支出注入：竞赛演示用的假流水，语义上与真实扣款无关，必须单独一类，
         # 否则审计链里分不清「演示注入」和「工具真的动了钱」。
         "proactive.simulated_expense",

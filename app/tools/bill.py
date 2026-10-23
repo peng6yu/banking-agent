@@ -153,6 +153,7 @@ def _by_category(out_rows: list[sqlite3.Row], total_out: int) -> list[dict[str, 
         {
             "category": category,
             "amount_fen": amount,
+            "amount_yuan": fen_to_yuan_str(amount),
             "count": count,
             "pct": round(amount / total_out * 100, 1) if total_out > 0 else 0.0,
         }
@@ -222,17 +223,28 @@ def _split_order_anomalies(rows: list[sqlite3.Row]) -> list[dict[str, Any]]:
     for merchant in sorted(groups):
         for window in _windows(groups[merchant], SPLIT_WINDOW_MS, SPLIT_MIN_COUNT):
             total = sum(int(row["amount_fen"]) for row in window)
+            window_start_ms = int(window[0]["ts_ms"])
+            window_end_ms = int(window[-1]["ts_ms"])
             found.append(
                 {
                     "kind": "split_orders",
                     "title": f"{merchant} 疑似拆单",
                     "detail": (
-                        f"{_time_text(int(window[0]['ts_ms']))} 到 "
-                        f"{_time_text(int(window[-1]['ts_ms']))}，在 {merchant} "
+                        f"{_time_text(window_start_ms)} 到 "
+                        f"{_time_text(window_end_ms)}，在 {merchant} "
                         f"连着付了 {len(window)} 笔，单笔都在 500—1000 元，"
                         f"合计 {fen_to_yuan_str(total)} 元。"
                     ),
                     "amount_fen": total,
+                    # 证据字段：前端要能列出"相关流水"让人自己复核，
+                    # 只给一句结论等于让人只能信，不能查。
+                    "merchant": merchant,
+                    # transactions.id 是文本主键（形如 t_000000ec），不是整数行号；
+        # 这里必须原样保留字符串，否则下游按 id 回查流水会直接崩。
+        "tx_ids": [str(row["id"]) for row in window],
+                    "occurrence_count": len(window),
+                    "window_start_ms": window_start_ms,
+                    "window_end_ms": window_end_ms,
                 }
             )
     return found
@@ -269,6 +281,11 @@ def _odd_hour_anomalies(rows: list[sqlite3.Row]) -> list[dict[str, Any]]:
                     f"发生在 0 点到 5 点之间，商户 {row['counterparty']} 属于境外。"
                 ),
                 "amount_fen": amount_fen,
+                "merchant": str(row["counterparty"]),
+                "tx_ids": [str(row["id"])],
+                "occurrence_count": 1,
+                "window_start_ms": int(row["ts_ms"]),
+                "window_end_ms": int(row["ts_ms"]),
             }
         )
     return found
@@ -294,11 +311,13 @@ def _is_overseas(row: sqlite3.Row) -> bool:
 def _subscription_hike_anomalies(rows: list[sqlite3.Row]) -> list[dict[str, Any]]:
     """规则三：同一订阅连续两个自然月金额上涨 ≥30%。"""
     totals: dict[tuple[str, tuple[int, int]], int] = {}
+    ids: dict[tuple[str, tuple[int, int]], list[str]] = {}
     for row in rows:
         if str(row["category"]) != "订阅" or str(row["direction"]) != "out":
             continue
         key = (str(row["counterparty"]), _month_key(int(row["ts_ms"])))
         totals[key] = totals.get(key, 0) + int(row["amount_fen"])
+        ids.setdefault(key, []).append(str(row["id"]))
     found: list[dict[str, Any]] = []
     for (merchant, prev_key), prev_amount in sorted(totals.items()):
         cur_amount = totals.get((merchant, _next_month(prev_key)))
@@ -317,6 +336,20 @@ def _subscription_hike_anomalies(rows: list[sqlite3.Row]) -> list[dict[str, Any]
                     f"{fen_to_yuan_str(cur_amount)} 元，涨幅 {round(ratio * 100)}%。"
                 ),
                 "amount_fen": cur_amount - prev_amount,
+                "merchant": merchant,
+                "tx_ids": [*ids.get((merchant, prev_key), []),
+                           *ids.get((merchant, _next_month(prev_key)), [])],
+                "occurrence_count": 2,
+                # 订阅涨价按自然月比较，没有"毫秒窗口"，显式给 null 比编一个时间更诚实
+                "window_start_ms": None,
+                "window_end_ms": None,
+                "comparison": {
+                    "previous_month": _month_label(prev_key),
+                    "current_month": _month_label(_next_month(prev_key)),
+                    "previous_fen": prev_amount,
+                    "current_fen": cur_amount,
+                    "hike_pct": round(ratio * 100),
+                },
             }
         )
     return found

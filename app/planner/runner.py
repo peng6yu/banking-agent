@@ -93,7 +93,18 @@ async def _settle(state: RunState, node: Any, rec: NodeRec, result: ToolResult, 
         rec.summary = question
         persist_node(state, rec, "done")
         await emit_event(emit, "tool", {"node_id": node.id, "ok": True, "summary": question})
-        await emit_event(emit, "done", {"summary": question, "question": question, "balance_after_fen": balance_of(state)})
+        await emit_event(
+            emit,
+            "done",
+            {
+                "summary": question,
+                "question": question,
+                "balance_after_fen": balance_of(state),
+                # 候选收款人必须以结构化形式下发：前端要渲染可点的列表，
+                # 而不是让用户照着一段中文自己敲尾号。
+                "clarification": _payee_clarification(node, data, question),
+            },
+        )
         return STOP
     state.results[node.id] = data
     rec.summary = summarize(node.tool, data)
@@ -103,6 +114,45 @@ async def _settle(state: RunState, node: Any, rec: NodeRec, result: ToolResult, 
     persist_node(state, rec, "done")
     await emit_event(emit, "tool", {"node_id": node.id, "ok": True, "summary": rec.summary})
     return CONTINUE
+
+
+def _payee_clarification(node: Any, data: dict[str, Any], question: str) -> dict[str, Any]:
+    """把"等用户选收款人"这件事表达成结构化数据。
+
+    候选里的手机号只给掩码：确认卡需要区分同名的人，不需要把完整号码摊开。
+    """
+    candidates = []
+    for item in data.get("candidates") or []:
+        if not isinstance(item, dict):
+            continue
+        candidates.append(
+            {
+                "payee_id": str(item.get("payee_id") or ""),
+                "name": str(item.get("name") or ""),
+                "bank": item.get("bank"),
+                "card_tail": item.get("card_tail"),
+                "alias": item.get("alias"),
+                "phone_masked": _mask_phone(item.get("phone")),
+            }
+        )
+    return {
+        "kind": "payee",
+        "node_id": node.id,
+        "query": str(data.get("query") or ""),
+        "count": len(candidates),
+        "candidates": candidates,
+        "question": question,
+        # 用户既可以点列表，也可以直接回「尾号4417」或「第二个」。
+        "accepts": ["select_candidate", "reply_text"],
+        "note": "选好之后我会重新生成确认卡片；金额、收款人任何一项变了，旧的授权都会作废。",
+    }
+
+
+def _mask_phone(phone: Any) -> str | None:
+    text = str(phone or "").strip()
+    if len(text) < 7:
+        return None
+    return f"{text[:3]}****{text[-4:]}"
 
 
 async def block_on_amount(state: RunState, node: Any, emit: Emit) -> str | None:

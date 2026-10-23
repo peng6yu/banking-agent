@@ -259,7 +259,16 @@ def test_analyze_bill_detects_all_three_anomalies(ctx: ToolContext) -> None:
     kinds = [item["kind"] for item in data["anomalies"]]
     assert kinds == ["split_orders", "odd_hour_overseas", "subscription_hike"]
     split, night, hike = data["anomalies"]
-    assert set(split) == {"kind", "title", "detail", "amount_fen"}
+    # 必需字段是集合下限（界面渲染依赖），新增证据字段不得改变这个契约
+    assert {"kind", "title", "detail", "amount_fen"} <= set(split)
+    # 证据字段：用户要能看到"到底是哪几笔流水"构成了这条异常
+    assert split["merchant"] == "优衣库旗舰店"
+    assert split["occurrence_count"] == len(split["tx_ids"]) >= 3
+    assert split["window_end_ms"] - split["window_start_ms"] <= 60 * 60 * 1000
+    assert night["occurrence_count"] == 1 and len(night["tx_ids"]) == 1
+    assert night["window_start_ms"] == night["window_end_ms"]
+    assert hike["comparison"]["hike_pct"] >= 30
+    assert hike["window_start_ms"] is None and hike["window_end_ms"] is None
     assert split["amount_fen"] == 299_700
     assert "优衣库旗舰店" in split["detail"]
     assert night["amount_fen"] == 288_000

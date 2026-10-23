@@ -104,6 +104,15 @@ def _sub_view(row) -> dict[str, Any]:
     }
 
 
+#: 用户可见的能力边界。本地只是银行侧的代扣授权，碰不到商户系统，
+#: 所以不能对用户承诺"以后不会再扣"。
+CANCEL_SCOPE: Final[str] = "bank_side_only"
+CANCEL_BOUNDARY_TEXT: Final[str] = (
+    "只停掉了银行侧的自动扣款；商户那边的会员/订阅本身还在，"
+    "需要你自己在商户 App 或客服那里取消，否则商户可能通过别的渠道继续收款。"
+)
+
+
 def _cancel_payload(row, idempotent: bool) -> dict[str, Any]:
     return {
         "sub_id": str(row["id"]),
@@ -111,6 +120,12 @@ def _cancel_payload(row, idempotent: bool) -> dict[str, Any]:
         "status": "cancelled",
         "next_charge_ms": int(row["next_charge_ms"]),
         "idempotent": idempotent,
-        "message": "这条订阅已经是取消状态了。" if idempotent else "已经取消，下次扣费不会再发生。",
+        "scope": CANCEL_SCOPE,
+        "boundary": CANCEL_BOUNDARY_TEXT,
+        "message": (
+            "这条订阅在我这边已经是取消状态了。"
+            if idempotent
+            else "银行侧的自动扣款已经停掉；商户会员本身没有取消。"
+        ),
         "ts_ms": now_ms(),
     }

@@ -312,10 +312,31 @@ def wait_done(page: Any, timeout: float = 20000) -> None:
     )
 
 
+def open_assistant(page: Any) -> None:
+    """六区信息架构把聊天放进「AI 助手」，默认落在「财务总览」，这里先切过去。"""
+    tab = page.wait_for_selector('nav#nav button.nav-tab[data-view="assistant"]', timeout=15000)
+    tab.click()
+    page.wait_for_function(
+        "() => document.querySelector('#view-assistant').classList.contains('active')",
+        timeout=15000,
+    )
+    page.wait_for_selector("#chat-input", state="visible", timeout=15000)
+
+
+def open_panels(page: Any) -> None:
+    """技术透明面板默认折叠（按需展开），断言前先展开。"""
+    page.evaluate(
+        "() => { document.querySelectorAll('#view-assistant details.panel').forEach(function (d) { d.open = true; }); }"
+    )
+    page.wait_for_timeout(200)
+
+
 def scenario_balance(page: Any, shots: Path) -> dict[str, Any]:
     """场景 1：绿灯查询。断言助手回复、右栏面板、SSE 流式三段证据。"""
     print(f"\n=== 场景 1：输入「{CHAT_TEXT}」 ===")
     page.goto(page.base_url, wait_until="domcontentloaded")
+    open_assistant(page)
+    open_panels(page)
     page.wait_for_function(
         "() => document.querySelectorAll('#cap-list .cap-chip').length > 1 || "
         "!document.querySelector('#cap-list').innerText.includes('加载中')",
@@ -378,6 +399,8 @@ def scenario_confirm(page: Any, shots: Path, prev: dict[str, Any]) -> dict[str, 
     """场景 2：黄灯转账。确认卡真的渲染、按钮真的可点、点了钱真的动。"""
     print("\n=== 场景 2：输入「转 100 元给妈妈」，等待确认卡并点击确认 ===")
     page.goto(page.base_url, wait_until="domcontentloaded")
+    open_assistant(page)
+    open_panels(page)
     page.fill("#chat-input", "转 100 元给妈妈")
     page.click("#chat-send")
     page.wait_for_selector(".confirm-card", timeout=20000)

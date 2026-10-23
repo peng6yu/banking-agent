@@ -312,7 +312,7 @@ A 组 23 条失败、B 组 27 条失败（同一条 case 可多标签）。按�
 
 | 缺陷 | 修复 | 测试 |
 |---|---|---|
-| 多收款人/一句话多笔靠模型槽位判断，模型漏抽就放行 | 新增原话层 `payment_guard.inspect`，A/B 共用 | `tests/test_payment_guard.py`（26 条） |
+| 多收款人/一句话多笔靠模型槽位判断，模型漏抽就放行 | 新增原话层 `payment_guard.inspect`，A/B 共用 | `tests/test_payment_guard.py`（44 条；本行旧快照写 26，2026-10-23 实测 collected 44） |
 | 理财赎回没说金额就建单 | `REDEEM_AMOUNT_QUESTION` + `extra_required` | `test_redeem_without_amount_asks_amount` |
 | 模型把「卖基金再转账」判成 invest，转账半句丢失 | `corrected_intent=transfer` + 跨场景图 | `test_redeem_modelled_as_invest_still_becomes_cross_and_asks_product` |
 | 普通「把基金赎回来」被错误改判 | 仅在同时有收款人+金额时改判 | `test_plain_redeem_stays_invest_without_payee` |

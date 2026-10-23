@@ -37,8 +37,13 @@ from app.tools.base import (
 )
 
 BOUGHT_TEXT: Final[str] = "申购成功，钱已经变成基金份额了。"
-REDEEMED_TEXT: Final[str] = "赎回成功，钱已经回到你的卡里。"
-UNSETTLED_TEXT: Final[str] = "钱已经锁定，但结算没成功，稍后我会重试。"
+#: 赎回是本地记账，别写成"已经回到卡里"（暗示实时到账）。
+REDEEMED_TEXT: Final[str] = "赎回成功：钱已经按本地账务记回你的账户。"
+#: 没有重试实现，见 app/tools/transfers.py 的 UNSETTLED_TEXT 注释。
+UNSETTLED_TEXT: Final[str] = (
+    "钱已经锁定，但结算没成功。系统不会自动重试：这笔锁定 5 分钟后自动释放，"
+    "钱回到可用余额；要买的话需要我重新发起一次。"
+)
 
 
 def buy_fund(ctx: ToolContext, params: dict[str, Any], token: str | None = None) -> ToolResult:
