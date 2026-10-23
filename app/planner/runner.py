@@ -7,6 +7,7 @@ from app import audit, clock, funds
 from app.clock import BankError, TokenMismatch
 from app.models import Action, Decision, ToolResult
 from app.planner import dag as planner_dag
+from app.planner.clarify import remember as remember_clarify
 from app.planner.events import emit_event, summarize, trace_event
 from app.planner.state import (
     CONTINUE,
@@ -77,6 +78,14 @@ async def _settle(state: RunState, node: Any, rec: NodeRec, result: ToolResult, 
     data = dict(result.data)
     question = _payee_gate(node, data)
     if question is not None:
+        # 记下澄清上下文：下一轮用户只回「尾号4417」也能接回这句原话（app/planner/clarify.py）。
+        remember_clarify(
+            state.session_id,
+            text=state.user_text,
+            query=str(data.get("query") or ""),
+            candidates=[dict(item) for item in (data.get("candidates") or []) if isinstance(item, dict)],
+            question=question,
+        )
         blocked = await block_on_amount(state, node, emit)
         if blocked is not None:
             return blocked

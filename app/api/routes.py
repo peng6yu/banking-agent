@@ -31,6 +31,8 @@ from app.llm import LLMError, build_adapter
 from app.models import ChatRequest, ConfirmRequest
 from app.planner import dag as planner_dag
 from app.planner import executor, intent, ticker
+from app.planner.clarify import augment as augment_clarification
+from app.planner.clarify import forget as forget_clarification
 from app.tools.registry import TOOL_NAMES, tool_schemas
 
 log = logging.getLogger(__name__)
@@ -93,9 +95,15 @@ async def chat(request: ChatRequest) -> StreamingResponse:
     """对话主入口：先解析意图，再把执行过程用 SSE 一条条吐出来。"""
     session_id = request.session_id or new_id("s")
     _remember(session_id, "user", request.text)
-    parsed = await _parse(session_id, request.text)
+    # 上一轮如果停在收款人歧义上，这一轮的「尾号4417 / 第一个」要先补全再解析，
+    # 否则解析器只看到一句没有金额的短回答，只能把问题再问一遍（已知限制 3）。
+    resumed_text = augment_clarification(session_id, request.text)
+    parse_text = resumed_text or request.text
+    if resumed_text is None:
+        forget_clarification(session_id)
+    parsed = await _parse(session_id, parse_text)
     return StreamingResponse(
-        _events(session_id, parsed),
+        _events(session_id, parsed, user_text=parse_text),
         media_type=SSE_MEDIA,
         headers=SSE_HEADERS,
     )
@@ -281,7 +289,7 @@ def _parse_sync(
     return asyncio.run(intent.parse(text, history, adapter=get_adapter(), session_id=session_id))
 
 
-async def _events(session_id: str, parsed: intent.IntentResult) -> Any:
+async def _events(session_id: str, parsed: intent.IntentResult, *, user_text: str = "") -> Any:
     """SSE 生成器：先发 start / intent，反问就到此为止，否则挂上执行器。"""
     queue: asyncio.Queue[str | tuple[str, dict[str, Any]]] = asyncio.Queue()
     await queue.put(("start", {"session_id": session_id, "now_ms": clock.now_ms()}))
@@ -291,7 +299,7 @@ async def _events(session_id: str, parsed: intent.IntentResult) -> Any:
         await queue.put(("done", {"summary": parsed.question, "question": parsed.question}))
         await queue.put((_SENTINEL, {}))
     else:
-        _start_run(session_id, parsed, queue)
+        _start_run(session_id, parsed, queue, user_text=user_text)
     while True:
         item = await queue.get()
         if isinstance(item, tuple) and item[0] == _SENTINEL:
@@ -300,7 +308,13 @@ async def _events(session_id: str, parsed: intent.IntentResult) -> Any:
         yield frame(name, data)
 
 
-def _start_run(session_id: str, parsed: intent.IntentResult, queue: asyncio.Queue[Any]) -> None:
+def _start_run(
+    session_id: str,
+    parsed: intent.IntentResult,
+    queue: asyncio.Queue[Any],
+    *,
+    user_text: str = "",
+) -> None:
     """建图并在后台跑；解析失败要退化成单步图，不能让整轮会话死掉。"""
     built = planner_dag.build_or_single({"intent": parsed.intent, "slots": parsed.slots})
 
@@ -309,7 +323,8 @@ def _start_run(session_id: str, parsed: intent.IntentResult, queue: asyncio.Queu
 
     async def driver() -> None:
         try:
-            await executor.run(session_id, built, emit)
+            # user_text 交给执行层：澄清闸门要用原话把短回答补全。
+            await executor.run(session_id, built, emit, user_text=user_text)
         except Exception as exc:  # noqa: BLE001 - 执行期任何异常都只能降级成 INTERNAL
             trace_id = new_id("tr")
             log.exception("api.chat.driver_failed session=%s trace=%s", session_id, trace_id)

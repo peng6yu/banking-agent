@@ -61,6 +61,8 @@ LAYERS: dict[str, int] = {
     "app.planner.runner": 4,
     "app.planner.state": 4,
     "app.planner.card_actions": 4,
+    # 澄清后续答（2026-10-23 限制 3）：短回答接回上一轮原话，只依赖时钟
+    "app.planner.clarify": 4,
     # 确定性拒答守卫（2026-10-23 红队收口）：只依赖 re/dataclass，纯函数
     "app.planner.refusal": 4,
     "app.planner.subscription": 4,
@@ -94,6 +96,7 @@ ALLOWED: dict[str, frozenset[str]] = {
         "app.llm",
         "app.models",
         "app.planner",
+        "app.planner.clarify",
         "app.tools.registry",
     }),
     "app.api.schemas": frozenset(),
@@ -183,6 +186,7 @@ ALLOWED: dict[str, frozenset[str]] = {
         "app.clock",
         "app.models",
         "app.planner",
+        "app.planner.clarify",
         "app.planner.events",
         "app.planner.state",
         "app.policy.engine",
@@ -199,6 +203,9 @@ ALLOWED: dict[str, frozenset[str]] = {
         "app.tools",
     }),
     "app.planner.card_actions": frozenset({
+        "app.clock",
+    }),
+    "app.planner.clarify": frozenset({
         "app.clock",
     }),
     "app.planner.subscription": frozenset({
