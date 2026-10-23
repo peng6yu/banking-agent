@@ -61,6 +61,8 @@ LAYERS: dict[str, int] = {
     "app.planner.runner": 4,
     "app.planner.state": 4,
     "app.planner.card_actions": 4,
+    # 确定性拒答守卫（2026-10-23 红队收口）：只依赖 re/dataclass，纯函数
+    "app.planner.refusal": 4,
     "app.planner.subscription": 4,
     "app.planner.due": 4,
     "app.planner.split_plan": 4,
@@ -116,6 +118,8 @@ ALLOWED: dict[str, frozenset[str]] = {
         "app.clock",
     }),
     "app.llm": frozenset({
+        # 降级链要记 llm.fallback.switch 审计：切目标必须留痕
+        "app.log",
         "app.script_mode",
     }),
     "app.log": frozenset({
@@ -141,6 +145,7 @@ ALLOWED: dict[str, frozenset[str]] = {
         "app.planner.card_actions",
         "app.planner.due",
         "app.planner.intent",
+        "app.planner.refusal",
         "app.planner.split_plan",
         "app.planner.subscription",
         "app.tools.base",
@@ -167,10 +172,12 @@ ALLOWED: dict[str, frozenset[str]] = {
     "app.planner.intent": frozenset({
         "app.llm",
         "app.money",
+        "app.planner",
         "app.planner.card_actions",
         "app.planner.intent_schema",
         "app.security",
     }),
+    "app.planner.refusal": frozenset(),
     "app.planner.intent_schema": frozenset(),
     "app.planner.runner": frozenset({
         "app.clock",
