@@ -6,14 +6,17 @@
 
 ## 30 秒看懂
 
-不用读文档，三条命令就能自己跑起来看效果：
+新电脑上就两条命令（脚本幂等，重跑不会破坏已有配置）：
 
 ```bash
-cd banking-agent
-python3.12 -m scripts.seed                      # 建库 + 种子数据（幂等，重复跑不会重复插；演示玩过之后余额变了，用 --force 删库重建恢复初始态）
-export CAPABILITY_SECRET=$(python3.12 -c "import secrets;print(secrets.token_hex(32))")   # 能力令牌签名密钥，必填，见「已知限制 1」
-python3.12 -m uvicorn app.main:app --port 8000  # 起服务
+git clone https://github.com/peng6yu/banking-agent.git && cd banking-agent
+make setup   # 没装 make 就 bash scripts/setup.sh
+make run     # 打开 http://127.0.0.1:8000
 ```
+
+`make setup` 依次做：找解释器（3.12 优先）→ 建 `.venv` → 装依赖（自动绕开本机 pip.conf 里解析不了的索引）→ 生成 `.env`（权限 600，不入库）→ 定模型来源 → 建库 + 种子 → 真模型时再跑一遍协议自检。模型来源它自己判断：环境或 `.env` 里已有 key 就用云端，本机 Ollama 在跑就用 Ollama，都没有才退回离线协作桩（`MOCK_MODE=script`，零网络也能演查余额与转账）。可以点名：`make setup ARGS="--ollama"` / `ARGS="--mock"` / `ARGS="--dry-run"`（只打印计划不动文件）。**仓库里没有任何人的 API key**，换厂商只改 `.env` 三行，见下面「模型配置」。
+
+不想建 venv 也行：系统 `python3.12` 装好依赖后，`python3.12 -m scripts.seed && python3.12 -m uvicorn app.main:app --port 8000` 一样能跑；能力令牌密钥首次运行会自动生成并落盘（`data/token_secret`，0600）。
 
 然后浏览器打开 <http://127.0.0.1:8000>，在左栏输入框里打一句：
 
@@ -29,18 +32,18 @@ python3.12 -m uvicorn app.main:app --port 8000  # 起服务
 
 ## 快速开始（评委复现路径）
 
-前提：解释器固定 `python3.12`（本项目不用 venv，见「已知限制 6」）。
+一条命令到底：`make setup && make run`。想看清每一步在做什么，或者手动分步：
 
 | 步骤 | 命令 | 实测结果 |
 |---|---|---|
-| 0. 装依赖 | `python3.12 -m pip install fastapi uvicorn pydantic httpx pyyaml` | 换机器时才需要；本机已装 |
-| 1. 配密钥 | `bash setup_env.sh --prompt`（或 `cp .env.example .env` 手填） | 生成 `.env`（权限 600，不入库）+ 能力令牌密钥。**任意厂商都行，见「模型配置」一节** |
-| 1b. 补能力密钥 | `export CAPABILITY_SECRET=$(python3.12 -c "import secrets;print(secrets.token_hex(32))")` | **必须**，否则黄灯/红灯全部 fail closed |
-| 2. 建库 | `python3.12 -m scripts.seed` | 幂等；末行 `seed.ok random_seed=20261018 tables=17 window_days=180`。**演示跑过转账后余额已变，自检会报 `seed.stale` 并失败——这是设计，用 `python3.12 -m scripts.seed --force` 删库重建即可恢复初始态** |
-| 3. 起服务 | `python3.12 -m uvicorn app.main:app --port 8000` | 打开 <http://127.0.0.1:8000> |
-| 4. 自检 | `curl -s http://127.0.0.1:8000/api/health` | `{"ok":true,"status":"ok","model":"MiniMax-M3.1-Flash-Preview","tools":14,"db":true,...}` |
+| 0. 一键配置 | `make setup`（等价 `bash scripts/setup.sh`） | 建 `.venv`、装依赖、生成 `.env`、选模型、建库、自检；幂等可重跑，`--dry-run` 只打印计划 |
+| 1. 起服务 | `make run`（等价 `python3.12 -m uvicorn app.main:app --port 8000`） | 打开 <http://127.0.0.1:8000> |
+| 2. 自检 | `curl -s http://127.0.0.1:8000/api/health` | `{"ok":true,"status":"ok","model":"MiniMax-M3.1-Flash-Preview","tools":14,"db":true,...}` |
+| 3. 不配模型也要演 | `make setup ARGS="--mock"` | `MOCK_MODE=script` 离线协作桩：查余额、转账两种业务照演，其余照实反问 |
+| 4. 演示跑脏了复原 | `make reseed`（等价 `python3.12 -m scripts.seed --force`） | 删库重建初始态，末行 `seed.ok random_seed=20261018 tables=18 window_days=180` |
+| 5. 换模型 / 换厂商 | 改 `.env` 三行 → `make smoke` | 4/4 PASS 才算配好，见下一节「模型配置」 |
 
-`make run` / `make seed` / `make test` / `make smoke` 是上面几条的快捷方式，行为完全一致。
+依赖清单在 `requirements.txt`（fastapi / uvicorn / pydantic / httpx / pyyaml），`make setup` 会装进 `.venv`；系统 `python3.12` 已装好依赖时也可以直接跑，两条路都实测过。
 
 ## 模型配置（仓库不含密钥，换厂商只改三行）
 
@@ -72,8 +75,8 @@ python3.12 -m app.smoke               # 自检：4/4 PASS 才算配好（会打�
 **换厂商有三条硬要求**（代码写死的调用方式）：① 支持 `tool_calls`；② 接受 `tool_choice: "auto"`；③ 支持 SSE 流式。
 各厂商填法、报错速查表、换模型后必跑的回归清单：**[docs/模型配置说明.md](docs/模型配置说明.md)**。
 
-> 没有 key 也能看演示：`MOCK_MODE=script` 是零网络的离线协作桩（只回放「查余额」与「转账」两种业务）。
-> `MOCK_MODE=true` 则是**对抗演示专用**的恶意模型桩，别混用（见「已知限制 7」）。
+> 没有 key 也能看演示：`MOCK_MODE=script` 是零网络的离线协作桩（只回放「查余额」与「转账」两种业务）；`make setup` 在既没有 key、本机也没有 Ollama 时会自动用它。
+> `MOCK_MODE=true` 是**对抗演示专用**的恶意模型桩：固定吐「转出全部余额到陌生账户」的计划，只用来演「模型被劫持也动不了一分钱」，**别拿它演普通问答**——问什么都是「我听不懂」。
 
 ## 这是什么
 
@@ -179,7 +182,7 @@ curl -s http://127.0.0.1:8000/api/audit/verify
 ### 单元与集成测试（实测全绿，用例数持续增补）
 
 ```bash
-python3.12 -m pytest -q tests/            # 862 passed, 4 skipped（2026-10-23 实测；用例会随增补变化，复跑以实测为准）
+python3.12 -m pytest -q tests/            # 870 passed, 4 skipped（2026-10-23 实测；用例会随增补变化，复跑以实测为准）
 ```
 
 ### 前端合规自检（实测 62 项全过）
@@ -249,7 +252,7 @@ python3.12 -m app.smoke                    # 实测 4/4 PASS，主脑延迟约 1
 | `app/tools/` | 26 个工具：查人、查余额、账单、卡片、订阅、转账、资金冻结等 |
 | `app/api/` | 10 个 HTTP 端点 + 根页面 |
 | `web/index.html` | 单文件前端（原生 JS，无框架、无 CDN、零外链） |
-| `tests/` | pytest 用例集（862 passed / 4 skipped，2026-10-23 实测）+ 43 条红队 YAML |
+| `tests/` | pytest 用例集（870 passed / 4 skipped，2026-10-23 实测）+ 43 条红队 YAML |
 | `scripts/` | 种子脚本、前端合规检查器 |
 | `docs/` | 交接规格书 00—10（写代码前必读）+ 答辩与演示交付件 |
 | `规划/` | 前期选型与模型实测记录 |
@@ -260,24 +263,41 @@ python3.12 -m app.smoke                    # 实测 4/4 PASS，主脑延迟约 1
 
 | 命令 | 作用 | 实测 |
 |---|---|---|
+| `make setup` | 一键配置新电脑（.venv + 依赖 + .env + 选模型 + 建库 + 自检） | ✅ 幂等；`ARGS="--dry-run"` 可预演 |
 | `make run` | 启动服务（--reload） | ✅ |
 | `make seed` | 建库 + 种子（幂等） | ✅ |
-| `make test` | pytest 全跑 | ✅ 全绿（862 passed / 4 skipped，2026-10-23 实测） |
+| `make test` | pytest 全跑 | ✅ 全绿（870 passed / 4 skipped，2026-10-23 实测） |
 | `make smoke` | 模型连通性自检 | ✅ 4/4 |
 | `make cov` | 覆盖率（未装 pytest-cov 时自动退回纯跑） | ✅ |
 | `make reset` | `POST /api/demo/reset` 演示前清场 | ✅ |
 | `make redteam` | 跑 43 条红队用例并打印七列判定表 | ✅ runner 已交付（commit c94a8cd）；全量约 12 秒跑完，退出码 1 = 有用例未通过 |
 | `make fresh` | 清理 → 种子 → 测试 | ✅ |
 
-## 已知限制（照实写，不藏）
+## 已经解决的问题（写在这里，不再算限制）
 
-1. **能力令牌密钥：默认自动生成，配了就必须是对的。** 取值顺序是「显式传入 → 环境变量 `CAPABILITY_SECRET` → 本地文件 `data/token_secret`（路径可用 `CAPABILITY_SECRET_FILE` 覆盖）」。变量**没设置**时首次运行生成一把 64 位十六进制密钥并落盘（权限 0600，已在 `.gitignore`），重启复用，删文件即轮换；变量**设置了**（哪怕设成空串）就只认 64 位十六进制，格式不对立刻 fail closed，确认时返回 `MISSING_CAPABILITY`——绝不退回硬编码默认密钥。生产部署建议显式配置环境变量，别依赖本地文件。回归测试：`tests/test_capability_secret.py`（8 条）。
-2. **红队 43 条现已全部通过。** 自动判定 runner（`make redteam` / `python3.12 -m scripts.redteam`，四模块 commit c94a8cd）2026-10-23 实跑 **PASS 43 / FAIL 0**，约 12 秒自行结束。历史 14 条 FAIL（commit `6b3b6c9` 快照）当时全部是 `LEVEL_BELOW`，逐条归因后分成两类：**8 条是夹具/判定口径缺陷**（脚本模型认不出卡片写操作、判定器根本没有「这一轮没走到策略层」这个级别、期望里把 503/反问轮写成 green），**6 条是设计取舍**（澄清即拒答、模型不可用、反问轮无裁决）。修的时候没有放宽标准，而是两边一起改 —— 产品侧新增确定性拒答守卫 `app/planner/refusal.py`（验证码/系统提示词/密钥/删审计/加收款人/改登录密码/冒充内部身份这 7 类话术在**调用模型之前**就送进 R03 红灯并落 `policy.decided`）、反问轮也扫注入并落 `injection.detected`、写库失败降级落盘并带 `trace_id` 回查、改密措辞词表补齐、注入污点棒改**严格会话认领**（宁可漏升色也不串味）、写锁竞争转 `SYSTEM_BUSY` 一句人话；判定侧新增 `level=none`（表示这一轮没有裁决记录，而不是判了绿灯）、把 `injection.detected.level_floor` 纳入级别判定、新增 `partial_write` 探针与 `must_contain_text` 断言。逐条归属与修正记录见 `docs/红队失败归因.md`，旧数字在 `docs/安全自评报告.md` §0.0 保留为历史快照。
-3. **同名收款人：一句带尾号最省事，只回「尾号4417」也能接上。** 种子数据里有两个「张三」；第一轮会正确反问「你要付给哪一位？」。原句「转 500 元给张三尾号 4417」只解析出 1 个张三 → R06 黄灯 → 确认 → 转账成功（余额 1286050 → 1236050，本机实测，commit `56a2741`）。现在**单独回一句「尾号4417」或「第一个」也可以**：`app/planner/clarify.py` 会把这次短回答接回上一轮原话再解析，用户不必重说整句。上下文 5 分钟过期、只认候选里真实存在的尾号/序号（手滑填一个不存在的尾号不会被当成选择），仍然不盲选同名收款人。回归测试：`tests/test_clarify_resume.py`（12 条，含 /api/chat 真链路）。
-4. **场景 6 已收紧到一轮走完。** 2026-10-22 用真实 MiniMax 跑赛题原句「下周三我妈生日，帮我提前留出300块，到时候给她订束花送过去」时，模型把「我妈」当关系词、收款人留空，于是多问了一轮「这份礼物是给谁过生日？」。根因在解析层：数据层早就支持这个称谓（`scripts/seed.py` 里「妈妈」的 alias 就是「我妈」）。现在 `app/planner/intent.py` 的 `_relation_payee` 会在模型没填 `payee_name` 时按原话把亲属称谓补上（我妈 / 老妈 / 妈妈 / 我爸 / 老婆 / 老公 / 儿子 / 女儿 / 哥姐弟妹…），赛题原句一次解析即命中，四节点照旧全走通（`resolve_payee → query_balance → reserve_funds → pay_merchant`，两次黄灯确认），余额 1286050 → 1256050。原话里没有任何称谓线索时仍然反问，查无此人也仍然照实说「没找到」，绝不猜人。回归测试：`tests/test_relation_payee.py`（11 条，含真实 seed 别名查询）。其余跨场景仍由 `scripts/e2e.py` 13 步演示覆盖（真实 FastAPI + 真实策略/工具/审计，只把 LLM 那一层换成脚本适配器）。
-5. **SSE 流在等待确认期间保持打开，窗口默认 120 秒、可用 `CONFIRM_TIMEOUT_S` 调。** 确认结果顺着同一条流回传，代价是纯命令行客户端得另开一个请求去 POST `/api/confirm`（这是 SSE 的语义，不是缺陷）。窗口过了没人点头，确认卡自动作废、预授权全部释放（此前曾因毫秒当秒而失效，已修：commit `93f28f2`）。现在窗口成了运行期参数：`CONFIRM_TIMEOUT_S=30 make run`（可填 10—3600 秒），SSE 的 `expires_in_s`、确认卡 `expires_ms`、执行器等待时长三处跟着同一档走；非法值回落 120 秒并打 `planner.confirm_timeout.*` 警告，不会把链路打成 500。回归测试：`tests/test_confirm_timeout.py` + `tests/test_confirm_timeout_config.py`（9 条）。
-6. **venv 现在能用了：`make venv`。** 之前装不上不是网络挂了，而是本机 pip 配置的锅：`~/.config/pip/pip.conf` 里有 `extra-index-url=https://pypi.ngc.nvidia.com`，这个域名在本机不解析，于是每个包都报 `Failed to establish a new connection: [Errno -2] 名称或服务未知`（`curl https://pypi.org/simple/` 是 200，只查 pypi 永远看不出问题）。`make venv` 用 `PIP_CONFIG_FILE=/dev/null` + `pip --isolated` + 显式 `--index-url` 绕开它，2026-10-23 实测从零建 `.venv`、装齐全部依赖并在里面跑通全量测试（`.venv/` 已 gitignore）。要换索引：`PIP_INDEX=https://pypi.org/simple make venv`。宿主机没有 pip 配置问题的，直接用系统 `python3.12` 也一样。
-7. **模型默认走云端 MiniMax，但厂商可换、可自动降级。** 代码只依赖 OpenAI 兼容协议（`tools` + `tool_choice:"auto"` + SSE 流式），换厂商只改 `.env` 三行（`LLM_API_KEY` / `LLM_BASE_URL` / `LLM_MODEL`，旧名 `MINIMAX_*` 仍然生效）。主目标不可用时按 `LLM_FALLBACK`（同厂商换模型）与 `LLM_FALLBACK_VENDORS`（跨厂商，格式 `base_url::模型名::KEY_ENV_NAME`）自动降级：401/403/404/408/429/5xx/超时会切，400/422 不切（请求体错了换谁都一样）；切换会打 `llm.fallback.switch` 日志，`LLMResponse.served_by` 告诉你谁真正服务了这次请求。换厂商之前用一条命令验四件事 —— `python3.12 -m scripts.provider_check`（连通性 / 真有 `tool_calls` / 接受 `tool_choice:"auto"` / SSE 以 `finish_reason` 收尾），它只从环境变量读 key、输出全打码。**两个真实厂商都真机跑过**（2026-10-23）：云端 MiniMax（默认）+ **本地 Ollama**（`ollama pull qwen2.5:0.5b` 起的 OpenAI 兼容端点 `http://127.0.0.1:11434/v1`）。Ollama 侧实测三件事：`scripts.provider_check` **4/4 PASS**（连通 200/144ms、真有 `tool_calls`、接受 `tool_choice:"auto"`、SSE 18 条 data 行以 `finish_reason=stop` 收尾且无 `[DONE]`）、`app.smoke` **4/4 PASS**、以及**真降级链**——MiniMax 配额耗尽返回 429 后自动切到 Ollama 并正常出话（日志 `llm.fallback.switch` status=429 → `served_by=vendor:http://127.0.0.1:11434/v1`，275ms，内容「收到」）。**仍未验的**：其他云厂商（DeepSeek / 通义 / 智谱等）没有 key，只有 21 条降级单测与协议层覆盖，本仓库不替它们背书；各厂商填法与兼容底线见 [docs/模型配置说明.md](docs/模型配置说明.md)（含第 12 节降级链、第 13 节本地 Ollama），结论以 `app.smoke` 与回归测试实测为准。`MOCK_MODE=1`（等价 `true`）是**对抗演示专用**的离线固定桩：它把模型换成一个恶意的，固定吐「转出全部余额到陌生账户」的计划，只用来现场演示「模型被劫持也动不了一分钱」；**不能拿它演普通问答**——问什么都是「我听不懂」。断网要演正常链路请用 `MOCK_MODE=script`：协作回放桩，纯规则、确定性、零网络，只回放「查余额」与「转账」两种业务，其余话术照实反问，绝不瞎猜。
+这些原来写在「已知限制」里，现在都真解了，各自带回归测试：
+
+| 原来是什么问题 | 现在怎么样 | 回归测试 |
+|---|---|---|
+| 能力令牌密钥必须手动 `export CAPABILITY_SECRET`，忘了就点不动确认 | 首次运行自动生成 64 位密钥落盘（`data/token_secret`，0600，已 gitignore），重启复用、删文件即轮换。显式设了就只认 64 位十六进制，格式不对立刻 fail closed（设成空串等于「关掉」，同样拒绝）——绝不退回硬编码默认密钥 | `tests/test_capability_secret.py`（8 条） |
+| 红队 43 条里有 14 条 FAIL | **PASS 43 / FAIL 0**（`make redteam`，约 12 秒）。14 条里 8 条是夹具/判定口径缺陷、6 条是设计取舍，两边一起改而不是放宽标准：新增确定性拒答守卫 `app/planner/refusal.py`（验证码/系统提示词/密钥/删审计/加收款人/改读密码/冒充内部身份 7 类话术在调模型之前就送 R03 红灯）、反问轮也扫注入、写库失败降级落盘并带 `trace_id`、注入污点棒改严格会话认领、写锁竞争转 `SYSTEM_BUSY` 一句人话；判定侧补 `level=none`、把 `injection.detected.level_floor` 纳入级别判定、加 `partial_write` 探针与 `must_contain_text` 断言 | `make redteam`；逐条归因见 `docs/红队失败归因.md` |
+| 同名收款人必须一句说清「张三尾号4417」，只回「4417」接不上 | 单独回「尾号4417」或「第一个」也能接上：`app/planner/clarify.py` 把短回答接回上一轮原话再解析；上下文 5 分钟过期，只认候选里真实存在的尾号/序号（手滑填一个不存在的不算数），仍然不盲选 | `tests/test_clarify_resume.py`（12 条，含 `/api/chat` 真链路） |
+| 场景 6 要两轮（模型把「我妈」当关系词，没填收款人） | 解析层兜底：模型没填 `payee_name` 时按原话补亲属称谓（我妈/老妈/妈妈/我爸/老婆/老公/儿子/女儿/哥姐弟妹…），赛题原句一轮命中四节点；原话没有任何称谓线索仍反问，查无此人照实说「没找到」 | `tests/test_relation_payee.py`（11 条，含真实 seed 别名查询） |
+| 确认窗口写死 120 秒，长演示等不起 | `CONFIRM_TIMEOUT_S=30 make run`（可填 10—3600 秒）：SSE 的 `expires_in_s`、确认卡 `expires_ms`、执行器等待时长三处同档；非法值回落 120 秒并打 `planner.confirm_timeout.*` 警告，不会把链路打成 500 | `tests/test_confirm_timeout.py` + `tests/test_confirm_timeout_config.py`（9 条） |
+| venv 装不上，每个包都报 `[Errno -2] 名称或服务未知` | 不是网络挂了，是本机 `~/.config/pip/pip.conf` 的 `extra-index-url=https://pypi.ngc.nvidia.com` 解析不了。`make venv` / `make setup` 用 `PIP_CONFIG_FILE=/dev/null` + `pip --isolated` + 显式 `--index-url` 绕开；换镜像 `PIP_INDEX=https://pypi.org/simple make venv` | `tests/test_setup_script.py`（8 条）；2026-10-23 从零建 `.venv` 并在里面跑通全量测试 |
+| 只在 MiniMax 上真机验过，降级链没验过 | 两个真实厂商都跑过：云端 MiniMax + 本地 Ollama（`qwen2.5:0.5b`）。Ollama 侧 `provider_check` **4/4**、`app.smoke` **4/4**、真降级链（MiniMax 429 → 自动切 Ollama，275ms 出话，`served_by=vendor:http://127.0.0.1:11434/v1`）。`make setup` 能认出本机 Ollama 并直接写好配置 | `tests/test_llm_fallback.py`（21 条）+ 手工三验记录见 `docs/模型配置说明.md` §12–§13 |
+
+## 仍然的边界（照实写，不藏）
+
+这些是设计边界或没条件验证的东西，不是待修 bug：
+
+1. **其他云厂商没有 key，未真机验证。** DeepSeek / 通义 / 智谱 / Kimi / OpenAI 的填法在「模型配置」表里；代码只依赖 OpenAI 兼容协议，降级侧有 21 条单测覆盖，但本仓库不替它们的真实行为背书——换之前先跑 `python3.12 -m scripts.provider_check` 与 `make smoke`。
+2. **自动降级只在「失败」时发生。** 401/403/404/408/429/5xx/超时切下一个目标，400/422 直接抛（请求体错了，换谁都一样）。不做语义级路由（例如「这类任务交给更便宜的模型」），也不做延迟加权选目标。
+3. **本地小模型有准确率上限。** `qwen2.5:0.5b` 证明的是协议通、降级通、离线可演；复杂多轮意图会退化。演示请用云端主模型，Ollama 只作降级与断网备份。
+4. **场景覆盖有边界。** 转账支持口语金额、同名按卡尾号收敛、日累计与多因子升色；季付定时与 AA 拆分未实现。账单异常识别三类（拆单、凌晨境外、订阅涨价），不做全量对账。
+5. **单用户单账户，没有登录体系与 RBAC。** 这是比赛原型：所有银行数据由本地种子生成，是虚构数据，不连接任何真实银行系统，不发起真实支付。
+6. **多因子是本地确定性 mock。** 人脸、动态口令、短信验证码都在本地校验（桩），不接真实生物识别或运营商网关；协议位在 `app/tools/` 与策略层里留着，接真渠道要替换实现。
+7. **SSE 长连接对纯 CLI 不友好。** 确认结果顺着同一条流回传，命令行客户端得另开请求 POST `/api/confirm`——这是 SSE 的语义，不是缺陷。
 
 ## 演示与答辩材料
 

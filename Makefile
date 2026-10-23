@@ -6,10 +6,15 @@ PY ?= python3.12
 PIP_INDEX ?= https://pypi.tuna.tsinghua.edu.cn/simple
 VENV_PY ?= .venv/bin/python
 
-.PHONY: help install venv run seed reseed test cov redteam smoke browser-smoke fresh clean reset check-env
+.PHONY: help setup install venv run seed reseed test cov redteam smoke browser-smoke fresh clean reset check-env
+
+# make setup 的透传参数，例如 make setup ARGS="--dry-run" 或 ARGS="--ollama"
+ARGS ?=
 
 help:
 	@echo 可用命令：
+	@echo   make setup     一键配置（新电脑：建 .venv、装依赖、生成 .env、选模型、建库、自检）
+	@echo   make setup ARGS="--dry-run"   只打印计划不动文件；ARGS="--ollama"/"--mock" 指定模型来源
 	@echo   make check-env 打印解释器版本
 	@echo   make venv     建 .venv 并装依赖（绕开本机 pip.conf 的坏索引）
 	@echo   make run       启动服务 http://127.0.0.1:8000
@@ -21,6 +26,9 @@ help:
 	@echo   make browser-smoke 真浏览器冒烟（Playwright + Chromium，截图进 docs/交付/截图/）
 	@echo   make fresh     从零到可演示
 	@echo   make clean     清理缓存与数据库
+
+setup:
+	bash scripts/setup.sh $(ARGS)
 
 check-env:
 	$(PY) --version

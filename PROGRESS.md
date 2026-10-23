@@ -206,3 +206,30 @@
 - 降级链只在"主目标失败"时切，没有"回答质量差就切"的语义级降级。
 - Ollama 0.5b 能过协议四关但业务准确率明显弱于云端，只适合验证兼容性与断网兜底，不做答辩主脑。
 
+
+## v1.7.0 一键配置 + 限制重分类  2026-10-23
+
+> 起因：用户看完 v1.6.1 说「既然都不是限制了就别写在限制里了，而且我需要一键在新电脑上方便快捷配置」。
+
+### 一、代码：`scripts/setup.sh` + `make setup`
+- [x] 新脚本 `scripts/setup.sh`（290 行，`bash -n` 干净）：找解释器（3.12 → 3.11 → 3，要求 ≥3.11）→ 建/复用 `.venv` → 装依赖（`PIP_CONFIG_FILE=/dev/null` + `pip --isolated` + 显式 `--index-url`，失败回落 pypi.org，再失败给换源提示）→ 生成 `.env`（不存在时从 `.env.example` 复制，`chmod 600`）→ **自动判断模型来源**（环境/`.env` 有 `LLM_API_KEY`|`MINIMAX_API_KEY` → 云端；本机 `curl $OLLAMA_HOST/v1/models` 通且有模型 → Ollama；都没有 → `MOCK_MODE=script` 离线桩）→ `scripts.seed`（失败自动 `--force` 重建并警告）→ 真模型时跑 `scripts.provider_check`（失败只警告）→ 打印下一步与 `.env` 现值。
+- [x] 选项：`-y/--yes`、`--ollama`、`--mock`、`--index URL`、`--skip-deps`、`--skip-seed`、`--skip-check`、`--dry-run`、`-h/--help`；未知参数 exit 2；全程幂等，重复跑不破坏已有 `.env`。
+- [x] `Makefile` 新增 `setup` 目标（`bash scripts/setup.sh $(ARGS)`）与 `ARGS` 透传，help 加两行；`.PHONY` 同步。
+- [x] 顺手修掉一处真实告警：`app/planner/refusal.py:45-46` 的 `s` 在非 raw 字符串里（`SyntaxWarning: invalid escape sequence`），改成 raw 字符串，正则语义不变。
+- [x] 新增 `tests/test_setup_script.py`（8 条）：`bash -n`、可执行位、`--help` 选项齐全、未知参数 exit 2、`--dry-run` 不创建 `.env`/`.venv` 且目录快照不变、`--index` 生效、pip 隔离三参数固定出现、`--mock` 跳过模型自检。
+
+### 二、文档：限制重分类
+- [x] README 原来的「## 已知限制（照实写，不藏）」七条整体拆成两节：**「## 已经解决的问题（写在这里，不再算限制）」**（表格：原问题 → 现在 → 回归测试，含红队 43/43）与 **「## 仍然的边界（照实写，不藏）」**（其他云厂商无 key 未验、降级只按失败切无语义级路由、本地小模型准确率上限、场景覆盖边界、单用户无 RBAC、多因子是本地 mock、SSE 长连接对纯 CLI）。
+- [x] README「30 秒看懂」改成 `git clone` + `make setup` + `make run` 两条命令；「快速开始」表格重写成 0—5 六行（一键配置 / 起服务 / health / `--mock` / `reseed` / 换模型）；「模型配置」里的 `MOCK_MODE` 说明去掉了对旧「已知限制 7」的引用。
+- [x] 同步 `docs/模型配置说明.md`（§0 加一键入口、§5 抬头改成「实测过 MiniMax + Ollama 两个」）、`docs/技术文档.md`（1.2 复现加 `make setup`）、`docs/02_目录结构与文件职责.md`（登记 `scripts/setup.sh` 与 `tests/test_setup_script.py`）、`docs/09_工作区与Git规范.md`（一键配置命令行 + 修正「不建 venv」那条过时结论）、`.env.example`（头部加一键配置提示）。
+- [x] 测试条数全仓同步 **862 → 870 passed / 4 skipped**（README、技术文档、答辩PPT大纲、提交物对照表、交付说明、红队失败归因、安全自评报告 §0.0、`docs/交付/build_ppt.py`）。
+
+### 三、复验（2026-10-23 实测）
+- `python3.12 -m pytest -q tests/` → **870 passed / 4 skipped**（12.5s，含新增 8 条）
+- 端到端：`git archive HEAD` 导出干净副本到 `/tmp/setup_e2e`，`bash scripts/setup.sh --mock` 从零跑通：建 `.venv` → 装齐依赖 → 生成 `.env` → `MOCK_MODE=script` → `seed.ok`，退出码 0；`--dry-run` 对仓库无任何写入。
+- `python3.12 -m scripts.redteam` → **PASS 43 / FAIL 0**；随后 `python3.12 -m scripts.seed --force` 复原演示库；`python3.12 scripts/check_frontend.py` → 62/62。
+
+### 遗留（照实说）
+- `make setup` 的端到端只在 Linux + 本机 Ollama 环境验过；macOS 未验（脚本只用 bash 3.2 兼容语法，未用到 `mapfile`/关联数组，理论可跑）。
+- 自动挑 Ollama 时只认 `/v1/models` 列表里的第一个 qwen 系模型；想要特定模型用 `--ollama` 前先 `ollama pull`。
+- 「其他云厂商未真机验证」仍在边界里，没变。
