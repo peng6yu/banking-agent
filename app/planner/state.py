@@ -13,6 +13,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import sqlite3
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -29,8 +30,13 @@ from app.tools import base as tool_base
 log = logging.getLogger(__name__)
 
 Emit = Callable[[str, dict[str, Any]], Any]
-#: 确认卡有效期：**毫秒**。对外承诺的「120 秒」就是这个常量（换算用 ms_to_seconds）。
+#: 确认卡有效期的**默认值**（毫秒）。实际取值走 confirm_timeout_ms()：
+#: 环境变量 CONFIRM_TIMEOUT_S（秒，10—3600）可覆盖，便于命令行/IM 客户端按自己的节奏调。
 CONFIRM_TIMEOUT_MS: Final[int] = 120_000
+#: 确认卡有效期的覆盖项（单位秒）；不设或非法时回落到 CONFIRM_TIMEOUT_MS。
+CONFIRM_TIMEOUT_ENV: Final[str] = "CONFIRM_TIMEOUT_S"
+MIN_CONFIRM_TIMEOUT_S: Final[int] = 10
+MAX_CONFIRM_TIMEOUT_S: Final[int] = 3600
 #: 能力令牌有效期：也是毫秒（app/security/token.py 里 exp_ms 与 now_ms() 同单位）。
 TOKEN_TTL_MS: Final[int] = 120_000
 
@@ -38,6 +44,32 @@ TOKEN_TTL_MS: Final[int] = 120_000
 def ms_to_seconds(ms: int) -> float:
     """毫秒 -> 秒。asyncio.wait_for / asyncio.sleep 收的是秒，别把它们当毫秒用。"""
     return ms / 1000
+
+
+def confirm_timeout_ms() -> int:
+    """确认卡有效期（毫秒）：默认 120 秒，可用 CONFIRM_TIMEOUT_S 覆盖。
+
+    非法值不 raise 而是回落到默认值再打一条警告——这是个运行期调参项，
+    为了一个拼错的变量名把整条确认链路变成 500，比沿用默认值更糟。
+    """
+    raw = os.environ.get(CONFIRM_TIMEOUT_ENV, "").strip()
+    if not raw:
+        return CONFIRM_TIMEOUT_MS
+    try:
+        seconds = int(raw)
+    except ValueError:
+        log.warning("planner.confirm_timeout.invalid value=%r fallback_ms=%s", raw, CONFIRM_TIMEOUT_MS)
+        return CONFIRM_TIMEOUT_MS
+    if not MIN_CONFIRM_TIMEOUT_S <= seconds <= MAX_CONFIRM_TIMEOUT_S:
+        log.warning(
+            "planner.confirm_timeout.out_of_range value=%s min=%s max=%s fallback_ms=%s",
+            seconds,
+            MIN_CONFIRM_TIMEOUT_S,
+            MAX_CONFIRM_TIMEOUT_S,
+            CONFIRM_TIMEOUT_MS,
+        )
+        return CONFIRM_TIMEOUT_MS
+    return seconds * 1000
 BUSY_STATES: Final[tuple[str, ...]] = ("pending", "running", "waiting_confirm", "waiting_factor")
 CONTINUE: Final[str] = "continue"
 STOP: Final[str] = "stop"
@@ -90,6 +122,8 @@ class RunState:
     notes: list[str] = field(default_factory=list)
     cancelled: bool = False
     cancel_reason: str = ""
+    #: 这一轮的用户原话：澄清闸门要以它为准补全（「尾号4417」→ 原话+尾号）。
+    user_text: str = ""
     question: str | None = None
     balance_after_fen: int | None = None
 
@@ -117,7 +151,13 @@ def tool_name(tool: str) -> str:
     }.get(tool, tool)
 
 
-def open_run(session_id: str, dag: Dag, account_id: str | None, secret: str | None) -> RunState:
+def open_run(
+    session_id: str,
+    dag: Dag,
+    account_id: str | None,
+    secret: str | None,
+    user_text: str = "",
+) -> RunState:
     """开库、清过期预授权、建会话与 run 行、写 dag.built 审计。"""
     conn = db.connect()
     try:
@@ -133,6 +173,7 @@ def open_run(session_id: str, dag: Dag, account_id: str | None, secret: str | No
             conn=conn,
             account_id=str(account["id"]),
             secret=secret,
+            user_text=user_text,
             nodes={node.id: NodeRec(node_id=node.id, tool=node.tool) for node in dag.nodes},
         )
         insert_run(state)
@@ -184,7 +225,7 @@ def new_confirmation(state: RunState, node: Any, action: Action, decision: Decis
         required_factors=list(decision.required_factors),
         action_text=action_text(node.tool, action, payee=who),
         created_ms=now_ms,
-        expires_ms=now_ms + CONFIRM_TIMEOUT_MS,
+        expires_ms=now_ms + confirm_timeout_ms(),
         payee_name=who,
         # future 在这里就建好，不推迟到 wait_for_answer 那一刻：
         # 答案可能早到——程序化客户端（IM Bot、自动化脚本）收到 confirm 帧就立刻

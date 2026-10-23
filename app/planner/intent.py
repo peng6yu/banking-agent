@@ -113,6 +113,42 @@ INTENT_LABELS: Final[dict[str, str]] = {
 }
 NEED_SLOTS: Final[frozenset[str]] = frozenset({"transfer", "birthday_plan", "schedule_transfer"})
 ALL_KEYWORDS: Final[tuple[str, ...]] = ("全部", "全额", "所有钱", "剩下的钱")
+# 亲属称谓 → 交给 resolve_payee 的查询词。真模型把「我妈」当关系词、payee_name 留空，
+# 于是多问一轮「这份礼物是给谁过生日？」（README 已知限制 4）。这里按原话兜底：
+# 词表长的在前（「我妈妈」先于「妈妈」），命中即填 payee_name；
+# 查不到人也只会走正常的「没找到」反问，不会猜错人。
+RELATION_PAYEES: Final[tuple[tuple[str, str], ...]] = (
+    ("我妈妈", "妈妈"),
+    ("我母亲", "妈妈"),
+    ("我妈", "我妈"),
+    ("老妈", "我妈"),
+    ("妈妈", "妈妈"),
+    ("母亲", "妈妈"),
+    ("我爸爸", "我爸"),
+    ("我爸", "我爸"),
+    ("老爸", "我爸"),
+    ("爸爸", "我爸"),
+    ("父亲", "我爸"),
+    ("我老婆", "老婆"),
+    ("老婆", "老婆"),
+    ("媳妇", "老婆"),
+    ("我老公", "老公"),
+    ("老公", "老公"),
+    ("我爱人", "爱人"),
+    ("爱人", "爱人"),
+    ("我儿子", "儿子"),
+    ("儿子", "儿子"),
+    ("我女儿", "女儿"),
+    ("女儿", "女儿"),
+    ("我哥", "哥哥"),
+    ("哥哥", "哥哥"),
+    ("我姐", "姐姐"),
+    ("姐姐", "姐姐"),
+    ("我弟", "弟弟"),
+    ("弟弟", "弟弟"),
+    ("我妹", "妹妹"),
+    ("妹妹", "妹妹"),
+)
 AMOUNT_SPLITTERS: Final[tuple[str, ...]] = ("转", "付", "给")
 HISTORY_TURNS: Final[int] = 6
 MAX_TOKENS: Final[int] = 512
@@ -381,6 +417,11 @@ def _slots(args: dict[str, Any], text: str, intent: str) -> dict[str, Any]:
             slots["amount_fen"] = guess
         elif guess == UNKNOWN_AMOUNT_FEN and _means_all(text):
             slots["amount_all"] = True
+    if intent in NEED_SLOTS and not slots.get("payee_name"):
+        # 规则层兜底：模型把「我妈」当关系词时，这里把称谓补成收款人查询词。
+        relation = _relation_payee(text)
+        if relation:
+            slots["payee_name"] = relation
     for key in ("amount_fen", "month"):
         if key in slots:
             slots[key] = _int_or_none(slots[key])
@@ -391,6 +432,18 @@ def _slots(args: dict[str, Any], text: str, intent: str) -> dict[str, Any]:
     if intent == CARD_INTENT:
         slots = card_action(slots, text)
     return slots
+
+
+def _relation_payee(text: str) -> str | None:
+    """从原话里找最近的一个亲属称谓；找不到返回 None（绝不瞎填收款人）。"""
+    best: tuple[int, str] | None = None
+    for word, target in RELATION_PAYEES:
+        index = text.find(word)
+        if index == -1:
+            continue
+        if best is None or index < best[0]:
+            best = (index, target)
+    return best[1] if best else None
 
 
 def _account_owner(intent: str, text: str) -> str:

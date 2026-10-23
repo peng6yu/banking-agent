@@ -12,7 +12,6 @@ from app.planner.events import emit_event, prompt_event, prompt_payload, trace_e
 from app.planner.runner import execute_node, issue_token
 from app.planner.state import (
     BUSY_STATES,
-    CONFIRM_TIMEOUT_MS,
     CONTINUE,
     RUNS,
     STOP,
@@ -21,6 +20,7 @@ from app.planner.state import (
     NodeRec,
     RunState,
     balance_of,
+    confirm_timeout_ms as default_confirm_timeout_ms,
     factors_ok,
     finish_run,
     mark_confirmation,
@@ -96,18 +96,22 @@ async def run(
     *,
     account_id: str | None = None,
     secret: str | None = None,
-    confirm_timeout_ms: int = CONFIRM_TIMEOUT_MS,
+    confirm_timeout_ms: int | None = None,
+    user_text: str = "",
 ) -> None:
     """跑一张执行图；只发事件，不返回业务数据。
 
-    confirm_timeout_ms 的单位是**毫秒**（默认 120_000 = 120 秒）；内部换算成秒再交给 asyncio。
+    confirm_timeout_ms 的单位是**毫秒**；传 None 时取 state.confirm_timeout_ms()——
+    默认 120_000（120 秒），可用环境变量 CONFIRM_TIMEOUT_S 覆盖；内部换算成秒再交给 asyncio。
     """
+    if confirm_timeout_ms is None:
+        confirm_timeout_ms = default_confirm_timeout_ms()
     state: RunState | None = None
     # 用户原话里的注入（IM 转发、夹带指令）不在工具参数里，只在这一轮认领：
     # 认领后并进每个 Action 的 untrusted_fields，R04 再把它升成双因子。
     taint = injection.claim_turn(session_id)
     try:
-        state = open_run(session_id, dag, account_id, secret)
+        state = open_run(session_id, dag, account_id, secret, user_text)
         RUNS[session_id] = state
         if taint is not None:
             audit_injection(

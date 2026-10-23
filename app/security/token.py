@@ -18,8 +18,10 @@ import hashlib
 import hmac
 import json
 import os
+import secrets
 import sqlite3
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Final
 
 from app import audit
@@ -30,6 +32,11 @@ from app.models import Action, RiskLevel
 
 TOKEN_VERSION: Final[int] = 1
 SECRET_ENV: Final[str] = "CAPABILITY_SECRET"
+#: 密钥文件位置覆盖项；未设置时用仓库约定路径（已在 .gitignore 的 data/token_secret*）。
+SECRET_FILE_ENV: Final[str] = "CAPABILITY_SECRET_FILE"
+DEFAULT_SECRET_FILE: Final[str] = "data/token_secret"
+#: 自动生成的密钥文件权限：只给属主读写。
+SECRET_FILE_MODE: Final[int] = 0o600
 SECRET_HEX_LEN: Final[int] = 64
 DEFAULT_TTL_MS: Final[int] = 120_000
 NONCE_HEX_LEN: Final[int] = 16
@@ -98,11 +105,74 @@ def params_hash(params: dict[str, Any]) -> str:
 
 
 def load_secret(raw: str | None = None) -> str:
-    """取签名密钥；缺失或不是 64 位十六进制就 fail closed，绝不退回默认密钥。"""
-    secret = raw if raw is not None else os.environ.get(SECRET_ENV, "")
-    if len(secret) != SECRET_HEX_LEN or any(char not in _HEX_CHARS for char in secret.lower()):
-        raise MissingCapability(reason="CAPABILITY_SECRET_MISSING", env=SECRET_ENV)
-    return secret.lower()
+    """取签名密钥：显式传入 > 环境变量 > 本地密钥文件（首次运行自动生成）。
+
+    取值优先级刻意写成三段，语义各不相同：
+    1. `raw` 显式传入：调用方自己负责，格式不对立刻抛（测试与多实例注入用）。
+    2. `CAPABILITY_SECRET` **已设置**：只认 64 位十六进制。设成空串也照样 fail closed——
+       「显式关掉」必须能被表达出来，否则运维清空变量会被悄悄兜底成自动生成。
+    3. 变量**未设置**：读 `CAPABILITY_SECRET_FILE`（默认 `data/token_secret`），
+       没有就生成一把 0600 的随机密钥落盘。首次 `make run` 不需要先配密钥，
+       再次启动复用同一把；删掉文件等于轮换（已签出的令牌随即失效，TTL 本就只有 120 秒）。
+
+    绝不退回硬编码默认密钥：任何一条路都走不到「所有人共用一个常量」。
+    """
+    if raw is not None:
+        return _require_hex(raw, where="explicit")
+    env = os.environ.get(SECRET_ENV)
+    if env is not None:
+        return _require_hex(env, where="env")
+    return _secret_from_file()
+
+
+def _require_hex(secret: str, *, where: str) -> str:
+    """校验 64 位十六进制；不合格一律 fail closed，错误里带上来源便于排查。"""
+    text = secret.strip()
+    if len(text) != SECRET_HEX_LEN or any(char not in _HEX_CHARS for char in text.lower()):
+        raise MissingCapability(reason="CAPABILITY_SECRET_MISSING", env=SECRET_ENV, source=where)
+    return text.lower()
+
+
+def secret_file_path() -> Path:
+    """密钥文件位置；`CAPABILITY_SECRET_FILE` 可覆盖（相对路径按进程工作目录解析）。"""
+    override = os.environ.get(SECRET_FILE_ENV, "").strip()
+    return Path(override) if override else Path(DEFAULT_SECRET_FILE)
+
+
+def _secret_from_file() -> str:
+    """读本地密钥文件；不存在或内容不合法就重新生成一把并落盘（0600）。"""
+    path = secret_file_path()
+    try:
+        existing = path.read_text(encoding="utf-8").strip()
+    except FileNotFoundError:
+        existing = ""
+    except OSError as exc:  # 权限不足等：不静默兜底，让运维看见
+        raise MissingCapability(
+            reason="CAPABILITY_SECRET_FILE_UNREADABLE", env=SECRET_ENV, path=str(path)
+        ) from exc
+    if existing:
+        try:
+            return _require_hex(existing, where="file")
+        except MissingCapability:
+            log.warn("capability.secret.file_invalid", path=str(path), action="regenerate")
+    return _write_new_secret(path)
+
+
+def _write_new_secret(path: Path) -> str:
+    """生成并原子写入密钥文件；先写临时文件再 replace，避免并发启动读到半截内容。"""
+    secret = secrets.token_hex(SECRET_HEX_LEN // 2)
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_name(path.name + ".tmp")
+        tmp.write_text(secret + "\n", encoding="utf-8")
+        os.chmod(tmp, SECRET_FILE_MODE)
+        os.replace(tmp, path)
+    except OSError as exc:
+        raise MissingCapability(
+            reason="CAPABILITY_SECRET_FILE_UNWRITABLE", env=SECRET_ENV, path=str(path)
+        ) from exc
+    log.warn("capability.secret.generated", path=str(path), mode=oct(SECRET_FILE_MODE))
+    return secret
 
 
 def _b64encode(raw: bytes) -> str:
@@ -290,8 +360,12 @@ def require_token(token: str | None, conn: sqlite3.Connection, *, session_id: st
 
 
 __all__ = [
+    "DEFAULT_SECRET_FILE",
     "DEFAULT_TTL_MS",
     "SECRET_ENV",
+    "SECRET_FILE_ENV",
+    "SECRET_FILE_MODE",
+    "SECRET_HEX_LEN",
     "TOKEN_VERSION",
     "TokenPayload",
     "decode",
@@ -301,6 +375,7 @@ __all__ = [
     "params_hash",
     "record_rejection",
     "require_token",
+    "secret_file_path",
     "sign",
     "verify",
 ]

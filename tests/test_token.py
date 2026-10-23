@@ -187,7 +187,12 @@ def test_issue_audited_writes_token_issued(conn) -> None:
 
 
 def test_missing_secret_fails_closed(monkeypatch) -> None:
-    monkeypatch.delenv(tk.SECRET_ENV, raising=False)
+    """显式关掉（设成空串）与显式传错都必须 fail closed。
+
+    变量**未设置**不在此列：那种情况会读/生成 data/token_secret（见
+    tests/test_capability_secret.py），这里断言的是「有人明确动了这个配置」的两条路。
+    """
+    monkeypatch.setenv(tk.SECRET_ENV, "")
     with pytest.raises(MissingCapability):
         tk.load_secret()
     with pytest.raises(MissingCapability):

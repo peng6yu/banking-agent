@@ -84,9 +84,13 @@ def test_unmapped_intent_name_is_not_spoken_to_user() -> None:
 
 
 def test_birthday_missing_payee_asks_who_the_birthday_is_for() -> None:
-    """生日送礼缺收款人：问「给谁过生日」，不能问得像在办转账。"""
+    """生日送礼缺收款人：问「给谁过生日」，不能问得像在办转账。
+
+    注意原句里**不能**出现亲属称谓：出现了就会被 app/planner/intent.py 的
+    _relation_payee 兜底填成收款人，这一轮根本不会反问（已知限制 4 的修复）。
+    """
     result = parse(
-        "下周三我妈生日，帮我提前留出300块，到时候给她订束花送过去",
+        "下周三生日，帮我提前留出300块，到时候订束花送过去",
         Scripted(
             [
                 {

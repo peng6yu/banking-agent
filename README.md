@@ -179,7 +179,7 @@ curl -s http://127.0.0.1:8000/api/audit/verify
 ### 单元与集成测试（实测全绿，用例数持续增补）
 
 ```bash
-python3.12 -m pytest -q tests/            # 820 passed, 4 skipped（2026-10-23 实测；用例会随增补变化，复跑以实测为准）
+python3.12 -m pytest -q tests/            # 862 passed, 4 skipped（2026-10-23 实测；用例会随增补变化，复跑以实测为准）
 ```
 
 ### 前端合规自检（实测 62 项全过）
@@ -234,7 +234,9 @@ python3.12 -c "import yaml;d=yaml.safe_load(open('tests/redteam/cases.yaml'));as
 ### 模型连通性自检
 
 ```bash
-python3.12 -m app.smoke                    # 实测 4/4 PASS，主脑延迟约 1.5s（若报 429 即账号额度用尽，换 key 或充额度）
+python3.12 -m app.smoke                    # 实测 4/4 PASS，主脑延迟约 1.5s（云端）；本地 Ollama 同样 4/4 PASS
+# 若报 429 / rate_limit_error（本仓库作者的 MiniMax Token Plan 配额在 2026-10-23 已耗尽），
+# 换 key、充额度，或直接切到本地 Ollama：见 docs/模型配置说明.md 第 13 节
 ```
 
 ## 项目结构
@@ -247,7 +249,7 @@ python3.12 -m app.smoke                    # 实测 4/4 PASS，主脑延迟约 1
 | `app/tools/` | 26 个工具：查人、查余额、账单、卡片、订阅、转账、资金冻结等 |
 | `app/api/` | 10 个 HTTP 端点 + 根页面 |
 | `web/index.html` | 单文件前端（原生 JS，无框架、无 CDN、零外链） |
-| `tests/` | pytest 用例集（820 passed / 4 skipped，2026-10-23 实测）+ 43 条红队 YAML |
+| `tests/` | pytest 用例集（862 passed / 4 skipped，2026-10-23 实测）+ 43 条红队 YAML |
 | `scripts/` | 种子脚本、前端合规检查器 |
 | `docs/` | 交接规格书 00—10（写代码前必读）+ 答辩与演示交付件 |
 | `规划/` | 前期选型与模型实测记录 |
@@ -260,7 +262,7 @@ python3.12 -m app.smoke                    # 实测 4/4 PASS，主脑延迟约 1
 |---|---|---|
 | `make run` | 启动服务（--reload） | ✅ |
 | `make seed` | 建库 + 种子（幂等） | ✅ |
-| `make test` | pytest 全跑 | ✅ 全绿（820 passed / 4 skipped，2026-10-23 实测） |
+| `make test` | pytest 全跑 | ✅ 全绿（862 passed / 4 skipped，2026-10-23 实测） |
 | `make smoke` | 模型连通性自检 | ✅ 4/4 |
 | `make cov` | 覆盖率（未装 pytest-cov 时自动退回纯跑） | ✅ |
 | `make reset` | `POST /api/demo/reset` 演示前清场 | ✅ |
@@ -269,13 +271,13 @@ python3.12 -m app.smoke                    # 实测 4/4 PASS，主脑延迟约 1
 
 ## 已知限制（照实写，不藏）
 
-1. **能力令牌密钥必须存在。** `CAPABILITY_SECRET`（64 位十六进制）缺失或格式不对时，系统按设计 fail closed：黄灯/红灯在用户点确认后会直接返回 `MISSING_CAPABILITY`，绿灯查询不受影响。`setup_env.sh` 现在会生成这一行（`.env.example` 里也有占位）；如果你的 `.env` 是早先生成的，请手动补上或重新 export。
+1. **能力令牌密钥：默认自动生成，配了就必须是对的。** 取值顺序是「显式传入 → 环境变量 `CAPABILITY_SECRET` → 本地文件 `data/token_secret`（路径可用 `CAPABILITY_SECRET_FILE` 覆盖）」。变量**没设置**时首次运行生成一把 64 位十六进制密钥并落盘（权限 0600，已在 `.gitignore`），重启复用，删文件即轮换；变量**设置了**（哪怕设成空串）就只认 64 位十六进制，格式不对立刻 fail closed，确认时返回 `MISSING_CAPABILITY`——绝不退回硬编码默认密钥。生产部署建议显式配置环境变量，别依赖本地文件。回归测试：`tests/test_capability_secret.py`（8 条）。
 2. **红队 43 条现已全部通过。** 自动判定 runner（`make redteam` / `python3.12 -m scripts.redteam`，四模块 commit c94a8cd）2026-10-23 实跑 **PASS 43 / FAIL 0**，约 12 秒自行结束。历史 14 条 FAIL（commit `6b3b6c9` 快照）当时全部是 `LEVEL_BELOW`，逐条归因后分成两类：**8 条是夹具/判定口径缺陷**（脚本模型认不出卡片写操作、判定器根本没有「这一轮没走到策略层」这个级别、期望里把 503/反问轮写成 green），**6 条是设计取舍**（澄清即拒答、模型不可用、反问轮无裁决）。修的时候没有放宽标准，而是两边一起改 —— 产品侧新增确定性拒答守卫 `app/planner/refusal.py`（验证码/系统提示词/密钥/删审计/加收款人/改登录密码/冒充内部身份这 7 类话术在**调用模型之前**就送进 R03 红灯并落 `policy.decided`）、反问轮也扫注入并落 `injection.detected`、写库失败降级落盘并带 `trace_id` 回查、改密措辞词表补齐、注入污点棒改**严格会话认领**（宁可漏升色也不串味）、写锁竞争转 `SYSTEM_BUSY` 一句人话；判定侧新增 `level=none`（表示这一轮没有裁决记录，而不是判了绿灯）、把 `injection.detected.level_floor` 纳入级别判定、新增 `partial_write` 探针与 `must_contain_text` 断言。逐条归属与修正记录见 `docs/红队失败归因.md`，旧数字在 `docs/安全自评报告.md` §0.0 保留为历史快照。
-3. **同名收款人要带卡尾号。** 种子数据里有两个「张三」；第一轮会正确反问「你要付给哪一位？」，**带上卡尾号即可收敛**——「转 500 元给张三尾号 4417」只解析出 1 个张三 → R06 黄灯 → 确认 → 转账成功（余额 1286050 → 1236050，本机实测，commit `56a2741`）。不带尾号时仍会反问让你选择，这是刻意的：不盲选同名收款人。演示请用「张三尾号 4417」或唯一收款人（王强 / 房东李静）。
-4. **场景 6 已用真实模型跑通，但需要一轮澄清。** 2026-10-22 用真实 MiniMax 跑赛题原句「下周三我妈生日，帮我提前留出300块，到时候给她订束花送过去」：模型把「我妈」当关系词而不是姓名，首轮反问「这份礼物是给谁过生日？」，补一句「我妈」后四节点全走通（`resolve_payee → query_balance → reserve_funds → pay_merchant`，两次黄灯确认），余额 1286050 → 1256050。其余跨场景仍由 `scripts/e2e.py` 13 步演示覆盖（真实 FastAPI + 真实策略/工具/审计，只把 LLM 那一层换成脚本适配器）。
-5. SSE 流在等待用户确认期间保持打开（最长 120 秒）。这是有意的——确认结果顺着同一条流回传，代价是纯命令行客户端需要自己另开一个请求去 POST 确认。前端不受影响。120 秒内没人点头，确认卡自动作废、预授权全部释放（此前曾因毫秒当秒而失效，已修：commit `93f28f2`，回归测试 `tests/test_confirm_timeout.py`）。
-6. **依赖装在系统 `python3.12` 里，没有 venv。** 实测：`python3.12 -m venv` 能建，但本机 `pip install` 装不上 —— 对 pypi 域名解析失败（`Failed to establish a new connection: [Errno -2] 名称或服务未知`）。`curl https://pypi.org/simple/` 返回 200、`getent hosts pypi.org` 只给 IPv6，属本机网络环境，不是项目配置。换到能连 pypi 的机器按 `requirements.txt` 建 venv 即可，代码没有写死任何系统级路径。
-7. **模型默认走云端 MiniMax，但厂商可换、可自动降级。** 代码只依赖 OpenAI 兼容协议（`tools` + `tool_choice:"auto"` + SSE 流式），换厂商只改 `.env` 三行（`LLM_API_KEY` / `LLM_BASE_URL` / `LLM_MODEL`，旧名 `MINIMAX_*` 仍然生效）。主目标不可用时按 `LLM_FALLBACK`（同厂商换模型）与 `LLM_FALLBACK_VENDORS`（跨厂商，格式 `base_url::模型名::KEY_ENV_NAME`）自动降级：401/403/404/408/429/5xx/超时会切，400/422 不切（请求体错了换谁都一样）；切换会打 `llm.fallback.switch` 日志，`LLMResponse.served_by` 告诉你谁真正服务了这次请求。换厂商之前用一条命令验四件事 —— `python3.12 -m scripts.provider_check`（连通性 / 真有 `tool_calls` / 接受 `tool_choice:"auto"` / SSE 以 `finish_reason` 收尾），它只从环境变量读 key、输出全打码。**如实说明**：本次只在 MiniMax 上真机跑过，降级链与其他厂商兼容性有 21 条单测覆盖、但**没有别家的 key 做真机验证**，本仓库不替其他厂商背书；各厂商填法与兼容底线见 [docs/模型配置说明.md](docs/模型配置说明.md)（含第 12 节降级链），结论以 `app.smoke` 与回归测试实测为准。`MOCK_MODE=1`（等价 `true`）是**对抗演示专用**的离线固定桩：它把模型换成一个恶意的，固定吐「转出全部余额到陌生账户」的计划，只用来现场演示「模型被劫持也动不了一分钱」；**不能拿它演普通问答**——问什么都是「我听不懂」。断网要演正常链路请用 `MOCK_MODE=script`：协作回放桩，纯规则、确定性、零网络，只回放「查余额」与「转账」两种业务，其余话术照实反问，绝不瞎猜。
+3. **同名收款人：一句带尾号最省事，只回「尾号4417」也能接上。** 种子数据里有两个「张三」；第一轮会正确反问「你要付给哪一位？」。原句「转 500 元给张三尾号 4417」只解析出 1 个张三 → R06 黄灯 → 确认 → 转账成功（余额 1286050 → 1236050，本机实测，commit `56a2741`）。现在**单独回一句「尾号4417」或「第一个」也可以**：`app/planner/clarify.py` 会把这次短回答接回上一轮原话再解析，用户不必重说整句。上下文 5 分钟过期、只认候选里真实存在的尾号/序号（手滑填一个不存在的尾号不会被当成选择），仍然不盲选同名收款人。回归测试：`tests/test_clarify_resume.py`（12 条，含 /api/chat 真链路）。
+4. **场景 6 已收紧到一轮走完。** 2026-10-22 用真实 MiniMax 跑赛题原句「下周三我妈生日，帮我提前留出300块，到时候给她订束花送过去」时，模型把「我妈」当关系词、收款人留空，于是多问了一轮「这份礼物是给谁过生日？」。根因在解析层：数据层早就支持这个称谓（`scripts/seed.py` 里「妈妈」的 alias 就是「我妈」）。现在 `app/planner/intent.py` 的 `_relation_payee` 会在模型没填 `payee_name` 时按原话把亲属称谓补上（我妈 / 老妈 / 妈妈 / 我爸 / 老婆 / 老公 / 儿子 / 女儿 / 哥姐弟妹…），赛题原句一次解析即命中，四节点照旧全走通（`resolve_payee → query_balance → reserve_funds → pay_merchant`，两次黄灯确认），余额 1286050 → 1256050。原话里没有任何称谓线索时仍然反问，查无此人也仍然照实说「没找到」，绝不猜人。回归测试：`tests/test_relation_payee.py`（11 条，含真实 seed 别名查询）。其余跨场景仍由 `scripts/e2e.py` 13 步演示覆盖（真实 FastAPI + 真实策略/工具/审计，只把 LLM 那一层换成脚本适配器）。
+5. **SSE 流在等待确认期间保持打开，窗口默认 120 秒、可用 `CONFIRM_TIMEOUT_S` 调。** 确认结果顺着同一条流回传，代价是纯命令行客户端得另开一个请求去 POST `/api/confirm`（这是 SSE 的语义，不是缺陷）。窗口过了没人点头，确认卡自动作废、预授权全部释放（此前曾因毫秒当秒而失效，已修：commit `93f28f2`）。现在窗口成了运行期参数：`CONFIRM_TIMEOUT_S=30 make run`（可填 10—3600 秒），SSE 的 `expires_in_s`、确认卡 `expires_ms`、执行器等待时长三处跟着同一档走；非法值回落 120 秒并打 `planner.confirm_timeout.*` 警告，不会把链路打成 500。回归测试：`tests/test_confirm_timeout.py` + `tests/test_confirm_timeout_config.py`（9 条）。
+6. **venv 现在能用了：`make venv`。** 之前装不上不是网络挂了，而是本机 pip 配置的锅：`~/.config/pip/pip.conf` 里有 `extra-index-url=https://pypi.ngc.nvidia.com`，这个域名在本机不解析，于是每个包都报 `Failed to establish a new connection: [Errno -2] 名称或服务未知`（`curl https://pypi.org/simple/` 是 200，只查 pypi 永远看不出问题）。`make venv` 用 `PIP_CONFIG_FILE=/dev/null` + `pip --isolated` + 显式 `--index-url` 绕开它，2026-10-23 实测从零建 `.venv`、装齐全部依赖并在里面跑通全量测试（`.venv/` 已 gitignore）。要换索引：`PIP_INDEX=https://pypi.org/simple make venv`。宿主机没有 pip 配置问题的，直接用系统 `python3.12` 也一样。
+7. **模型默认走云端 MiniMax，但厂商可换、可自动降级。** 代码只依赖 OpenAI 兼容协议（`tools` + `tool_choice:"auto"` + SSE 流式），换厂商只改 `.env` 三行（`LLM_API_KEY` / `LLM_BASE_URL` / `LLM_MODEL`，旧名 `MINIMAX_*` 仍然生效）。主目标不可用时按 `LLM_FALLBACK`（同厂商换模型）与 `LLM_FALLBACK_VENDORS`（跨厂商，格式 `base_url::模型名::KEY_ENV_NAME`）自动降级：401/403/404/408/429/5xx/超时会切，400/422 不切（请求体错了换谁都一样）；切换会打 `llm.fallback.switch` 日志，`LLMResponse.served_by` 告诉你谁真正服务了这次请求。换厂商之前用一条命令验四件事 —— `python3.12 -m scripts.provider_check`（连通性 / 真有 `tool_calls` / 接受 `tool_choice:"auto"` / SSE 以 `finish_reason` 收尾），它只从环境变量读 key、输出全打码。**两个真实厂商都真机跑过**（2026-10-23）：云端 MiniMax（默认）+ **本地 Ollama**（`ollama pull qwen2.5:0.5b` 起的 OpenAI 兼容端点 `http://127.0.0.1:11434/v1`）。Ollama 侧实测三件事：`scripts.provider_check` **4/4 PASS**（连通 200/144ms、真有 `tool_calls`、接受 `tool_choice:"auto"`、SSE 18 条 data 行以 `finish_reason=stop` 收尾且无 `[DONE]`）、`app.smoke` **4/4 PASS**、以及**真降级链**——MiniMax 配额耗尽返回 429 后自动切到 Ollama 并正常出话（日志 `llm.fallback.switch` status=429 → `served_by=vendor:http://127.0.0.1:11434/v1`，275ms，内容「收到」）。**仍未验的**：其他云厂商（DeepSeek / 通义 / 智谱等）没有 key，只有 21 条降级单测与协议层覆盖，本仓库不替它们背书；各厂商填法与兼容底线见 [docs/模型配置说明.md](docs/模型配置说明.md)（含第 12 节降级链、第 13 节本地 Ollama），结论以 `app.smoke` 与回归测试实测为准。`MOCK_MODE=1`（等价 `true`）是**对抗演示专用**的离线固定桩：它把模型换成一个恶意的，固定吐「转出全部余额到陌生账户」的计划，只用来现场演示「模型被劫持也动不了一分钱」；**不能拿它演普通问答**——问什么都是「我听不懂」。断网要演正常链路请用 `MOCK_MODE=script`：协作回放桩，纯规则、确定性、零网络，只回放「查余额」与「转账」两种业务，其余话术照实反问，绝不瞎猜。
 
 ## 演示与答辩材料
 

@@ -174,3 +174,35 @@
 - 其他厂商真机验证（需要各自的 key）；降级链目前只在"主目标失败"时切，没有做"模型回答质量差就切"的语义级降级。
 - 拒答守卫是**词表 + 正则**，高精度但不可能穷尽话术；新的绕过说法要往 `app/planner/refusal.py` 的 `RULES` 里补，并同步 `tests/test_refusal_guard.py` 的 HITS/PASS_THROUGH。
 - 红队 43 条是冻结用例集，改期望要留 note；新增攻击面请加新用例而不是改旧用例。
+
+---
+
+## v1.6.1 把「已知限制」从照实写改成真解决  2026-10-23
+
+上一版的做法是把解不掉的地方写进 README 就交付，被要求"解决现有的所有问题"。这一轮逐条回到代码里改，
+能修的真修、修不了的才留话；README 第 1/3/4/5/6/7 条全部重写为"已解决 + 怎么用 + 回归测试在哪"。
+
+### 一、真解决的（代码变更 + 回归测试）
+- [x] **限制 1 密钥必填 → 首次运行自动生成**（`app/security/token.py`）：取值顺序「显式传入 → `CAPABILITY_SECRET` → 文件 `data/token_secret`（`CAPABILITY_SECRET_FILE` 可覆盖）」；变量未设置时 `secrets.token_hex(32)` 生成、`0600` 落盘、`os.replace` 原子替换，重启复用、删文件即轮换；变量**设置了**（含空串）就只认 64 位十六进制，不合格立刻 fail closed（`MISSING_CAPABILITY` / `CAPABILITY_SECRET_FILE_UNREADABLE` / `..._UNWRITABLE`）。测试 `tests/test_capability_secret.py` 8 条。
+- [x] **限制 3 同名收款人 → 可只回尾号/序号**（新文件 `app/planner/clarify.py`，第 4 层，只依赖 `app.clock`）：反问时记住原话，下一轮短回答经 `augment()` 接回原话再解析；只认候选里真实存在的卡尾号（`尾号`/`后四位`/`末四位`/`卡号` 或无前缀的 4 位）与序号（`第N个/位/张/条`，中文数字或阿拉伯数字），5 分钟过期，用一次即忘，换话题即清。测试 `tests/test_clarify_resume.py` 12 条（含 /api/chat 真链路三条）。
+- [x] **限制 4 场景 6 需一轮澄清 → 一轮走完**（`app/planner/intent.py`）：新增 `RELATION_PAYEES`（长词优先，覆盖我妈/老妈/妈妈/母亲、我爸/老爸/爸爸/父亲、老婆/媳妇、老公、爱人、儿子/女儿、哥/姐/弟/妹）+ `_relation_payee()` 取原话中**最早出现**的称谓；模型没填 `payee_name` 时兜底填上。种子数据「妈妈」的 alias 本来就是「我妈」，所以赛题原句一次命中。测试 `tests/test_relation_payee.py` 11 条。
+- [x] **限制 5 确认窗口写死 120 秒 → `CONFIRM_TIMEOUT_S` 可配**（`app/planner/state.py`）：新增 `confirm_timeout_ms()`，范围 10—3600 秒，空值/非法值/越界一律回落 120000 并打 `planner.confirm_timeout.*` 警告；`new_confirmation` 的 `expires_ms`、`executor.run(confirm_timeout_ms=...)`、SSE 的 `expires_in_s` 三处跟同一档。测试 `tests/test_confirm_timeout_config.py` 9 条。
+- [x] **限制 6 venv 装不上 → `make venv`**：根因不是网络，是本机 `~/.config/pip/pip.conf` 的 `extra-index-url=https://pypi.ngc.nvidia.com` 不解析，导致每个包都报 `Failed to establish a new connection: [Errno -2]`。`Makefile` 新增 `venv` 目标，用 `PIP_CONFIG_FILE=/dev/null` + `pip --isolated` + 显式 `--index-url`（`PIP_INDEX` 可换），实测 `rm -rf .venv && make venv` 装齐依赖并在 `.venv` 内跑通全量测试。
+- [x] **限制 7 只实测过 MiniMax → 两个真实厂商**：新增本地 Ollama 实证（`qwen2.5:0.5b`，`http://127.0.0.1:11434/v1`）：`provider_check` 4/4 PASS、`app.smoke` 4/4 PASS、真降级链（MiniMax 429 → `llm.fallback.switch` → `served_by=vendor:http://127.0.0.1:11434/v1`，275ms）。`docs/模型配置说明.md` 增 **§13 本地 Ollama**（装、填、验、当降级目标、本地小模型的真实下限）。
+
+### 二、文档同步
+- [x] README 已知限制第 1/3/4/5/6/7 条整段重写；第 2 条（红队 43/43）沿用上一版。
+- [x] 测试条数全仓同步 **820 → 862 passed / 4 skipped**（README、技术文档、答辩PPT大纲、提交物对照表、交付说明、红队失败归因、安全自评报告 §0.0、`docs/交付/build_ppt.py`）；PPT 重新生成。
+- [x] README「模型连通性自检」补一句 429 的真实含义与切 Ollama 的出口。
+
+### 三、复验（2026-10-23 实测）
+- `python3.12 -m pytest -q tests/` → **862 passed / 4 skipped**；`.venv/bin/python -m pytest -q tests/` 同样 862 passed / 4 skipped（11.85s）
+- `rm -rf .venv && make venv` → 装齐依赖，exit 0
+- `python3.12 -m scripts.redteam` → **PASS 43 / FAIL 0**
+- `python3.12 -m scripts.seed --force` 恢复演示库；`python3.12 scripts/check_frontend.py` → 62/62
+
+### 遗留（这一轮没做完的，照实说）
+- 其他云厂商（DeepSeek / 通义 / 智谱）仍无 key 真机验证，只有协议层单测与 Ollama 这个第二实证。
+- 降级链只在"主目标失败"时切，没有"回答质量差就切"的语义级降级。
+- Ollama 0.5b 能过协议四关但业务准确率明显弱于云端，只适合验证兼容性与断网兜底，不做答辩主脑。
+
