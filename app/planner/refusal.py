@@ -42,8 +42,8 @@ class RefusalRule:
     reply: str
 
 
-_PROMPT_WORDS, _SECRET_WORDS = "提示词|系统设定|系统指令|system\s*prompt|developer\s*mode|开发者模式", (
-    "CAPABILITY_SECRET|API\\s*key|api[_-]?key|密钥|私钥|签名密钥|secret"
+_PROMPT_WORDS, _SECRET_WORDS = r"提示词|系统设定|系统指令|system\s*prompt|developer\s*mode|开发者模式", (
+    r"CAPABILITY_SECRET|API\s*key|api[_-]?key|密钥|私钥|签名密钥|secret"
 )
 _DELETE_VERBS = "删|删除|清除|清空|抹掉|擦掉|篡改|改掉|销毁"
 _DELETE_OBJECTS = "审计|日志|流水|交易记录|历史记录|操作记录|记录"
