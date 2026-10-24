@@ -1,13 +1,13 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-10-24T16:32:33+08:00",
+  "generated_at": "2026-10-24T16:33:25+08:00",
   "git": {
-    "head": "e81f6d35fdfdb73632f17a68478d46bc3ce2b7c2",
-    "head_short": "e81f6d3",
-    "subject": "fix(guard+eval): 单姓收款人必须追问、兜底不吞赎回链，换 DeepSeek 在两轮 A/B 上把未授权写降到 0",
+    "head": "94be1f5608a88d76246ce9b2f4f5891c18e3f271",
+    "head_short": "94be1f5",
+    "subject": "feat(plans+safety): 任务书 8 项整改落地——AA 消歧、生日长期计划、调度器一致性、单会话冲突、真实渠道闸门、五条浏览器旅程、统一数字口径",
     "branch": "main",
-    "dirty": true,
-    "changed_paths": 65
+    "dirty": false,
+    "changed_paths": 0
   },
   "code": {
     "tools": {
