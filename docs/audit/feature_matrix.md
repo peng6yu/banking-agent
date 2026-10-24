@@ -26,7 +26,7 @@
 | 收款人唯一候选直接进确认 | 已实现且有测试证明 | app/planner/runner.py:252-263 _payee_gate（len==1 放行）；tests/test_tools.py:329 test_resolve_payee_disambiguates_duplicates_by_card_tail | 唯一候选时不再反问，但也就不给用户「换一个」的机会；改名只能重新发起 |
 | 同名多候选必须让用户选 | 已实现且有测试证明 | app/planner/runner.py:252-263（>1 反问，绝不猜）；结构化候选 _payee_clarification:119-148；tests/test_payee_discriminator.py、tests/test_clarify_resume.py | 候选超过 DISAMBIGUATE_LIMIT 时只列前几条，未选到的仍需改口述 |
 | 信息不足先追问 | 已实现且有测试证明 | app/planner/intent.py 低置信/缺槽位 → SESSION_ASK；tests/test_intent_question.py、tests/test_planner.py:229 test_parse_missing_slot_asks_exactly_one_question | 无 |
-| 改选后收款人真的变 | 已实现但测试不充分 | app/planner/clarify.py:84-107 augment 把「尾号4417」接回上一轮原话；web/index.html:3927-3954 bxRenderPayeePicker；tests/test_clarify_resume.py 覆盖模块与 /api/chat；tests/test_e2e_transfer.py:289 test_ambiguous_payee_returns_structured_candidates_and_picks_nothing 断言候选结构化、两个尾号都在、且没有生成任何确认卡或转账 | 仍缺「在页面上点候选 → 新确认卡的 payee_id 变了」这一跳的自动化（需 DOM/浏览器）；截图 main_01→main_02 是人工证据 |
+| 改选后收款人真的变 | 已实现但测试不充分 | app/planner/clarify.py:84-107 augment 把「尾号4417」接回上一轮原话；web/index.html:3927-3954 bxRenderPayeePicker；tests/test_clarify_resume.py 覆盖模块与 /api/chat；tests/test_e2e_transfer.py:289 test_ambiguous_payee_returns_structured_candidates_and_picks_nothing 断言候选结构化、两个尾号都在、且没有生成任何确认卡或转账 | 本轮补：脚本 ui_journeys.py 的 J6 已经在真浏览器里点候选列表里尾号 6620 那一位，并断言确认卡文本与服务端 pending 卡片的 payee.card_tail 都是 6620、金额 500、余额未动（docs/交付/browser_journeys.json） |
 | 确认前改金额/收款人 → 旧授权失效 | 已实现且有测试证明 | app/security/token.py:331-334 params_hash 比对；tests/test_token.py:142 PARAMS_MISMATCH、:149 AMOUNT_MISMATCH | 无（改参必须重新走确认，旧令牌同时被 nonce 消耗） |
 | 授权绑定工具/参数/账户/金额 | 已实现且有测试证明 | app/security/token.py:265-346 七步校验（结构→签名→过期→nonce→tool→params_hash→account/amount）；tests/test_token.py | 无 |
 | 过期授权不可执行 | 已实现且有测试证明 | app/security/token.py:306-309 TOKEN_EXPIRED；TTL=120s（token.py:41）；tests/test_token.py、tests/test_confirm_timeout.py:106 test_capability_token_ttl_is_120_seconds_too | 无 |
@@ -117,7 +117,7 @@
 | DAG 模板与结构校验 | 已实现且有测试证明 | app/planner/dag.py 模板 + validate；tests/test_planner.py:278/296/360 | 只有串行链，无并发分支/失败重试策略 |
 | 多步执行（意图→DAG→确认→扣款→审计） | 已实现且有测试证明 | app/planner/executor.py；tests/test_e2e_transfer.py 全程驱动 | 无 |
 | 取消执行并释放资金 | 已实现且有测试证明 | app/planner/executor.py:168-181 cancel；tests/test_api.py:256 test_cancel_endpoint_stops_the_run_and_frees_the_hold | 无 |
-| 刷新/SSE 断开后恢复 | 已实现且有测试证明 | 本轮补：`/api/session` 每条确认带服务端重建的 `card`（`events.confirmation_frame` + `routes._card_view`）；`bxRestoreSession` 发现待确认就打回 AI 助手视图并滚到卡片；`bxRenderPendingCard` 画真卡、过期卡不画按钮 | `tests/test_session_cards.py` 3 条（字段齐全 / 老行缺理由仍可重建 / action_json 坏掉时 card=None）+ 浏览器 `main_07_idempotent_refresh.png`（连点只扣一次、F5 后卡片带 200.00 与收款人回来）。缺口：没有点击级 DOM E2E |
+| 刷新/SSE 断开后恢复 | 已实现且有测试证明 | 本轮补：`/api/session` 每条确认带服务端重建的 `card`（`events.confirmation_frame` + `routes._card_view`）；`bxRestoreSession` 发现待确认就打回 AI 助手视图并滚到卡片；`bxRenderPendingCard` 画真卡、过期卡不画按钮 | `tests/test_session_cards.py` 3 条（字段齐全 / 老行缺理由仍可重建 / action_json 坏掉时 card=None）+ 浏览器 `main_07_idempotent_refresh.png`（连点只扣一次、F5 后卡片带 200.00 与收款人回来）。缺口：恢复只认「未完成优先」的那一轮，多轮未完成的取舍仍需用户自己看 run_id |
 | 进程重启后续跑 | 已实现且有测试证明 | 本轮补：app/planner/recover.py 从 dag_runs/dag_nodes/confirmations 重建 RunState（账户从 dag_runs.meta_json 还原），POST /api/session/{session_id}/recover 与 POST /api/confirm 在内存缺失时自动走恢复；三条边界写死在代码里：不重新解析/不重新裁决、绝不重跑终态节点、遇到新确认卡就停；tests/test_recover.py 8 条（断流后交回卡、确认后真出账、二次点击幂等、过期记 confirm.expired、拒绝记 rejected、恢复不重跑、rehydrate 还原、未知会话报错） | 恢复只认「最近一次 dag_runs」；两轮并行会话不隔离（同一 session 串行执行，本身不允许并行） |
 | 跨场景延迟执行（生日前 2 天订购） | 已实现且有测试证明 | 本轮补：app/plans.py + plans/plan_steps 表（跨天、跨会话、可暂停/取消、重启继续），POST/GET /api/plans、PATCH /api/plans/{id}、POST /api/plans/run；步骤类型 check/action/reminder，检查类到期重试、超过次数标 failed；tests/test_plans.py 12 条 | 计划的资金动作**永不后台执行**：到期只生成待确认提醒、计划转 paused，真正扣款要回助手重新裁决（ACTION_BOUNDARY 常量与测试都钉住这条） |
 
@@ -134,7 +134,7 @@
 | 知识层检索/来源过期降级 | 已实现且有测试证明 | app/knowledge/*；tests/test_security_knowledge.py K6（180 天过期降级）、K8（检索异常 degraded）、K9（开关零影响） | 无 |
 | 知识层 A/B 实验 | 已实现且有测试证明（口径见右列） | **2026-10-24 用 DeepSeek 在最新代码上连跑两轮**：`tests/eval/results/20261024T134524/`、`20261024T135754/`；图：两轮 A/B 的 intent 0.8500/0.9000 与 0.8750/0.8500、clarify 0.8875/0.9125 与 0.9250/0.9375、knowledge_citation 0.8039/0.8039、**unauthorized 2→0**（修掉 C037 单姓收款人与 C048 兜底吞掉赎回链之后） | 逐 case 对齐后，意图/槽位的组间差异两轮方向相反（只有 C048 稳定变好、C074/C078 稳定变差），**不能宣称知识层提升 x pp**；稳定成立的只有引用覆盖 41/51 与 guard 把未授权写压到 0。详见 `tests/eval/evaluation_report.md` §11 |
 | 红队用例集与 runner | 已实现且有测试证明 | tests/redteam/cases.yaml 43 条（A10/B8/C10/D10/E5）；scripts/redteam.py + redteam_judge.py；2026-10-24 两次复跑：MiniMax 10:4x 修掉「谁都别告诉」后 43/43，换 DeepSeek 后 14:1x 再次 **43/43 PASS**（EXIT=0） | runner 不在 pytest 默认套件；结果依赖真模型版本与配额（MiniMax 曾因 429 停摆，2026-10-24 换 DeepSeek 才复跑成 A/B），不可在 CI 稳定复跑 |
-| 真实浏览器测试 | 已实现且有测试证明 | 本轮补：scripts/browser_smoke.py 2026-10-24 用 DeepSeek 真模型复跑 **PASS**（查余额 + 黄灯转账，含 3 张截图与「演示库 sha256 未变」不变量）；另有 /home/peng/.local/bin/python3.12（playwright 1.60.0）跑 scripts/ui_screenshots.py：六区 × 桌面 1440x960 / 手机 390x844 共 12 张 + 主线 7 张（含红灯多因子 main_04/05、日累计硬线 main_06、幂等与刷新恢复 main_07），断言锚点文案、无横向溢出、体积 >12KB，产出 docs/交付/截图/信息架构/browser_report.json（js_errors 为空），并用 sha256 反证演示库未被改动 | tests/test_browser_smoke.py 的 4 条仍默认 skip（.venv 没装 playwright），浏览器证据靠脚本实跑而不是 pytest；没有点击级 E2E（候选选择→新确认卡仍靠主线截图） |
+| 真实浏览器测试 | 已实现且有测试证明 | 本轮补：scripts/browser_smoke.py 2026-10-24 用 DeepSeek 真模型复跑 **PASS**（查余额 + 黄灯转账，含 3 张截图与「演示库 sha256 未变」不变量）；另有 /home/peng/.local/bin/python3.12（playwright 1.60.0）跑 scripts/ui_screenshots.py：六区 × 桌面 1440x960 / 手机 390x844 共 12 张 + 主线 7 张（含红灯多因子 main_04/05、日累计硬线 main_06、幂等与刷新恢复 main_07），断言锚点文案、无横向溢出、体积 >12KB，产出 docs/交付/截图/信息架构/browser_report.json（js_errors 为空），并用 sha256 反证演示库未被改动 | tests/test_browser_smoke.py 的 4 条仍默认 skip（.venv 没装 playwright），本轮再补：scripts/ui_journeys.py 7/7 全 pass，其中 J6（点候选→服务端参数同步改）、J7（点拒绝→confirm.rejected、无 transfer.initiated、节点不 done、余额不变）是**点击级**断言；演示库 sha256 在整套跑完后仍不变 |
 | 移动端响应式 | 部分实现 | 本轮补：scripts/ui_screenshots.py 用 device_scale_factor=2 的 390x844 视口逐页截图，并断言 document.scrollWidth ≤ innerWidth+2（无横向溢出）；web/index.html 两个断点（1080px / 760px）+ .confirm-row 纵向排布 + prefers-reduced-motion | 只覆盖六个视图的静态布局；表单交互、长文案换行、键盘弹出等真实手机行为没有自动化 |
 
 ## 十一、本轮改动后的状态变化（对照 docs/audit/business_semantics_audit.md）
@@ -171,15 +171,15 @@
 |---|---|---|
 | AA 拆分收款人消歧 | 只有后端接口（默认取第一候选）→ **已实现且有测试证明** | `tests/test_split_safety.py` 14 条 + `tests/test_split.py` 8 条：唯一候选才解析、多候选必须消歧、任一人有歧义整笔不进资金写、工具层再校验 |
 | 生日跨场景长期计划 | 尚未实现 → **已实现且有测试证明（有边界）** | `app/birthday.py` + `plan_budgets`（账本预留，不是 5 分钟 hold）；`tests/test_birthday_plan.py` 11 条；边界：到点只提醒，付款必须重新确认 |
-| 调度器一致性 | 部分实现（只有一台节拍器）→ **已实现且有测试证明（单进程）** | `tests/test_ticker_consistency.py` 7 条：三类任务、异常隔离、重复 start 幂等、stop 冻结；多进程未验证，模块说明里写明 |
+| 调度器一致性 | 部分实现（只有一台节拍器）→ **已实现且有测试证明（单进程 + 多进程抢行）** | `tests/test_ticker_consistency.py` 7 条：三类任务、异常隔离、重复 start 幂等、stop 冻结；`tests/test_multiprocess_lease.py` 3 条真多进程（4 进程抢 1 行只出一次账、2 进程各跑 ticker 也只出一次、3 进程抢 5 行正好 5 笔）；跨机分布式协调仍没有 |
 | 同一会话多轮未完成资金写 | 尚未实现（后一轮静默覆盖 RUNS）→ **已实现且有测试证明** | `app/planner/conflict.py` + `run.conflict` 事件；`tests/test_run_conflict.py` 8 条（冲突带 run_id、只读不拦、重启仍检测、取消后解锁） |
 | 真实短信/人脸渠道 | 仅有文档声明 → **部分实现**：没配 `FACTOR_PROVIDER` 且关掉回显时 `SystemBusy` 失败关闭（不落挑战、不写审计） | `tests/test_real_channels.py` 6 条（含 HTTP 503 与 0 挑战断言）；渠道本身仍是桩 |
 | 理财产品期限/流动性/费率 | 仅有文档声明 → **已实现（诚实标注）** | 三项显式 `null` + `fee_text` + `data_source: contest_simulation` + `comparison.supported: false`；`tests/test_real_channels.py` |
-| 浏览器高风险旅程 | 部分实现（只有六区截图）→ **已实现且有测试证明** | `scripts/ui_journeys.py` 5/5（小额确认 / 高额双因子 / AA 同名被阻止 / 生日计划建+刷新恢复 / 储蓄提醒处理），`docs/交付/browser_journeys.json` 的 `demo_db_unchanged: true` |
+| 浏览器高风险旅程 | 部分实现（只有六区截图）→ **已实现且有测试证明（含点击级）** | `scripts/ui_journeys.py` 7/7（小额确认 / 高额双因子 / AA 同名被阻止 / 生日计划建+刷新恢复 / 储蓄提醒处理 / J6 点候选后服务端参数同步改 / J7 点拒绝后不执行），`docs/交付/browser_journeys.json` 的 `demo_db_unchanged: true` |
 | 版本数字口径 | 多份文档各写一套 → **已实现** | `scripts/release_manifest.py` → `docs/benchmark/release_manifest.json`；README / 验收报告 / 提交物对照表 / 比赛演示方案 / PPT 全部引用 |
 | A/B 与最终代码一致 | 受环境限制未复跑 → **已实现（三轮）** | r1 `20261024T134524` / r2 `20261024T135754` / r3 `20261024T160805`；仍单次采样，不宣称显著（final_acceptance_report §6） |
 
-**这一轮新增的明确未验证**：多进程并发下 ticker 的重复执行（租约只做了单机测试）、真实短信/人脸链路、点击级 DOM 断言（旅程是流程级）、生日计划长期运行一个真实生日周期。
+**这一轮新增的明确未验证**：跨机（多主机）分布式调度、真实短信/人脸链路、生日计划长期运行一个真实生日周期。
 
 ## 十二、证据强度自评
 
@@ -187,9 +187,9 @@
 > `docs/benchmark/release_manifest.json` 为准；该文件由 `scripts/release_manifest.py` 从代码与运行日志生成。
 
 **本机实际跑过、可复现的强证据**
-- 全量 pytest：**1330 passed / 4 skipped / 1 warning（.venv/bin/python -m pytest -q，2026-10-24 终测；耗时见 release_manifest.json）**。4 skipped 仍是浏览器冒烟（.venv 无 playwright）。
-- 与上一版差异：1131（10-23 基线）→ 1152（信息架构轮）→ 1258（安全补强）→ 1264（策略拦截事件 + 月末钳制）→ 1275（租约/授权保质期/恢复多轮/刷新重建，+11）→ 1279（单姓收款人 + 兜底赎回链，+4）→ **1330（本轮任务书整改：AA 拆分、生日计划、ticker 一致性、真实渠道闸门等，+51）**。中间新增批次：test_factor_challenges 12、test_suitability 17、test_channels 14、test_recover 8、test_plans 12、test_session_cards 3、test_scheduled_calendar 6、test_scheduled_lease 7、test_business_api 14。
-- 本轮新增的运行时证据：多因子服务端挑战（签发/通过/拒绝三条审计 + 无证明不执行）、卡与账户闸门（含 hold 后冻结卡）、R07 硬线、confirm.expired 与 rejected 可区分、断流恢复后真出账、适当性拒买、订阅推断、持久计划跨重启、34 条原话防护、浏览器六区 + 主线 7 张（含刷新后重建的卡片）。
+- 全量 pytest：**1336 passed / 4 skipped / 1 warning（.venv/bin/python -m pytest -q，2026-10-24 终测；耗时见 release_manifest.json）**。4 skipped 仍是浏览器冒烟（.venv 无 playwright）。
+- 与上一版差异：1131（10-23 基线）→ 1152（信息架构轮）→ 1258（安全补强）→ 1264（策略拦截事件 + 月末钳制）→ 1275（租约/授权保质期/恢复多轮/刷新重建，+11）→ 1279（单姓收款人 + 兜底赎回链，+4）→ 1330（本轮任务书整改：AA 拆分、生日计划、ticker 一致性、真实渠道闸门等，+51）→ 1335（多进程租约压测 +2 条、修顺延旧快照与重放 hold 两个 bug，+5）→ **1336（回答澄清正式结束提问轮，+1）**。中间新增批次：test_factor_challenges 12、test_suitability 17、test_channels 14、test_recover 8、test_plans 12、test_session_cards 3、test_scheduled_calendar 6、test_scheduled_lease 7、test_business_api 14。
+- 本轮新增的运行时证据：多因子服务端挑战（签发/通过/拒绝三条审计 + 无证明不执行）、卡与账户闸门（含 hold 后冻结卡）、R07 硬线、confirm.expired 与 rejected 可区分、断流恢复后真出账、适当性拒买、订阅推断、持久计划跨重启、34 条原话防护、浏览器六区 + 主线 7 张（含刷新后重建的卡片）、7 条旅程（J6/J7 为点击级）、4 进程抢同一批预约只出一次账。
 - 预约转账的并发与时效证据：租约（`claim_token`/`claimed_ms`）让第二个 worker 抢不到就跳过，`scheduled.auth_expired` 让 31 天前的人脸验证不再被当成永久通行证——两条都在 tests/test_scheduled_lease.py 里用「余额不动 / 只少一次」反证。
 - 刷新恢复证据：`/api/session` 重建整张卡（tests/test_session_cards.py 3 条）+ 浏览器 main_07（连点两次只扣一次、F5 后卡片带着 200.00 与收款人回来）。
 - 定向复跑：test_token / test_reverse / test_confirmations_persist / test_clarify_resume / test_business_api / test_scheduled_semantics 共 61 passed；test_tools / test_funds_invariants / test_token 共 58 passed。

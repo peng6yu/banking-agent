@@ -136,6 +136,59 @@ def _options(session_id: str, runs: list[dict[str, Any]]) -> list[dict[str, Any]
     return options
 
 
+SUPERSEDE_REASON: Final[str] = "CLARIFICATION_ANSWERED"
+
+
+def supersede_answered_clarifications(
+    session_id: str, *, conn: sqlite3.Connection | None = None
+) -> list[str]:
+    """用户刚刚回答了上一轮的澄清问题：把那一轮正式关掉，别让它继续挡路。
+
+    为什么必须显式关：停在收款人歧义上的那一轮，run 还是 waiting、转账节点还是 pending，
+    冲突闸门于是把「用户用来回答的那句话」也当成新的写请求挡掉——表现就是
+    「点了候选，页面却说这个会话还有一轮没走完」。而那一轮本来没有授权、没有动钱，
+    它唯一的作用是提问；问题答完了，它的生命周期就该结束。
+
+    边界：只关「没有待确认卡片」的轮次。有卡在等签字的是「等确认」，不是「等澄清」，
+    替用户取消掉就等于替他拒绝了一笔他自己发起的交易。
+    """
+    own = conn is None
+    target = db.connect() if own else conn
+    closed: list[str] = []
+    try:
+        for run in unfinished(target, session_id):
+            if run["pending_confirmations"]:
+                continue
+            now = clock.now_ms()
+            with db.tx(target):
+                target.execute(
+                    "UPDATE dag_nodes SET state = 'skipped', ts_ms = ?"
+                    " WHERE run_id = ? AND state IN (?, ?, ?, ?)",
+                    (now, run["run_id"], *BUSY_NODE_STATES),
+                )
+                target.execute(
+                    "UPDATE dag_runs SET status = 'cancelled', updated_ms = ?"
+                    " WHERE id = ? AND status IN (?, ?)",
+                    (now, run["run_id"], *UNFINISHED_RUN_STATES),
+                )
+                audit.append(
+                    target,
+                    "run.superseded",
+                    {
+                        "run_id": run["run_id"],
+                        "reason": SUPERSEDE_REASON,
+                        "skipped_nodes": [node["node_id"] for node in run["write_nodes"]],
+                        "note": "这一轮停在澄清问题上，用户已经回答；它没有授权、没有动钱，按被取代关闭。",
+                    },
+                    session_id=session_id,
+                )
+            closed.append(run["run_id"])
+    finally:
+        if own:
+            target.close()
+    return closed
+
+
 def detect(session_id: str, dag: Dag, *, conn: sqlite3.Connection | None = None) -> dict[str, Any] | None:
     """新请求是否要先被上一轮挡住；挡住时返回结构化冲突，方便接口层与测试直接断言。"""
     tools = new_write_tools(dag)
@@ -179,8 +232,10 @@ def detect(session_id: str, dag: Dag, *, conn: sqlite3.Connection | None = None)
 __all__ = [
     "BUSY_NODE_STATES",
     "CONFLICT_CODE",
+    "SUPERSEDE_REASON",
     "UNFINISHED_RUN_STATES",
     "detect",
     "new_write_tools",
+    "supersede_answered_clarifications",
     "unfinished",
 ]

@@ -5,7 +5,7 @@
 > 本轮收口改动已 commit 并 push GitHub（最终提交号见 `git log -1 --oneline` / 远程 `main`）。
 > 本报告里的每个数字都来自本次实际执行，不引用 README 里的历史数字；命令与输出见 §3。
 > **2026-10-24 复核**：模型已换 DeepSeek（`deepseek-flash`），在同一份 80 例上连跑三轮 A/B，
-> 红队、独立 `browser_smoke.py` 与五条浏览器旅程也在新代码上复跑；MiniMax 轮次保留为历史对照。
+> 红队、独立 `browser_smoke.py` 与七条浏览器旅程（含 J6/J7 点击级）也在新代码上复跑；MiniMax 轮次保留为历史对照。
 > **数字口径**：工具数、表数、事件数、测试数一律以 `docs/benchmark/release_manifest.json` 为准，
 > 本文件不再手抄这些计数；A/B 三轮明细见 §6。
 
@@ -21,7 +21,7 @@
 | A/B 实验 | 2026-10-24 换 DeepSeek 连跑三轮：B−A 的 intent 差值为 **+5.0 / −2.5 / +8.75pp**，方向反复，**不宣称知识层稳定提升 x pp**；只认知识引用 41/51、41/51、42/51 与未授权写 1/1→0/0→0/0（§6） |
 | 主动财务 | 储蓄目标 → 确定性计算 → 监测 → 提醒 → 处理 → 重算闭环已跑通（真浏览器点过）；后台节拍 `app/planner/ticker.py` 是单进程 asyncio，只推进显式开启监测的目标（默认 6 小时节流），只写提醒不动钱 |
 | 安全 | 红队 43/43；执行层未授权写操作 0；知识层 13 条、主动服务 11 条、payment_guard 44 条测试全绿；权限裁决代码未被修改 |
-| 端到端 | `scripts/e2e.py --offline` **13/13 PASS**（含注入、双因子、审计链、恶意模型）；`test_browser_smoke.py` **4 passed**；独立 `browser_smoke.py` 与 `scripts/ui_journeys.py`（5 条旅程）2026-10-24 用 DeepSeek 复跑 **PASS**，演示库 sha256 未变（§9） |
+| 端到端 | `scripts/e2e.py --offline` **13/13 PASS**（含注入、双因子、审计链、恶意模型）；`test_browser_smoke.py` **4 passed**；独立 `browser_smoke.py` 与 `scripts/ui_journeys.py`（7 条旅程，含两条点击级）2026-10-24 用 DeepSeek 复跑 **PASS**，演示库 sha256 未变（§9） |
 | 交付物 | 阶段 0–7 文档、知识文件、测试、评估报告、演示手册、PPT 均已落盘；限制与未实现项见 §7 |
 
 ---
@@ -46,7 +46,7 @@
 
 | # | 命令 | 结果 |
 |---|---|---|
-| 1 | `.venv/bin/python -m pytest -q tests/` | **1330 passed, 4 skipped, 1 warning**（2026-10-24 终测；耗时取决于机器负载，以 `release_manifest.json` 记录为准）；4 个 skip 是浏览器冒烟默认关闭 |
+| 1 | `.venv/bin/python -m pytest -q tests/` | **1336 passed, 4 skipped, 1 warning**（2026-10-24 终测；耗时取决于机器负载，以 `release_manifest.json` 记录为准）；4 个 skip 是浏览器冒烟默认关闭 |
 | 2 | `RUN_BROWSER_SMOKE=1 python3.12 -m pytest tests/test_browser_smoke.py -q` | **4 passed in 6.44s**（最终代码，固定模型） |
 | 3 | `python3.12 scripts/check_frontend.py` | **前端检查通过：66/66** |
 | 4 | `python3.12 -m scripts.redteam` | **43 条：PASS 43 / FAIL 0** |
@@ -175,7 +175,7 @@ guard 上线前 A 组确实出现过未追问即列写工具，这正是新增 g
 10. **4 个默认 skip**：浏览器冒烟测试默认关闭，避免无浏览器环境拖红全量；已单独以 `RUN_BROWSER_SMOKE=1` 验证 4 passed。
 11. **审计链的准确边界**：应用层只追加 + 链可验证；拿到数据库文件写权限的人可重建整条链，不等价于绝对不可篡改。
 12. **外部模型配额（部分缓解）**：MiniMax 在 2026-10-23 22:10 后 429，2026-10-24 复测仍 429；
-    换 DeepSeek 后 A/B、红队、独立浏览器冒烟与五条旅程都已复跑。DeepSeek 侧仍是单一厂商、
+    换 DeepSeek 后 A/B、红队、独立浏览器冒烟与七条旅程都已复跑。DeepSeek 侧仍是单一厂商、
     单次采样，没有第三方交叉验证。
 13. **未做 RAG/向量库对照**：结构化匹配已够用，刻意不引入；未来若加应作为第三对照组，而不是替换现有知识层。
 
@@ -218,9 +218,9 @@ python3.12 -m tests.eval.run_eval --cases tests/eval/intent_cases.yaml --out tes
 | 监管文件逐条比对 | 已核验发布机构、文号、生效状态与关键条款；未做法律意见级别的逐字解释 |
 | 全天候主动服务 | 已有进程内节拍（预约转账 / 开启监测的目标 / 到点计划步骤），但只是单进程 asyncio：进程退出即停、多 worker 未验证；未做多用户/长周期稳定性测试 |
 | 真实资金链路 | 按任务书全部模拟，无法也不应验证真实转账/投资 |
-| 真实模型复跑 | MiniMax 仍 429；2026-10-24 换 DeepSeek 完成三轮 A/B、红队、独立浏览器冒烟与五条旅程，结果见 §6 与 `browser_journeys.json`；仍是单一厂商、单次采样 |
+| 真实模型复跑 | MiniMax 仍 429；2026-10-24 换 DeepSeek 完成三轮 A/B、红队、独立浏览器冒烟与七条旅程，结果见 §6 与 `browser_journeys.json`；仍是单一厂商、单次采样 |
 | 独立 `browser_smoke.py` | 2026-10-24 换 DeepSeek 后复跑 **PASS**（场景 1 查余额、场景 2 黄灯转账点确认，余额 12,860.50 → 12,760.50，演示库未变） |
-| 五条高风险浏览器旅程 | `scripts/ui_journeys.py`：小额转账、高额强验证、AA 同名候选、生日计划刷新恢复、储蓄提醒处理，5/5 PASS；每条同时核对 DOM 与服务端节点/审计，演示库 sha256 未变 |
+| 高风险浏览器旅程 | `scripts/ui_journeys.py`：小额转账、高额强验证、AA 同名候选、生日计划刷新恢复、储蓄提醒处理，加点击级 J6（点候选→服务端参数同步改）与 J7（点拒绝→不执行），7/7 PASS；每条同时核对 DOM 与服务端节点/审计，演示库 sha256 未变 |
 | 点击级 DOM 单测 | 旅程是流程级（真浏览器 + 服务端双证），没有做每个按钮的点击级组件测试；`tests/test_browser_smoke.py` 默认 skip，需 `RUN_BROWSER_SMOKE=1` |
 
 ---

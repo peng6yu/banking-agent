@@ -340,7 +340,9 @@ async def chat(request: ChatRequest) -> StreamingResponse:
         forget_clarification(session_id)
     parsed = await _parse(session_id, parse_text)
     return StreamingResponse(
-        _events(session_id, parsed, user_text=parse_text),
+        # supersede：这句话是在回答上一轮的反问。答完之后那一轮就该结束，
+        # 不能继续挂成「没走完的写操作」把这一轮也挡掉。
+        _events(session_id, parsed, user_text=parse_text, supersede=resumed_text is not None),
         media_type=SSE_MEDIA,
         headers=SSE_HEADERS,
     )
@@ -893,7 +895,13 @@ def _parse_sync(
     return asyncio.run(intent.parse(text, history, adapter=get_adapter(), session_id=session_id))
 
 
-async def _events(session_id: str, parsed: intent.IntentResult, *, user_text: str = "") -> Any:
+async def _events(
+    session_id: str,
+    parsed: intent.IntentResult,
+    *,
+    user_text: str = "",
+    supersede: bool = False,
+) -> Any:
     """SSE 生成器：先发 start / intent，反问就到此为止，否则挂上执行器。"""
     queue: asyncio.Queue[str | tuple[str, dict[str, Any]]] = asyncio.Queue()
     # 纵深防御：即便将来有人重构掉意图层的 guard，接口层也拿原话再挡一次。
@@ -913,7 +921,7 @@ async def _events(session_id: str, parsed: intent.IntentResult, *, user_text: st
         await queue.put(("done", {"summary": parsed.question, "question": parsed.question}))
         await queue.put((_SENTINEL, {}))
     else:
-        _start_run(session_id, parsed, queue, user_text=user_text)
+        _start_run(session_id, parsed, queue, user_text=user_text, supersede=supersede)
     while True:
         item = await queue.get()
         if isinstance(item, tuple) and item[0] == _SENTINEL:
@@ -928,6 +936,7 @@ def _start_run(
     queue: asyncio.Queue[Any],
     *,
     user_text: str = "",
+    supersede: bool = False,
 ) -> None:
     """建图并在后台跑；解析失败要退化成单步图，不能让整轮会话死掉。"""
     built = planner_dag.build_or_single(
@@ -941,7 +950,7 @@ def _start_run(
     async def driver() -> None:
         try:
             # user_text 交给执行层：澄清闸门要用原话把短回答补全。
-            await executor.run(session_id, built, emit, user_text=user_text)
+            await executor.run(session_id, built, emit, user_text=user_text, supersede=supersede)
         except Exception as exc:  # noqa: BLE001 - 执行期任何异常都只能降级成 INTERNAL
             trace_id = new_id("tr")
             log.exception("api.chat.driver_failed session=%s trace=%s", session_id, trace_id)

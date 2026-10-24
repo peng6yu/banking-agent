@@ -136,6 +136,122 @@ def send(page: Any, text: str) -> None:
     page.click("#chat-send")
 
 
+
+# ------------------------------------------------- J6 候选点击（DOM 级绑定）
+def journey_candidate_click(page: Any, base_url: str, token: str, out: Path) -> dict[str, Any]:
+    """点第二名候选，验「卡片上的收款人」和「服务端确认里的收款人」同时变。
+
+    为什么单独做一条：以前的旅程用**文字回答**（「尾号6620」）推动消歧，
+    但用户真实动作是点候选按钮。点错触发路径（比如按钮把候选写进 UI 却没写进
+    计划参数）时，卡片文字对、后端参数错，这类偏差只有同时比对两边才抓得到。
+    """
+    print("\n=== J6 候选点击：点第 2 位，卡片与服务端参数必须同时改 ===")
+    goto_view(page, "assistant", base_url)
+    before = balance_fen(base_url, token)
+    send(page, "帮我转 500 元给张三")
+    page.wait_for_selector(".pick-list", timeout=30000)
+    buttons = page.locator(".pick")
+    total = buttons.count()
+    if total < 2:
+        raise JourneyFail(f"[J6] 应该有多个张三候选，实际 {total}")
+    target_index = None
+    for index in range(total):
+        label = buttons.nth(index).inner_text()
+        if "6620" in label:
+            target_index = index
+            break
+    if target_index is None:
+        raise JourneyFail(f"[J6] 候选里没有尾号 6620：{[buttons.nth(i).inner_text() for i in range(total)]}")
+    if target_index == 0:
+        print("[J6] 注意：尾号 6620 恰好是第一位，本用例仍按「点它」而不是「默认选第一个」执行")
+    buttons.nth(target_index).click()
+
+    page.wait_for_selector(".confirm-card", timeout=30000)
+    page.wait_for_timeout(300)
+    card = page.inner_text(".confirm-card")
+    if "6620" not in card:
+        raise JourneyFail(f"[J6] 卡片收款人没有跟着换成 6620：{card[:300]}")
+    if "4417" in card:
+        raise JourneyFail(f"[J6] 卡片里还留着另一位张三：{card[:300]}")
+
+    sid = session_id_of(page)
+    view = session_view(base_url, token, sid)
+    pending = [c for c in (view.get("confirmations") or []) if c.get("status") == "pending"]
+    if len(pending) != 1:
+        raise JourneyFail(f"[J6] 服务端应该恰好有一张待确认：{view.get('confirmations')}")
+    rebuilt = pending[0].get("card") or {}
+    payee = rebuilt.get("payee") or {}
+    if str(payee.get("card_tail")) != "6620":
+        raise JourneyFail(f"[J6] 服务端确认卡片的收款人尾号不是 6620：{payee}")
+    amount = float(str(rebuilt.get("amount_yuan") or "0").replace(",", ""))
+    if abs(amount - 500.0) > 0.001:
+        raise JourneyFail(f"[J6] 金额不对：{rebuilt.get('amount_yuan')}")
+    if balance_fen(base_url, token) != before:
+        raise JourneyFail("[J6] 还没确认就动钱了")
+    shot = shoot(page, out / "journey_06_candidate_click.png")
+    return {
+        "status": "pass",
+        "session_id": sid,
+        "picked_index": target_index,
+        "candidates": total,
+        "server_payee_tail": str(payee.get("card_tail")),
+        "server_amount_yuan": rebuilt.get("amount_yuan"),
+        "confirmation_id": pending[0].get("confirmation_id"),
+        "balance_unchanged": True,
+        "shot": str(shot.relative_to(ROOT)),
+    }
+
+
+# ------------------------------------------------------- J7 拒绝（点击级）
+def journey_reject(page: Any, base_url: str, token: str, out: Path) -> dict[str, Any]:
+    """点「拒绝」：界面、服务端确认状态、审计三处必须一致，且钱一分不动。"""
+    print("\n=== J7 拒绝：点一下拒绝，服务端记录 confirm.rejected ===")
+    goto_view(page, "assistant", base_url)
+    before = balance_fen(base_url, token)
+    send(page, "帮我转 100 元给李静")
+    page.wait_for_selector(".confirm-card", timeout=30000)
+    sid = session_id_of(page)
+    page.click(".confirm-card .btn-red")
+    page.wait_for_function(
+        "() => document.querySelector('#chat-log').innerText.includes('已经拒绝')",
+        timeout=20000,
+    )
+
+    status = None
+    deadline = time.time() + 10
+    while time.time() < deadline:
+        view = session_view(base_url, token, sid)
+        cards = view.get("confirmations") or []
+        if cards:
+            status = str(cards[0].get("status"))
+            if status == "rejected":
+                break
+        time.sleep(0.2)
+    if status != "rejected":
+        raise JourneyFail(f"[J7] 服务端确认状态不是 rejected：{status}")
+    kinds = event_types(audit_events(base_url, token, sid))
+    if "confirm.rejected" not in kinds:
+        raise JourneyFail(f"[J7] 审计里没有 confirm.rejected：{sorted(kinds)}")
+    # 只读节点（resolve_payee / query_balance）也会写 tool.executed，
+    # 所以不能拿「有没有 tool.executed」当「钱有没有动」的证据。
+    if "transfer.initiated" in kinds:
+        raise JourneyFail(f"[J7] 拒绝了却仍然发起了转账：{sorted(kinds)}")
+    states = node_states(session_view(base_url, token, sid))
+    if states.get("transfer") == "done":
+        raise JourneyFail(f"[J7] 拒绝了但转账节点仍标成 done：{states}")
+    if balance_fen(base_url, token) != before:
+        raise JourneyFail("[J7] 拒绝之后余额变了")
+    shot = shoot(page, out / "journey_07_reject.png")
+    return {
+        "status": "pass",
+        "session_id": sid,
+        "server_status": status,
+        "audit_events": sorted(kinds),
+        "balance_unchanged": True,
+        "shot": str(shot.relative_to(ROOT)),
+    }
+
+
 # ---------------------------------------------------------------- J1 小额转账
 def journey_small_transfer(page: Any, base_url: str, token: str, out: Path) -> dict[str, Any]:
     """小额转账：确认卡字段齐全、点一次确认只扣一次钱、服务端节点真的 done。"""
@@ -545,6 +661,8 @@ def run(args: argparse.Namespace) -> int:
                 ("j2", journey_red_mfa),
                 ("j4", journey_birthday_plan),
                 ("j5", journey_savings_alert),
+                ("j6", journey_candidate_click),
+                ("j7", journey_reject),
             ]
             for name, func in plan:
                 if wanted and name not in wanted:

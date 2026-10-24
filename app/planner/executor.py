@@ -104,6 +104,7 @@ async def run(
     secret: str | None = None,
     confirm_timeout_ms: int | None = None,
     user_text: str = "",
+    supersede: bool = False,
 ) -> None:
     """跑一张执行图；只发事件，不返回业务数据。
 
@@ -120,6 +121,11 @@ async def run(
         # 同一会话只允许一轮没走完的写操作：两轮并行时后一轮会覆盖 RUNS[session_id]，
         # 前一轮的确认卡还在库里却已经没人驱动它——用户点确认「没反应」。
         # 这里只拦「新请求含写操作且上一轮还没落定」，只读请求照放。
+        if supersede:
+            # 这句话是在回答上一轮的澄清问题：那一轮该正式结束，否则它会一直挡着新请求。
+            closed = run_conflict.supersede_answered_clarifications(session_id)
+            if closed:
+                log.info("executor.run.superseded session=%s runs=%s", session_id, ",".join(closed))
         blocked = run_conflict.detect(session_id, dag)
         if blocked is not None:
             log.info(

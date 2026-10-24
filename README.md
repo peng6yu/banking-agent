@@ -82,10 +82,13 @@ make run     # 启动日志会打印一条带 #token= 的地址，打开那一�
 | 25 | **调度器一致性**（三类任务 + 异常隔离 + 幂等启动） | 「已接入调度器」以前只是代码里看得见，没有证据说明一类失败会不会拖死另外两类、重复 start 会不会跑两份 | `tests/test_ticker_consistency.py` 7 条（三类各跑一次、一类抛异常另外两类照跑、重复 start 只留一个 task、停止后计数冻结、提醒不重复、未开监测的目标不被碰） |
 | 26 | **同一会话只允许一轮未完成资金写**（`app/planner/conflict.py` + `run.conflict` 事件） | 后一轮会静默覆盖前一轮的 `RUNS`，用户以为还在等确认的那笔其实已经被顶掉 | `tests/test_run_conflict.py` 8 条（第二笔被拒并告诉你是哪一轮挡路、只读请求不拦、重启后仍能检测、列出全部未完成轮、取消上一轮后解锁、过期卡不会静默解锁、已完成轮不算冲突且不重复扣款、恢复已完成轮不重跑资金节点） |
 | 27 | **真实渠道闸门 + 模拟数据自报家门** | 关掉演示回显后没有真实短信/人脸渠道时会静默发不出码；理财的期限/流动性/费率三家都没数据 | `FACTOR_PROVIDER` 未声明真实渠道时 `issue()` 抛 `SystemBusy`（不落挑战、不写 `factor.challenge_issued`，HTTP 503）；理财每项 `duration_days/liquidity/fee = null` + `data_source: contest_simulation` + `comparison.supported: false`；`tests/test_real_channels.py` 6 条 |
-| 28 | **五条浏览器高风险旅程**（`scripts/ui_journeys.py`，真浏览器 + 真模型） | 六区截图只证明页面能打开，不证明任务能走完 | `docs/交付/browser_journeys.json`：5/5 pass——小额转账确认、高额双因子出账、AA 同名候选被阻止、生日计划建立+刷新恢复、储蓄提醒处理后落库；`demo_db_unchanged: true`（测试库与演示库隔离） |
-| 29 | **单一事实源 `docs/benchmark/release_manifest.json`** | README / 进度文件 / 验收报告 / PPT 各写一套数字，改一处忘一处 | `scripts/release_manifest.py` 直接从代码与运行结果取数：git SHA、tools 35、tables 27、events 48、API 30 条、KB 版本、pytest / 红队 / e2e / A/B 结果目录；文档与 PPT 一律引用它 |
+| 28 | **浏览器高风险旅程**（`scripts/ui_journeys.py`，真浏览器 + 真模型） | 六区截图只证明页面能打开，不证明任务能走完 | `docs/交付/browser_journeys.json`：7/7 pass——小额转账确认、高额双因子出账、AA 同名候选被阻止、生日计划建立+刷新恢复、储蓄提醒处理后落库、J6 点候选、J7 点拒绝；`demo_db_unchanged: true`（测试库与演示库隔离） |
+| 29 | **单一事实源 `docs/benchmark/release_manifest.json`** | README / 进度文件 / 验收报告 / PPT 各写一套数字，改一处忘一处 | `scripts/release_manifest.py` 直接从代码与运行结果取数：git SHA、tools 35、tables 27、events 49、API 30 条、KB 版本、pytest / 红队 / e2e / A/B 结果目录；文档与 PPT 一律引用它 |
+| 30 | **多进程抢同一批预约转账的压测** | 租约以前只有单进程测试：两个 uvicorn worker 同时到点会不会各扣一次，没有证据 | `tests/lease_worker.py` + `tests/test_multiprocess_lease.py` 3 条：4 进程抢 1 行只出一次账、2 进程各跑一轮 ticker 也只出一次、3 进程抢 5 行正好 5 笔 |
+| 31 | **点击级旅程 J6/J7** | 之前 5 条旅程是流程级：直接调接口，没证明「页面上真点一下」也会同步改服务端 | J6 点候选列表里尾号 6620 那一位，断言确认卡与服务端 pending 卡片的 payee.card_tail 都是 6620、金额 500、余额未动；J7 点拒绝，断言 confirm.rejected、无 transfer.initiated、转账节点不是 done、余额不变；整套 7 条全 pass |
+| 32 | **回答澄清时正式结束提问那一轮**（`supersede_answered_clarifications` + `run.superseded` 事件） | J6 首跑就撞上：点了候选、后端也把原句拼回来了，却被自己的冲突闸门拦成 SESSION_RUN_CONFLICT——提问中的那一轮把下一句当成「第二轮资金写」 | 只在**没有待签确认卡**的轮次上生效（等签字不等于等澄清，不能替用户取消），把 busy 节点标 skipped、run 标 cancelled、写 run.superseded；`tests/test_run_conflict.py` 9 条 | README / 进度文件 / 验收报告 / PPT 各写一套数字，改一处忘一处 | `scripts/release_manifest.py` 直接从代码与运行结果取数：git SHA、tools 35、tables 27、events 49、API 30 条、KB 版本、pytest / 红队 / e2e / A/B 结果目录；文档与 PPT 一律引用它 |
 
-同一轮里也修了十个由测试/截图/A/B/新 clone 抓出来的真 bug：未满足的条件步忘了把状态退回 pending（一次不满足就永久卡住）、`_settle_plan` 把「已暂停」误判成「已完成」、模糊收款人正则把「谁都别告诉」里的「谁」当成收款人（导致一笔明确写了卡号的大额转账绕开了 R07 红灯）、桩模式抽取收款人时把动词一起吃进去（「帮我给妈妈转 2000 元」抽成「妈妈转」，浏览器里直接找不到收款人）、没有金额也没有操作说明的 SSE 帧会画出一张字段全是「见操作说明全文」的空确认卡，以及刷新页面时 `/api/session` 只回确认号（用户在看不见金额和收款人的情况下被要求再签一次字，现在改成服务端用 `confirmation_frame` 重建同一张卡）、把「转500给王」里的单姓当成了收款人（现在要求全名或卡号后四位）、以及兜底解析把「把货币基金卖了转3000给我妈」压成一句纯转账（现在遇到赎回/基金/理财等词就拒答，交给模型重新理解）。最后一条是把仓库重新 clone 到干净目录跑全量测试才暴露的：`test_cancel_unknown_session_is_a_benign_noop` 借用了工作区里的 `data/bank.db`，而 `data/` 不入库，新 clone 里没有这张表，于是「取消未知会话」直接抛 `no such table: dag_runs`——测试依赖工作区状态，不是产品行为；已改成显式临时库（`monkeypatch db.DEFAULT_DB_PATH` + `db.init_db`）。其余九条是 2026-10-24 测试、截图、两轮 A/B 各自抓到的，不是读代码猜的。
+同一轮里也修了十三个由测试/截图/A/B/新 clone/多进程压测抓出来的真 bug：未满足的条件步忘了把状态退回 pending（一次不满足就永久卡住）、`_settle_plan` 把「已暂停」误判成「已完成」、模糊收款人正则把「谁都别告诉」里的「谁」当成收款人（导致一笔明确写了卡号的大额转账绕开了 R07 红灯）、桩模式抽取收款人时把动词一起吃进去（「帮我给妈妈转 2000 元」抽成「妈妈转」，浏览器里直接找不到收款人）、没有金额也没有操作说明的 SSE 帧会画出一张字段全是「见操作说明全文」的空确认卡，以及刷新页面时 `/api/session` 只回确认号（用户在看不见金额和收款人的情况下被要求再签一次字，现在改成服务端用 `confirmation_frame` 重建同一张卡）、把「转500给王」里的单姓当成了收款人（现在要求全名或卡号后四位）、以及兜底解析把「把货币基金卖了转3000给我妈」压成一句纯转账（现在遇到赎回/基金/理财等词就拒答，交给模型重新理解）。最后一条是把仓库重新 clone 到干净目录跑全量测试才暴露的：`test_cancel_unknown_session_is_a_benign_noop` 借用了工作区里的 `data/bank.db`，而 `data/` 不入库，新 clone 里没有这张表，于是「取消未知会话」直接抛 `no such table: dag_runs`——测试依赖工作区状态，不是产品行为；已改成显式临时库（`monkeypatch db.DEFAULT_DB_PATH` + `db.init_db`）。其余九条是 2026-10-24 测试、截图、两轮 A/B 各自抓到的，不是读代码猜的。多进程压测又补了三条：顺延后的旧快照还能按 ID 抢到行（`_claim` 现在要求 `due_ms <= now` 重新读库）、重放一个已释放的 hold 会把预约误标 `scheduled.failed`（现在识别为 `skipped/ALREADY_HANDLED`）、以及点击候选回答澄清时被自己上一轮的冲突闸门拦住（`supersede_answered_clarifications` 只关没有待签卡的轮次）。
 
 ## 快速开始（评委复现路径）
 
@@ -295,7 +298,7 @@ curl -s http://127.0.0.1:8000/api/audit/verify
 ### 单元与集成测试（实测全绿，用例数持续增补）
 
 ```bash
-python3.12 -m pytest -q tests/            # 1330 passed, 4 skipped（2026-10-24 终测；复跑以实测为准）
+python3.12 -m pytest -q tests/            # 1336 passed, 4 skipped（2026-10-24 终测；复跑以实测为准）
 ```
 
 > **数字口径**：本 README 里的工具数、表数、审计事件数、测试通过数与 A/B 轮次，
@@ -371,7 +374,7 @@ python3.12 -m app.smoke                    # 实测 4/4 PASS，主脑延迟约 1
 | `app/tools/` | 35 个工具：查人、查余额、账单、卡片、订阅、转账、资金冻结 + 7 个主动财务（只读/需确认，无动钱语义） |
 | `app/api/` | 会话/确认/审计等 30 条 API 路径 + 只读业务视图 `business.py`（overview / bill / management / plans / executions 五个 GET，六个区域的唯一数据来源） |
 | `web/index.html` | 单文件前端（原生 JS，无框架、无 CDN、零外链） |
-| `tests/` | pytest 用例集（1330 passed / 4 skipped，2026-10-24 终测）+ 43 条红队 YAML + `tests/eval/` 80 例 A/B 评估集（10-24 两轮结果已入库） |
+| `tests/` | pytest 用例集（1336 passed / 4 skipped，2026-10-24 终测）+ 43 条红队 YAML + `tests/eval/` 80 例 A/B 评估集（10-24 两轮结果已入库） |
 | `scripts/` | 种子脚本、前端合规检查器、真实 Chromium 冒烟(`browser_smoke.py`)、六区+主线截图(`ui_screenshots.py`) |
 | `docs/` | 交接规格书 00—10（改造前基线，写代码前必读）+ 11—15 改造设计与验收 + 答辩与演示交付件 |
 | `规划/` | 前期选型与模型实测记录 |
@@ -385,7 +388,7 @@ python3.12 -m app.smoke                    # 实测 4/4 PASS，主脑延迟约 1
 | `make setup` | 一键配置新电脑（.venv + 依赖 + .env + 选模型 + 建库 + 自检） | ✅ 幂等；`ARGS="--dry-run"` 可预演 |
 | `make run` | 启动服务（--reload） | ✅ |
 | `make seed` | 建库 + 种子（幂等） | ✅ |
-| `make test` | pytest 全跑 | ✅ 全绿（1330 passed / 4 skipped，2026-10-23 本轮实测） |
+| `make test` | pytest 全跑 | ✅ 全绿（1336 passed / 4 skipped，2026-10-23 本轮实测） |
 | `make smoke` | 模型连通性自检 | ✅ 4/4 |
 | `make cov` | 覆盖率（未装 pytest-cov 时自动退回纯跑） | ✅ |
 | `make reset` | `POST /api/demo/reset` 演示前清场 | ✅ |

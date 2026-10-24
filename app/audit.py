@@ -29,6 +29,9 @@ EVENT_TYPES: Final[frozenset[str]] = frozenset(
         # 同一会话里已有没走完的写轮次：这一轮被挡住也必须留痕，
         # 否则用户问「为什么我这句话没执行」时，库里只有一句 intent.parsed。
         "run.conflict",
+        # 提问那一轮被用户的回答取代：它没授权、没动钱，但「消失」也必须留痕，
+        # 否则事后只能看到一轮 cancelled 的 run，不知道是用户取消还是被回答取代。
+        "run.superseded",
         "policy.decided",
         "confirm.requested",
         "confirm.approved",

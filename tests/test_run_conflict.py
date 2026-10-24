@@ -288,3 +288,64 @@ def test_recovering_a_finished_run_does_not_execute_the_money_node_again(bank: P
         assert _audit_kinds(conn, SESSION).count("transfer.initiated") == 1
     finally:
         conn.close()
+
+
+# ------------------------------------------- 回答澄清后，提问那一轮要正式结束
+
+
+def _ambiguous_dag() -> Dag:
+    return planner_dag.build(
+        {"intent": "transfer", "slots": {"payee_name": "张三", "amount_fen": AMOUNT_FEN}}
+    )
+
+
+def test_answering_a_payee_clarification_supersedes_the_run_that_asked(bank: Path) -> None:
+    """点了候选/回了尾号之后，提问那一轮必须结束，而不是继续挡着下一句。
+
+    现场（真浏览器里抓到的）：第一轮停在「有两位都叫张三」，用户点了候选，
+    第二句话被冲突闸门拦成 SESSION_RUN_CONFLICT——用户看到的是
+    「这个会话还有一轮没走完」，而那一轮其实只是在等一个答案。
+    """
+    frames: list[tuple[str, dict[str, Any]]] = []
+
+    async def emit(name: str, data: dict[str, Any]) -> None:
+        frames.append((name, data))
+
+    asyncio.run(executor.run(SESSION, _ambiguous_dag(), emit, confirm_timeout_ms=5_000))
+    done = [data for name, data in frames if name == "done"]
+    assert done and (done[-1].get("clarification") or {}).get("kind") == "payee"
+
+    conn = _conn()
+    try:
+        pending = conflict.unfinished(conn, SESSION)
+        assert len(pending) == 1, "提问中的那一轮应该被认成未完成"
+        asked_run = pending[0]["run_id"]
+
+        # 用户回答了问题：这一轮按「被回答取代」关闭。
+        closed = conflict.supersede_answered_clarifications(SESSION)
+        assert closed == [asked_run]
+        assert conflict.unfinished(conn, SESSION) == [], "回答之后不能再有未完成轮次"
+        row = conn.execute("SELECT status FROM dag_runs WHERE id = ?", (asked_run,)).fetchone()
+        assert str(row["status"]) == "cancelled"
+        states = {
+            str(node["tool"]): str(node["state"])
+            for node in conn.execute(
+                "SELECT tool, state FROM dag_nodes WHERE run_id = ?", (asked_run,)
+            ).fetchall()
+        }
+        assert states["transfer"] == "skipped"
+        assert "run.superseded" in _audit_kinds(conn, SESSION)
+        before = _balance(conn)
+    finally:
+        conn.close()
+
+    # 新的那句话可以正常执行：只扣一次钱，且带 run.superseded 的审计链没断。
+    frames2 = _drive(SESSION, _dag())
+    assert _error(frames2) is None, "回答澄清之后，新请求不该再被冲突闸门拦住"
+    conn = _conn()
+    try:
+        assert _balance(conn) == before - AMOUNT_FEN
+        kinds = _audit_kinds(conn, SESSION)
+        assert "run.superseded" in kinds and "confirm.approved" in kinds
+    finally:
+        conn.close()

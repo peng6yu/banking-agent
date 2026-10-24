@@ -248,14 +248,19 @@ def _claim(conn: sqlite3.Connection, sched_id: str, stamp: int) -> str | None:
     用一条 UPDATE … WHERE 拿行锁：SQLite 里同一行只有一个写者能成功，rowcount 就是裁决结果。
     判断条件里带上 status='scheduled'，所以别人刚取消/刚执行完的行不会被抢到；
     租约过期（claimed_ms 太旧）说明持有者死了，允许接管。
+
+    还要再确认一次 due_ms <= stamp：进入循环的那份 rows 是**开始时的快照**，
+    期间别的进程可能已经把这行顺延到明天（额度不够）。只按 ID+status 抢，会把
+    「明天才该执行的行」当今天执行，然后用上一轮的幂等键重放到一份已释放的 hold 上，
+    把一条本来只是顺延的预约误判成失败。这个条件让抢行重新读一次库里的真实到期时间。
     """
     token = uuid.uuid4().hex[:12]
     with _tx(conn):
         cur = conn.execute(
             "UPDATE scheduled_transfers SET claim_token = ?, claimed_ms = ?"
-            " WHERE id = ? AND status = 'scheduled'"
+            " WHERE id = ? AND status = 'scheduled' AND due_ms <= ?"
             " AND (claim_token = '' OR claimed_ms <= ?)",
-            (token, stamp, sched_id, stamp - CLAIM_LEASE_MS),
+            (token, stamp, sched_id, stamp, stamp - CLAIM_LEASE_MS),
         )
         if cur.rowcount != 1:
             return None
@@ -317,6 +322,13 @@ def _execute_one(
         hold = funds.initiate(
             conn, action, session_id=session_id, node_id="due", token=tok, payee_id=payee_id, secret=secret
         )
+        if hold.reused or hold.status != "held":
+            # 同一个幂等键已经有一份 hold 了：说明这一行的这份参数被处理过。
+            # 要么是另一个 worker 刚提交（那就不能再扣一次），要么是上一轮撞额度
+            # 顺延后把 hold 放掉了（再 commit 只会拿到 HoldExpired）。
+            # 两种情况都不该把预约标记成失败——它只是这一轮轮不到执行。
+            log.info("scheduled.hold_replayed id=%s status=%s", sched_id, hold.status)
+            return {"scheduled_id": sched_id, "status": "skipped", "reason": "ALREADY_HANDLED"}
         try:
             outcome = funds.commit(
                 conn, hold.hold_id, daily_limit_fen=daily_cap_fen(tok, secret)

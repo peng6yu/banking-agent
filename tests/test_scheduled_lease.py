@@ -20,8 +20,10 @@ from typing import Any
 
 import pytest
 
-from app import clock, db
+from app import clock, db, funds
+from app.security import token as token_mod
 from app.tools import scheduled
+from app.tools.base import build_action
 from scripts.seed import DEBIT_ACCOUNT_ID, PAYEE_LIJING, USER_ID, seed
 
 SECRET = "0123456789abcdef" * 4
@@ -187,3 +189,77 @@ def test_ttl_constant_is_stated_in_days_not_magic(bank: Path) -> None:
     """30 天这个数是产品口径，测试把它钉住：改成更短/更长都得是有意为之。"""
     assert scheduled.AUTH_TTL_MS == 30 * 24 * 3600 * 1000
     assert scheduled.CLAIM_LEASE_MS == 10 * 60 * 1000
+
+
+# --------------------------------------------------- 顺延之后的两条并发回归
+
+
+def test_a_deferred_row_cannot_be_claimed_from_a_stale_snapshot(bank: Path) -> None:
+    """顺延到明天之后，拿着旧快照的 worker 不能再抢这一行。
+
+    现场：两个进程几乎同时读到「这行今天到期」，A 撞当日额度把它顺延到明天、
+    放掉 hold；B 手里的 rows 还是旧的，只按 ID+status 去抢会抢成功，然后用同一个
+    幂等键重放到 A 放掉的那份 hold 上，把一条只是顺延的预约误记成失败。
+    修法是在 claim 的 WHERE 里再确认一次 due_ms <= stamp。
+    """
+    conn = _conn()
+    try:
+        stamp = clock.now_ms()
+        _insert(conn, sched_id="sch_stale", due_ms=stamp - 1_000)
+        conn.execute(
+            "INSERT INTO daily_limits (account_id, day, spent_fen, tx_count) VALUES (?,?,?,0)",
+            (DEBIT_ACCOUNT_ID, _day_key(stamp), 100_000),
+        )
+        results = scheduled.execute_due(conn, now=stamp, secret=SECRET)
+        assert results[0]["status"] == "scheduled", "额度不够应该顺延"
+        row = _row(conn, "sch_stale")
+        assert int(row["due_ms"]) > stamp
+
+        # 旧快照的 worker 用同一天的时间戳来抢：必须抢不到。
+        assert scheduled._claim(conn, "sch_stale", stamp) is None
+        assert str(_row(conn, "sch_stale")["claim_token"]) == ""
+    finally:
+        conn.close()
+
+
+def test_a_replayed_released_hold_does_not_fail_the_scheduled_row(bank: Path) -> None:
+    """幂等键撞上一份已释放的 hold：这一轮跳过，不能把预约标成失败。
+
+    这是上一条的后果层：就算抢行条件被绕过（或历史数据已经在那种状态），
+    执行器也不能把「钱没动」误报成「这笔预约失败了」——用户会以为预约丢了。
+    正确结局是保持 scheduled、余额不动、审计里没有 scheduled.failed。
+    """
+    conn = _conn()
+    try:
+        stamp = clock.now_ms()
+        _insert(conn, sched_id="sch_replay", due_ms=stamp - 1_000)
+        row = _row(conn, "sch_replay")
+        action = build_action(
+            "scheduled_transfer",
+            {"payee_id": PAYEE_LIJING, "amount_fen": AMOUNT_FEN, "due_ms": int(row["due_ms"])},
+            DEBIT_ACCOUNT_ID,
+            AMOUNT_FEN,
+        )
+        tok = token_mod.issue_audited(
+            conn, action, session_id="sched:sch_replay", level="yellow", secret=SECRET
+        )
+        hold = funds.initiate(
+            conn, action, session_id="sched:sch_replay", node_id="due",
+            token=tok, payee_id=PAYEE_LIJING, secret=SECRET,
+        )
+        funds.release(conn, hold.hold_id, reason="TEST_RELEASED", session_id="sched:sch_replay")
+
+        results = scheduled.execute_due(conn, now=stamp, secret=SECRET)
+        assert results[0]["status"] == "skipped"
+        assert results[0]["reason"] == "ALREADY_HANDLED"
+        assert str(_row(conn, "sch_replay")["status"]) == "scheduled"
+        assert _balance(conn) == START_BALANCE_FEN
+        assert "scheduled.failed" not in _audit_kinds(conn, "sch_replay")
+    finally:
+        conn.close()
+
+
+def _day_key(ms: int) -> str:
+    import datetime
+
+    return datetime.datetime.fromtimestamp(ms / 1000).strftime("%Y-%m-%d")
