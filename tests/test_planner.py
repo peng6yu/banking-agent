@@ -547,13 +547,21 @@ def test_cancel_releases_every_hold_and_skips_the_rest(bank: Path) -> None:
     conn.close()
 
 
-def test_cancel_unknown_session_is_a_benign_noop() -> None:
+def test_cancel_unknown_session_is_a_benign_noop(tmp_path: Path, monkeypatch) -> None:
     """取消一个不存在的会话不该报错。
 
     2026-10-24 起「中断」也覆盖重启后的场景：库里有轮次就按库取消，库里没有
     就返回 cancelled=False。原来抛 VALIDATION 会让刷新后的页面点「中断」直接报错，
     而这时用户看到的其实只是「没有可取消的东西」。
+
+    注意用独立的临时库：这个用例会走恢复层去读 dag_runs，如果借的是仓库里的
+    data/bank.db，刚 clone 下来（data/ 不入库）就会因为「没有这张表」而失败，
+    那是测试依赖工作区，不是产品行为。
     """
+    monkeypatch.setattr(db, "DEFAULT_DB_PATH", tmp_path / "cancel.db")
+    conn = db.connect()
+    db.init_db(conn)
+    conn.close()
     result = asyncio.run(executor.cancel("s_nope", "试试"))
     assert result["ok"] is True
     assert result["cancelled"] is False
