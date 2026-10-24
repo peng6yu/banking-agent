@@ -119,7 +119,7 @@
 | 取消执行并释放资金 | 已实现且有测试证明 | app/planner/executor.py:168-181 cancel；tests/test_api.py:256 test_cancel_endpoint_stops_the_run_and_frees_the_hold | 无 |
 | 刷新/SSE 断开后恢复 | 已实现且有测试证明 | 本轮补：`/api/session` 每条确认带服务端重建的 `card`（`events.confirmation_frame` + `routes._card_view`）；`bxRestoreSession` 发现待确认就打回 AI 助手视图并滚到卡片；`bxRenderPendingCard` 画真卡、过期卡不画按钮 | `tests/test_session_cards.py` 3 条（字段齐全 / 老行缺理由仍可重建 / action_json 坏掉时 card=None）+ 浏览器 `main_07_idempotent_refresh.png`（连点只扣一次、F5 后卡片带 200.00 与收款人回来）。缺口：恢复只认「未完成优先」的那一轮，多轮未完成的取舍仍需用户自己看 run_id |
 | 进程重启后续跑 | 已实现且有测试证明 | 本轮补：app/planner/recover.py 从 dag_runs/dag_nodes/confirmations 重建 RunState（账户从 dag_runs.meta_json 还原），POST /api/session/{session_id}/recover 与 POST /api/confirm 在内存缺失时自动走恢复；三条边界写死在代码里：不重新解析/不重新裁决、绝不重跑终态节点、遇到新确认卡就停；tests/test_recover.py 8 条（断流后交回卡、确认后真出账、二次点击幂等、过期记 confirm.expired、拒绝记 rejected、恢复不重跑、rehydrate 还原、未知会话报错） | 恢复只认「最近一次 dag_runs」；两轮并行会话不隔离（同一 session 串行执行，本身不允许并行） |
-| 跨场景延迟执行（生日前 2 天订购） | 已实现且有测试证明 | 本轮补：app/plans.py + plans/plan_steps 表（跨天、跨会话、可暂停/取消、重启继续），POST/GET /api/plans、PATCH /api/plans/{id}、POST /api/plans/run；步骤类型 check/action/reminder，检查类到期重试、超过次数标 failed；tests/test_plans.py 12 条 | 计划的资金动作**永不后台执行**：到期只生成待确认提醒、计划转 paused，真正扣款要回助手重新裁决（ACTION_BOUNDARY 常量与测试都钉住这条） |
+| 跨场景延迟执行（生日前 2 天订购） | 已实现且有测试证明 | 本轮补：app/plans.py + plans/plan_steps 表（跨天、跨会话、可暂停/取消、重启继续），POST/GET /api/plans、PATCH /api/plans/{id}、POST /api/plans/run；步骤类型 check/action/reminder，检查类到期重试、超过次数标 failed；tests/test_plans.py 12 条；生日计划另见 app/birthday.py + plan_authorizations | **通用计划**的资金动作永不后台执行：到期只生成待确认提醒、计划转 paused，真正扣款要回助手重新裁决（ACTION_BOUNDARY 常量与测试都钉住这条）；**生日计划的一次性授权是显式例外**（版本/账户/金额/窗口匹配且重判绿/黄才自动付款） |
 
 ## 十、安全、审计与实验
 
@@ -163,7 +163,7 @@
 | 5.3/5.8 ticker 不跑主动监测、无重试队列 | 已修（监测）/未修（重试队列） | ticker 三段：预约转账、开启监测的储蓄目标、持久计划到点步骤（run_due_once / run_monitor_once / run_plans_once）；重试只在计划步骤层（max_attempts，默认 3），预约转账仍无重试队列 |
 | 5.10 预约授权跨期永不过期 | 已修 | `_execute_one` 判 `now - factor_verified_ms <= AUTH_TTL_MS`（30 天），过期不再按已授权直接扣款：退回 yellow → 当日额度生效 → 顺延（`defer_count+1`），并写 `scheduled.auth_expired`；tests/test_scheduled_lease.py |
 | 5.12 审计 trigger 硬编码 manual | 已修 | trigger 区分 manual / scheduler 并落 payload（app/proactive.py），测试覆盖；历史事件无法追溯 |
-| 5.13 单会话串行 DAG ≠ 长期计划 | 已修（有边界） | 2026-10-24：app/plans.py + plans/plan_steps（跨天、跨会话、可暂停取消、重启继续，POST /api/plans 等）；tests/test_plans.py 12 条。边界：计划的资金动作永不后台执行，到期只生成待确认提醒并把计划转 paused |
+| 5.13 单会话串行 DAG ≠ 长期计划 | 已修（有边界） | 2026-10-24：app/plans.py + plans/plan_steps（跨天、跨会话、可暂停取消、重启继续，POST /api/plans 等）；tests/test_plans.py 12 条。边界：通用计划资金动作永不后台执行，到期只生成待确认提醒并把计划转 paused；生日计划一次性授权为显式例外 |
 
 ## 十一·二、第四轮（任务书 8 项整改）状态变化，2026-10-24
 

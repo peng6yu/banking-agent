@@ -152,7 +152,13 @@ def parse_e2e(path: Path | None) -> dict[str, Any] | None:
 
 
 def gather_ab() -> dict[str, Any]:
-    rounds: list[dict[str, Any]] = []
+    """把 A/B 结果分成「完整 80 例轮次」和「小样本预检」两类。
+
+    目录里除了正式 8 轮，还留着两条 2 例的 MiniMax 预检记录。它们对
+    「8 轮完整 80 例」的口径没有贡献，混在 rounds 里会让评委以为跑了 10 轮。
+    """
+    full_rounds: list[dict[str, Any]] = []
+    preflight: list[dict[str, Any]] = []
     for summary_path in sorted((ROOT / "tests" / "eval" / "results").glob("*/summary.json")):
         try:
             data = json.loads(summary_path.read_text(encoding="utf-8"))
@@ -178,8 +184,12 @@ def gather_ab() -> dict[str, Any]:
                 "knowledge_citation": (metrics.get("knowledge_citation") or {}).get("value"),
                 "unauthorized_write_attempts": (metrics.get("unauthorized_write_attempts") or {}).get("value"),
             }
-        rounds.append(row)
-    latest = rounds[-1] if rounds else None
+        try:
+            case_count = int(row.get("cases") or 0)
+        except (TypeError, ValueError):
+            case_count = 0
+        (full_rounds if case_count >= 20 else preflight).append(row)
+    latest = full_rounds[-1] if full_rounds else None
     conclusion = (
         "跨轮方向不一致：8 轮完整 80 例真实 A/B（5 轮 MiniMax + 3 轮 DeepSeek）中，"
         "逐轮 intent 的 B−A 为 −1.25/+2.50/0/+2.50/+5.00 与 +5.00/−2.50/+8.75pp，符号反复；"
@@ -188,7 +198,14 @@ def gather_ab() -> dict[str, Any]:
         "不能替代重复采样的方差。稳定成立的是行为面：B 组知识引用正确率 41–42/51，A 组为 0。"
         "结论：不宣称知识层稳定提升准确率；逐轮配对与 bootstrap 明细见 docs/benchmark/ab_paired_stats.md。"
     )
-    return {"rounds": rounds, "latest": latest, "conclusion": conclusion, "dataset": "tests/eval/intent_cases.yaml"}
+    return {
+        "rounds": full_rounds,
+        "preflight": preflight,
+        "preflight_note": "cases < 20 的小样本预检，不计入 8 轮完整 80 例配对统计。",
+        "latest": latest,
+        "conclusion": conclusion,
+        "dataset": "tests/eval/intent_cases.yaml",
+    }
 
 
 def gather_browser() -> dict[str, Any]:
