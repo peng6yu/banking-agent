@@ -60,6 +60,8 @@ PROACTIVE_TOOL_NAMES = (
     "resolve_proactive_alert",
     "run_proactive_monitor",
 )
+#: 阶段 6 投资者适当性：查画像（只读）+ 提交问卷（黄灯写，不动钱但要令牌）
+SUITABILITY_TOOL_NAMES = ("get_suitability", "assess_suitability")
 CARD_TOOL_NAMES = (
     "apply_virtual_card",
     "set_card_limit",
@@ -80,6 +82,7 @@ def test_tool_names_match_authoritative_table() -> None:
         + CARD_CLOSE_TOOL_NAMES
         + REVERSAL_TOOL_NAMES
         + PROACTIVE_TOOL_NAMES
+        + SUITABILITY_TOOL_NAMES
     )
     assert set(TOOL_NAMES) == set(registry.TOOLS)
     assert len(registry.tool_schemas()) == len(TOOL_NAMES)

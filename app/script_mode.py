@@ -40,6 +40,9 @@ _NUM_AFTER_VERB_RE: Final[re.Pattern[str]] = re.compile(r"(?:转|付|给)\s*(\d+
 _CN_AFTER_VERB_RE: Final[re.Pattern[str]] = re.compile(r"(?:转|付|给)\s*([零〇一二两三四五六七八九十百千万]+)")
 _PAYEE_RE: Final[re.Pattern[str]] = re.compile(r"(?:给|转给|付给|向)\s*([一-龥]{2,4})")
 _POLITE_TAIL: Final[tuple[str, ...]] = ("谢谢", "谢", "啦", "吧", "呀", "啊", "呢")
+# 「给我妈转 2000」这种语序：正则的 2-4 个汉字会把紧跟的动词一起吞进来（「妈妈转」），
+# 所以名字尾部还要按动词再削一刀。削空就返回空串，让上层去追问，绝不瞎填。
+_VERB_TAIL: Final[str] = "转汇打付给是"
 _DATA_RE: Final[re.Pattern[str]] = re.compile(r"<DATA[^>]*>(.*?)</DATA>", re.S)
 
 
@@ -93,6 +96,13 @@ def script_payee(text: str) -> str:
     if not match:
         return ""
     name = match.group(1)
+    for verb_suffix in ("转账", "转帐", "汇款"):
+        if name.endswith(verb_suffix) and len(name) > len(verb_suffix):
+            name = name[: -len(verb_suffix)]
+    while name and name[-1] in _VERB_TAIL:
+        name = name[:-1]
+    if len(name) < 2:
+        return ""
     for suffix in _POLITE_TAIL:
         if name.endswith(suffix) and len(name) > len(suffix):
             name = name[: -len(suffix)]

@@ -13,6 +13,7 @@ from typing import Any
 
 import pytest
 
+from tests import mfa
 from app import clock, db
 from app.clock import ValidationError
 from app.llm import LLMError, LLMResponse, ToolCall
@@ -97,8 +98,13 @@ def drive(session_id: str, dag_obj: Dag, *, answers: list[dict[str, Any]] | None
                         continue
                     reply = answers[min(used, len(answers) - 1)]
                     used += 1
+                    approve = bool(reply.get("approve", True))
+                    card_proofs = (
+                        mfa.solve(session_id, conf.id, list(conf.required_factors))
+                        if approve and conf.required_factors else []
+                    )
                     await executor.resume(
-                        session_id, conf.id, bool(reply.get("approve", True)), factor=reply.get("factor")
+                        session_id, conf.id, approve, factor=reply.get("factor"), proofs=card_proofs
                     )
             await asyncio.sleep(0.005)
 
@@ -379,7 +385,7 @@ def test_unregistered_intent_is_not_silently_answered() -> None:
 
 
 def test_unregistered_intent_ends_as_a_red_refusal(bank: Path) -> None:
-    """编造的意图走到执行器：R03 亮红灯、confirm.rejected 留痕，一个工具都不执行。"""
+    """编造的意图走到执行器：R03 亮红灯、policy.blocked 留痕，一个工具都不执行。"""
     events = drive("s_madeup", planner_dag.build_or_single({"intent": "reset_password", "slots": {}}))
     trace = payload(events, "trace")
     assert (trace["level"], trace["rule_id"]) == ("red", "R03_unknown_tool")
@@ -391,7 +397,8 @@ def test_unregistered_intent_ends_as_a_red_refusal(bank: Path) -> None:
         for row in conn.execute("SELECT event_type FROM audit_log WHERE session_id='s_madeup' ORDER BY seq")
     ]
     assert "policy.decided" in kinds
-    assert "confirm.rejected" in kinds
+    assert "policy.blocked" in kinds, "策略拦截要单独留痕，不能占用户的「拒绝」"
+    assert "confirm.rejected" not in kinds, "用户没点过拒绝"
     assert balance(conn) == 1_286_050
     assert count(conn, "transactions") == 320
     conn.close()
@@ -607,7 +614,7 @@ def test_third_party_query_marks_account_owner_other() -> None:
     """代查他人余额：主体记 other，句里的卡号尾号丢掉，主体进 missing，但不反问。
 
     不反问是有意的：反问会让 API 层在建 DAG 之前收尾（docs/07 7.4），
-    R12 的红裁决与 confirm.rejected 就永远落不了审计。话术由 R12 出。
+    R12 的红裁决与 policy.blocked 就永远落不了审计。话术由 R12 出。
     """
     result = parse(
         "帮我看看朋友李四的余额，他卡号尾号 8899",
@@ -643,7 +650,8 @@ def test_missing_account_owner_still_reaches_the_policy_layer(bank: Path) -> Non
         )
     ]
     assert "policy.decided" in kinds
-    assert "confirm.rejected" in kinds
+    assert "policy.blocked" in kinds, "策略拦截要单独留痕，不能占用户的「拒绝」"
+    assert "confirm.rejected" not in kinds, "用户没点过拒绝"
     assert "tool.executed" not in kinds, "红灯之前不许真的去查"
     assert balance(conn) == 1_286_050
     conn.close()
@@ -709,7 +717,8 @@ def test_third_party_balance_query_is_blocked_red_end_to_end(bank: Path) -> None
         for row in conn.execute("SELECT event_type FROM audit_log WHERE session_id='s_owner' ORDER BY seq")
     ]
     assert "policy.decided" in kinds
-    assert "confirm.rejected" in kinds
+    assert "policy.blocked" in kinds, "策略拦截要单独留痕，不能占用户的「拒绝」"
+    assert "confirm.rejected" not in kinds, "用户没点过拒绝"
     assert "tool.executed" not in kinds
     assert balance(conn) == 1_286_050
     conn.close()
@@ -744,6 +753,7 @@ def test_red_amount_is_decided_before_the_payee_question(bank: Path) -> None:
     ]
     assert "policy.decided" in kinds
     assert "confirm.rejected" not in kinds, "没有终局拒绝，就不该写拒绝留痕"
+    assert "policy.blocked" not in kinds, "有因子可验的红不算策略拦截"
     assert balance(conn) == 1_286_050
     assert count(conn, "transactions") == 320
     conn.close()
@@ -779,8 +789,8 @@ def test_red_amount_with_factors_does_not_stop_before_the_payee_question(
     ).fetchall()
     decided = [json.loads(row["payload_json"]) for row in rows if row["event_type"] == "policy.decided"]
     assert any(item.get("rule_id") == "R08_transfer_red_single" for item in decided), decided
-    rejected = [json.loads(row["payload_json"]) for row in rows if row["event_type"] == "confirm.rejected"]
-    assert not any(item.get("stage") == "PRE_PAYEE_GATE" for item in rejected), rejected
+    blocked_rows = [json.loads(row["payload_json"]) for row in rows if row["event_type"] == "policy.blocked"]
+    assert not any(item.get("stage") == "PRE_PAYEE_GATE" for item in blocked_rows), blocked_rows
     assert balance(conn) == 1_286_050
     assert count(conn, "transactions") == 320
     conn.close()
@@ -792,7 +802,7 @@ def test_red_without_factors_is_still_a_hard_reject(
     """没有因子可验的红才终局拒绝：「等因子」和「不可能」不能混为一谈。
 
     这里把策略层的裁决换成空因子的红灯（等价于 R03/R11/R12 这类没法验的红），
-    断言仍然是 POLICY_BLOCKED + confirm.rejected，不发 done。
+    断言仍然是 POLICY_BLOCKED + policy.blocked，不发 done。
     """
     real_decide = runner.decide
 
@@ -813,7 +823,8 @@ def test_red_without_factors_is_still_a_hard_reject(
         )
     ]
     assert "policy.decided" in kinds
-    assert "confirm.rejected" in kinds
+    assert "policy.blocked" in kinds, "策略拦截要单独留痕，不能占用户的「拒绝」"
+    assert "confirm.rejected" not in kinds, "用户没点过拒绝"
     assert balance(conn) == 1_286_050
     assert count(conn, "transactions") == 320
     conn.close()

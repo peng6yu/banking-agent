@@ -12,7 +12,7 @@ import sqlite3
 from dataclasses import dataclass
 from typing import Final
 
-from app import audit
+from app import audit, channels
 from app.clock import (
     HoldExpired,
     InsufficientFunds,
@@ -349,6 +349,11 @@ def _create_hold(
         with tx(conn):
             if conn.execute("SELECT 1 FROM payees WHERE id = ?", (payee_id,)).fetchone() is None:
                 raise ValidationError("收款人不存在", payee_id=payee_id)
+            # 通道闸门分两步问：先问「这条通道通不通」（账户/卡状态，不带金额），
+            # 再问「余额够不够」，最后才问「单笔限额」。顺序是有意的：
+            # 卡被冻结比余额不足更根本；而余额不足比限额超了更该先说——
+            # 用户听到「你只有 100 元」才知道问题出在哪，「超限额」会误导他去调额度。
+            channels.assert_spendable(conn, action.account_id, None)
             row = conn.execute(
                 "SELECT balance_fen FROM accounts WHERE id = ?", (action.account_id,)
             ).fetchone()
@@ -359,6 +364,7 @@ def _create_hold(
                 raise InsufficientFunds(
                     balance_fen=balance_fen, amount_fen=amount_fen, account_id=action.account_id
                 )
+            channels.assert_spendable(conn, action.account_id, amount_fen)
             note = str(action.params.get("note") or "")
             conn.execute(
                 "INSERT INTO holds (id, account_id, payee_id, amount_fen, note, status,"
@@ -456,6 +462,9 @@ def _settle(
     """扣余额、写流水、改 hold、更新日累计、写审计：五件事一个事务，任一步失败整体回滚。"""
     stamp_ms = now_ms()
     with tx(conn):
+        # 建 hold 到扣款之间用户可能把卡冻了：扣钱这一刻再核一次通道，
+        # 与「余额在扣款那一刻再核一次」是同一个道理。
+        channels.assert_spendable(conn, hold.account_id, hold.amount_fen)
         balance_after_fen = _post_leg(
             conn, account_id=hold.account_id, direction="out", amount_fen=hold.amount_fen,
             counterparty=counterparty or _counterparty(conn, hold.payee_id), category="转账",

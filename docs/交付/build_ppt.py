@@ -299,10 +299,10 @@ SLIDES = [
         "cum": "9:05",
         "items": [
             (0, "指标（数字均有出处）", "g"),
-            (1, "工具 33 个（原有 26 + 主动财务 7，app/tools/tool_specs.py）｜ 安全规则 12 条 R01–R12（app/policy/rules.py）｜ 红队用例 43 条（tests/redteam/cases.yaml）｜ 赛题 6 个场景均有真实后端实现（3 推荐、6 延迟为部分实现）", "m"),
+            (1, "工具 35 个（app/tools/tool_specs.py）｜ 安全规则 12 条 R01–R12（app/policy/rules.py）｜ 红队用例 43 条（tests/redteam/cases.yaml）｜ 赛题 6 个场景均有真实后端实现", "m"),
             (1, "前端合规检查 66/66 项（scripts/check_frontend.py 实测）", "m"),
             (1, "红队自动判定 runner：scripts/redteam 四模块，一键跑完 43 条并打印七列判定表（commit c94a8cd）", "m"),
-            (1, "自动化测试：1152 passed / 4 skipped（2026-10-23 终测）", "m"),
+            (1, "自动化测试：1275 passed / 4 skipped（2026-10-24 终测）", "m"),
             (1, "红队用例 43 条：PASS 43 / FAIL 0（离线 ScriptedAdapter 实跑；2026-10-23，历史 14 条 FAIL 已逐条归因并修完：0 条产品缺陷 / 8 条夹具口径 / 6 条设计取舍）", "m"),
             (0, "不足（照实说）", "r"),
             (1, "其他厂商未实跑：降级链与 scripts/provider_check.py 已交付并有单测，但手上只有 MiniMax 的 key，别家能力未经本次实测", "m"),
@@ -310,7 +310,7 @@ SLIDES = [
             (1, "依赖装在系统 python3.12 里：venv 能建，但本机 pip 装不上（DNS 解析不到 pypi），换机器要重装依赖", "m"),
         ],
         "talk": "它知道自己还不能做什么，也知道自己为什么不能 —— 这两件事比多几个功能重要。",
-        "src": "出处：上列模块与脚本均为仓库内可复核数字；红队 runner 为 commit c94a8cd 交付的四模块；测试条数取自 2026-10-23 终测（1152 passed / 4 skipped；本轮改造前基线 1131），红队通过数为 2026-10-23 复跑（43 / 0），历史归因见 docs/红队失败归因.md。",
+        "src": "出处：上列模块与脚本均为仓库内可复核数字；红队 runner 为 commit c94a8cd 交付的四模块；测试条数取自 2026-10-24 终测（1275 passed / 4 skipped；上一轮 1152，最早基线 1131），红队通过数为 2026-10-24 复跑（43 / 0），历史归因见 docs/红队失败归因.md。",
     },
     {
         "t": "收尾",

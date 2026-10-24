@@ -11,7 +11,7 @@ from typing import Any
 
 import pytest
 
-from app import clock, db
+from app import clock, db, suitability
 from app.models import Action
 from app.security import token as token_mod
 from app.tools.base import ToolContext
@@ -19,6 +19,16 @@ from scripts.fund_seeds import seed_funds
 
 SECRET = "d" * 64
 USER_ID = "u_test"
+#: 全部选最高档的测评答案（C5，最高可买 R5）：工具层用例只关心资金与令牌，
+#: 不关心风险等级，所以统一给一个"测评已完成且什么都能买"的用户。
+#: 适当性本身的边界在 tests/test_suitability.py 里单独测。
+MAX_ANSWERS = {
+    "q_horizon": "gt_3y",
+    "q_experience": "equity",
+    "q_loss": "buy_more",
+    "q_goal": "aggressive",
+    "q_share": "lt_10",
+}
 DEBIT_ID = "a_debit"
 CREDIT_ID = "a_credit"
 DEBIT_BALANCE = 1_286_050
@@ -54,6 +64,9 @@ MINIMAL_PARAMS: dict[str, dict[str, Any]] = {
     "update_savings_goal": {"goal_id": "sg_ghost"},
     "resolve_proactive_alert": {"alert_id": "pa_ghost", "action": "ignore"},
     "run_proactive_monitor": {},
+    # 阶段 6：适当性测评。查询无参数，提交要五道题的答案。
+    "get_suitability": {},
+    "assess_suitability": {"answers": dict(MAX_ANSWERS)},
 }
 
 
@@ -176,6 +189,7 @@ def bank(tmp_path):
     conn = db.connect(str(tmp_path / "tools.db"))
     db.init_db(conn)
     _seed(conn)
+    suitability.save(conn, USER_ID, MAX_ANSWERS)
     yield conn
     conn.close()
     clock.unfreeze()

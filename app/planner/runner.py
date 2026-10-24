@@ -169,7 +169,7 @@ async def block_on_amount(state: RunState, node: Any, emit: Emit) -> str | None:
       然后放行收款人闸门；等 DAG 走到真正的花钱节点，由执行层弹 factor 事件、
       走双因子，验过才放款。没有因子就硬拒，等于把「等因子」说成「不可能」。
     - 不可执行的红（required_factors 为空，如 R03/R11/R12）：没有因子可验，
-      才是终局拒绝（POLICY_BLOCKED + confirm.rejected + 节点 failed）。
+      才是终局拒绝（POLICY_BLOCKED + policy.blocked + 节点 failed）。
 
     返回 STOP 表示已经终局拒绝，返回 None 表示照旧走收款人歧义闸门。
     """
@@ -221,10 +221,18 @@ async def block_on_amount(state: RunState, node: Any, emit: Emit) -> str | None:
         "error",
         {"code": "POLICY_BLOCKED", "user_text": decision.reason_text or "这笔金额超过我这边能办的单子上限，我先不做了。"},
     )
+    # 同上：策略拦截记 policy.blocked，别占用户「拒绝」的位置。
     audit.append(
         state.conn,
-        "confirm.rejected",
-        {"node_id": target.id, "reason": "POLICY_BLOCKED", "stage": "PRE_PAYEE_GATE"},
+        "policy.blocked",
+        {
+            "node_id": target.id,
+            "reason": "POLICY_BLOCKED",
+            "stage": "PRE_PAYEE_GATE",
+            "rule_id": decision.rule_id,
+            "level": decision.level,
+            "amount_fen": amount,
+        },
         session_id=state.session_id,
     )
     persist_node(state, rec, "failed", error_code="POLICY_BLOCKED")

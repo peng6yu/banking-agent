@@ -46,9 +46,19 @@ LAYERS: dict[str, int] = {
     "app.security.breaker": 1,
     "app.security.injection": 1,
     "app.security.token": 1,
+    # 多因子挑战：服务端签发 + 校验 + 一次性，只依赖数据层
+    "app.security.factors": 1,
     "app.funds": 2,
+    # 账户/卡通道闸门：出账前最后一道，只读 accounts/cards
+    "app.channels": 2,
     # 主动财务管理（阶段 5）：确定性计算 + 目标/规则/提醒仓储，只依赖数据层
     "app.proactive": 2,
+    # 投资者适当性（阶段 6 P0-6）：5 题问卷 + 画像落库 + 申购前匹配，只依赖数据层
+    "app.suitability": 2,
+    # 订阅推断（阶段 6 P0-7）：从流水里找周期性扣款 + 续费窗口，纯读，只依赖金额格式化
+    "app.subscriptions": 2,
+    # 跨场景计划（P1-9）：状态全在库里，后台节拍推进；action 步只提醒、不代扣
+    "app.plans": 2,
     "app.policy.engine": 2,
     "app.policy.rules": 2,
     "app.tools.base": 3,
@@ -73,6 +83,8 @@ LAYERS: dict[str, int] = {
     "app.planner.runner": 4,
     "app.planner.state": 4,
     "app.planner.card_actions": 4,
+    # 重启恢复：从库里重建 RunState 接着跑，依赖执行器与状态
+    "app.planner.recover": 4,
     # 知识层接线（阶段 3）：把领域知识翻译成「问不问/填什么/怎么解释」，不碰策略
     "app.planner.kb_bridge": 4,
     "app.planner.payment_guard": 4,
@@ -116,8 +128,10 @@ ALLOWED: dict[str, frozenset[str]] = {
         "app.models",
         "app.planner",
         "app.planner.clarify",
+        "app.plans",
         "app.proactive",
         "app.security",
+        "app.suitability",
         "app.tools.registry",
     }),
     "app.api.business": frozenset({
@@ -260,6 +274,17 @@ ALLOWED: dict[str, frozenset[str]] = {
         "app.knowledge.models",
     }),
     "app.planner.payment_guard": frozenset(),
+    # 重启恢复：只重建状态、接着驱动，不重新解析意图也不重新裁决
+    "app.planner.recover": frozenset({
+        "app.clock",
+        "app.models",
+        "app.planner.executor",
+        "app.planner.state",
+        "app.security",
+        # 账户要按运行时的同一条规则补回来（primary_account）：
+        # 老库没有 meta_json，硬用空串会让令牌必然 ACCOUNT_MISMATCH
+        "app.tools.base",
+    }),
     "app.planner.card_actions": frozenset({
         "app.clock",
     }),
@@ -305,6 +330,11 @@ ALLOWED: dict[str, frozenset[str]] = {
         "app.clock",
     }),
     "app.security.api_auth": frozenset(),
+    # 多因子挑战：签发/校验只碰审计、时钟、ID 生成
+    "app.security.factors": frozenset({
+        "app.clock",
+        "app.ids",
+    }),
     "app.security.injection": frozenset({
         "app.log",
         "app.models",
@@ -314,6 +344,20 @@ ALLOWED: dict[str, frozenset[str]] = {
         "app.ids",
         "app.log",
         "app.models",
+    }),
+    # 通道闸门：账户/卡状态与单笔限额，只依赖时钟的错误类型
+    "app.channels": frozenset({
+        "app.clock",
+    }),
+    # 适当性：问卷与匹配是纯函数，落库只依赖 audit；错误类型用 app.clock
+    "app.suitability": frozenset({
+        "app.audit",
+        "app.clock",
+    }),
+    # 订阅推断：只读流水，只用到金额格式化
+    "app.plans": frozenset(),
+    "app.subscriptions": frozenset({
+        "app.money",
     }),
     "app.smoke": frozenset(),
     "app.tools": frozenset({
@@ -343,12 +387,14 @@ ALLOWED: dict[str, frozenset[str]] = {
         "app.tools.base",
     }),
     "app.tools.invest": frozenset({
+        "app.audit",
         "app.clock",
         "app.db",
         "app.funds",
         "app.log",
         "app.models",
         "app.money",
+        "app.suitability",
         "app.tools.base",
         "app.tools.products",
     }),

@@ -13,7 +13,7 @@
 
 | 维度 | 结论 |
 |---|---|
-| 代码 | 知识层与主动财务管理均已接入真实调用链；全量测试 **1131 passed / 4 skipped**（62 个测试文件） |
+| 代码 | 知识层与主动财务管理均已接入真实调用链；全量测试 **1275 passed / 4 skipped**（75 个测试文件） |
 | 知识层 | 40 术语 / 25 实体 / 22 关系 / 11 意图规则 / 10 流程 / 34 来源；参与意图修正、槽位补齐、追问与跨场景规划 |
 | 原话层 guard | 新增 `app/planner/payment_guard.py`：多收款人 / 一句多笔的确定性预检查，A/B 共用，**44 条测试** |
 | A/B 实验 | 最终轮同口径：intent **+5.0pp**、slot **+5.48pp**、clarify **−2.5pp**、unauthorized **4→0**；dev 与 holdout 分层见 §6 |
@@ -44,7 +44,7 @@
 
 | # | 命令 | 结果 |
 |---|---|---|
-| 1 | `.venv/bin/python -m pytest -q tests/` | **1131 passed, 4 skipped, 1 warning in 18.52s**；4 个 skip 是浏览器冒烟默认关闭 |
+| 1 | `.venv/bin/python -m pytest -q tests/` | **1275 passed, 4 skipped, 1 warning in 25.84s**；4 个 skip 是浏览器冒烟默认关闭 |
 | 2 | `RUN_BROWSER_SMOKE=1 python3.12 -m pytest tests/test_browser_smoke.py -q` | **4 passed in 6.44s**（最终代码，固定模型） |
 | 3 | `python3.12 scripts/check_frontend.py` | **前端检查通过：66/66** |
 | 4 | `python3.12 -m scripts.redteam` | **43 条：PASS 43 / FAIL 0** |
@@ -185,7 +185,7 @@ python3.12 -m uvicorn app.main:app --port 8000
 验证与演示：
 
 ```bash
-make test                                   # 1131 passed / 4 skipped
+make test                                   # 1275 passed / 4 skipped
 python3.12 scripts/check_frontend.py        # 66/66
 python3.12 -m scripts.redteam               # 43/43
 python3.12 -m scripts.e2e                   # 13/13（会删库重建，跑完 make reseed）

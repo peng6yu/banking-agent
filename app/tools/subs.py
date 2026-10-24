@@ -9,9 +9,9 @@ MissingCapability（docs/05 5.3）。已经取消过的再取消一次算幂等�
 from __future__ import annotations
 
 import time
-from typing import Any
+from typing import Any, Final
 
-from app import audit, db
+from app import audit, db, subscriptions
 from app.clock import now_ms
 from app.models import ToolResult
 from app.money import fen_to_yuan_str
@@ -41,6 +41,11 @@ def list_subs(ctx: ToolContext, params: dict[str, Any], token: str | None = None
         for row in subs
         if str(row["period"]) == "monthly" and str(row["status"]) == "active"
     )
+    # 已知代扣（subs 表）之外，再给两样东西：
+    # inferred = 从流水里推出来的疑似订阅（带证据、带不确定性，不是事实）；
+    # upcoming = 未来 7 天内会扣的已知订阅（页面打开时算，不推送）。
+    inferred = subscriptions.detect_recurring(ctx.conn, str(account["id"]))
+    upcoming = subscriptions.upcoming(ctx.conn, str(account["id"]))
     return ok_result(
         {
             "account_tail": str(account["tail"]),
@@ -48,6 +53,13 @@ def list_subs(ctx: ToolContext, params: dict[str, Any], token: str | None = None
             "count": len(subs),
             "monthly_total_fen": monthly,
             "monthly_total_yuan": fen_to_yuan_str(monthly),
+            "inferred": inferred,
+            "upcoming": upcoming,
+            "scope": {
+                "recorded": "subs 表：本行有授权的代扣记录，能停银行侧扣款。",
+                "inferred": "inferred：只是流水规律，未经确认，不能直接当作订阅取消。",
+                "cancel_boundary": CANCEL_BOUNDARY_TEXT,
+            },
         }
     )
 

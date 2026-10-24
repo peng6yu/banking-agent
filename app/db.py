@@ -26,7 +26,7 @@ PRAGMAS: Final[tuple[str, ...]] = (
     "PRAGMA busy_timeout=5000;",
 )
 
-# 22 张表（改造前 18 + 主动财务 4），顺序即依赖顺序（被引用的先建）
+# 28 张表（改造前 18 + 主动财务 4 + 本轮 6：因子挑战、投资者画像、计划、计划步骤、订阅推断字段在 subs、运行元数据在 dag_runs）
 TABLE_NAMES: Final[tuple[str, ...]] = (
     "users",
     "accounts",
@@ -50,6 +50,10 @@ TABLE_NAMES: Final[tuple[str, ...]] = (
     "monitor_rules",
     "proactive_alerts",
     "monitor_runs",
+    "factor_challenges",
+    "investor_profiles",
+    "plans",
+    "plan_steps",
 )
 
 SCHEMA_SQL: Final[str] = """
@@ -323,6 +327,63 @@ CREATE TABLE IF NOT EXISTS monitor_runs (
 );
 CREATE INDEX IF NOT EXISTS idx_monitor_runs_started ON monitor_runs(started_ms);
 
+-- 多因子挑战：服务端签发、服务端校验、一次性使用（app/security/factors.py）
+-- code_hash 只存摘要；used_ms 非空即已用过；attempts 防暴力猜码。
+CREATE TABLE IF NOT EXISTS factor_challenges (
+  id              TEXT PRIMARY KEY,
+  session_id      TEXT NOT NULL,
+  confirmation_id TEXT NOT NULL,
+  factor          TEXT NOT NULL CHECK (factor IN ('sms','face','otp')),
+  code_hash       TEXT NOT NULL,
+  created_ms      INTEGER NOT NULL,
+  expires_ms      INTEGER NOT NULL,
+  used_ms         INTEGER,
+  attempts        INTEGER NOT NULL DEFAULT 0 CHECK (attempts >= 0)
+);
+CREATE INDEX IF NOT EXISTS idx_factor_challenges_conf ON factor_challenges(confirmation_id, factor);
+
+-- 投资者适当性：问卷答案 + 能力/意愿两个分数，买基金前必须先有这张表里的画像
+CREATE TABLE IF NOT EXISTS investor_profiles (
+  user_id       TEXT PRIMARY KEY REFERENCES users(id),
+  score         INTEGER NOT NULL CHECK (score BETWEEN 0 AND 100),
+  level         TEXT NOT NULL CHECK (level IN ('C1','C2','C3','C4','C5')),
+  capacity      INTEGER NOT NULL CHECK (capacity BETWEEN 1 AND 5),
+  horizon_years INTEGER NOT NULL CHECK (horizon_years >= 0),
+  loss_tolerance TEXT NOT NULL,
+  answers_json  TEXT NOT NULL,
+  created_ms    INTEGER NOT NULL,
+  updated_ms    INTEGER NOT NULL
+);
+
+-- 跨场景计划：一份计划下面挂若干步骤，按 due_ms 由调度器推进
+CREATE TABLE IF NOT EXISTS plans (
+  id          TEXT PRIMARY KEY,
+  user_id     TEXT NOT NULL REFERENCES users(id),
+  title       TEXT NOT NULL,
+  status      TEXT NOT NULL CHECK (status IN ('active','paused','completed','cancelled','failed')),
+  meta_json   TEXT NOT NULL DEFAULT '{}',
+  created_ms  INTEGER NOT NULL,
+  updated_ms  INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_plans_user ON plans(user_id, status);
+
+CREATE TABLE IF NOT EXISTS plan_steps (
+  id          TEXT PRIMARY KEY,
+  plan_id     TEXT NOT NULL REFERENCES plans(id),
+  seq         INTEGER NOT NULL,
+  kind        TEXT NOT NULL CHECK (kind IN ('check','action','reminder')),
+  title       TEXT NOT NULL,
+  payload_json TEXT NOT NULL DEFAULT '{}',
+  state       TEXT NOT NULL CHECK (state IN ('pending','running','done','failed','skipped')),
+  due_ms      INTEGER NOT NULL,
+  attempts    INTEGER NOT NULL DEFAULT 0 CHECK (attempts >= 0),
+  max_attempts INTEGER NOT NULL DEFAULT 3 CHECK (max_attempts > 0),
+  last_error  TEXT NOT NULL DEFAULT '',
+  updated_ms  INTEGER NOT NULL,
+  UNIQUE (plan_id, seq)
+);
+CREATE INDEX IF NOT EXISTS idx_plan_steps_due ON plan_steps(state, due_ms);
+
 -- 审计只增不改：UPDATE/DELETE 一律由 SQLite 层拦掉（docs/03 3.2 第 7 张表）
 CREATE TRIGGER IF NOT EXISTS audit_no_update BEFORE UPDATE ON audit_log
 BEGIN SELECT RAISE(ABORT, 'audit_log is append-only'); END;
@@ -399,6 +460,24 @@ _ADDED_COLUMNS: Final[tuple[tuple[str, str, str], ...]] = (
     ("transactions", "reversed_by", "TEXT"),
     ("scheduled_transfers", "factor_verified_ms", "INTEGER NOT NULL DEFAULT 0"),
     ("scheduled_transfers", "defer_count", "INTEGER NOT NULL DEFAULT 0"),
+    # 领取租约：多进程同时 tick 时，只有抢到租约的那一个执行（不是靠「谁先读到」）
+    ("scheduled_transfers", "claim_token", "TEXT NOT NULL DEFAULT ''"),
+    ("scheduled_transfers", "claimed_ms", "INTEGER NOT NULL DEFAULT 0"),
+    # 账户状态：money path 真的要看它（冻结/销户后不能再出账）
+    ("accounts", "status", "TEXT NOT NULL DEFAULT 'active'"),
+    # 订阅来源：recorded=银行代扣记录，inferred=从流水推断（必须带证据与置信度）
+    ("subs", "source", "TEXT NOT NULL DEFAULT 'recorded'"),
+    ("subs", "confidence", "REAL NOT NULL DEFAULT 1.0"),
+    ("subs", "evidence_json", "TEXT NOT NULL DEFAULT '{}'"),
+    # 运行元数据：重建 RunState 需要 account_id / user_text
+    ("dag_runs", "meta_json", "TEXT NOT NULL DEFAULT '{}'"),
+    # 自动监测的节流时间：同一时间窗内不重复跑，重启后也不会重复
+    ("savings_goals", "last_monitored_ms", "INTEGER NOT NULL DEFAULT 0"),
+    # 这次监测是谁触发的：manual=用户点按钮，scheduler=后台节拍器
+    ("monitor_runs", "trigger", "TEXT NOT NULL DEFAULT 'manual'"),
+    # 提醒的归属：储蓄目标提醒由 goal_id 推出用户；跨场景计划的提醒没有 goal_id，
+    # 必须自己带 user_id，否则按用户查提醒时会整条看不见。
+    ("proactive_alerts", "user_id", "TEXT NOT NULL DEFAULT ''"),
 )
 
 

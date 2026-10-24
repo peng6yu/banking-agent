@@ -419,8 +419,15 @@ def test_malformed_model_output_falls_back_to_unknown_with_question() -> None:
     for args in malformed:
         result, _adapter = parse("帮我转账100元给李静", [args])
         assert isinstance(result, intent.IntentResult)
-        assert result.ok is False, args
-        assert result.question, args
+        if result.ok:
+            # 2026-10-24 起，模型输出不可用时允许「只读原话」的确定性兜底接手：
+            # 它不读模型给的任何字段，所以上面那些坏结构没有机会变成槽位。
+            # 兜底必须留下 source 标记、置信度压在模型路径之下，且槽位逐字来自原话。
+            assert result.source == "fallback", args
+            assert result.confidence <= 0.6, args
+            assert result.slots == {"payee_name": "李静", "amount_fen": 10000}, args
+        else:
+            assert result.question, args
 
     # 未知意图：模型编了一个没登记的意图，必须落到 unknown + 反问，而不是 ok=True 往下走。
     unknown, _adapter = parse("帮我转账100元给李静", [{"intent": "nonsense", "confidence": 0.9}])

@@ -6,7 +6,7 @@
 记成「这一轮没有裁决」。守卫把它们收成确定性判定：
 
     命中 → intent=unsupported → DAG 的 unsupported_request 哨兵节点
-    → 策略层 R03 红灯 → policy.decided + confirm.rejected → 逐类话术
+    → 策略层 R03 红灯 → policy.decided + policy.blocked → 逐类话术
 
 五条契约（谁改坏哪条，下面的用例就红）：
 1. 八类请求都得命中，且类别正确（类别要进审计，便于复盘口径）；

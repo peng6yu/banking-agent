@@ -32,6 +32,7 @@ from typing import Any
 
 import pytest
 
+from tests import mfa
 from app import audit, db
 from app.models import Action, Dag, Decision
 from app.planner import dag as planner_dag
@@ -91,8 +92,10 @@ def drive_answering_in_emit(
     async def emit(name: str, data: dict[str, Any]) -> None:
         events.append((name, dict(data)))
         if name in ("confirm", "factor"):
+            cid = str(data["confirmation_id"])
             await executor.resume(
-                session_id, str(data["confirmation_id"]), True, factor=factor
+                session_id, cid, True, factor=factor,
+                proofs=mfa.solve(session_id, cid) if factor else [],
             )
 
     started = time.monotonic()

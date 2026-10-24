@@ -185,6 +185,16 @@ def ask(text: str, *, session_id: str | None = None, confirm: str = "approve",
                                                  "approve": confirm == "approve"}
                         if body["approve"] and card.required_factors:
                             body["factor"] = "+".join(card.required_factors)
+                            challenge = await http.post("/api/factor/challenge", json={
+                                "session_id": sid, "confirmation_id": card.id})
+                            assert challenge.status_code == 200, challenge.text
+                            payload = challenge.json()
+                            assert payload["required"] == list(card.required_factors), payload
+                            body["proofs"] = [
+                                {"factor": item["factor"], "challenge_id": item["challenge_id"],
+                                 "code": item["code"]}
+                                for item in payload["challenges"]
+                            ]
                         await http.post("/api/confirm", json=body)
                     await asyncio.sleep(0.02)
 

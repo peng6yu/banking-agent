@@ -24,7 +24,7 @@ from typing import Any, Final
 
 from fastapi import APIRouter, Depends, Query
 
-from app import audit, db, proactive
+from app import audit, db, plans, proactive, subscriptions, suitability
 from app.api.routes import require_api_token
 from app.clock import now_ms
 from app.money import fen_to_yuan_str
@@ -337,6 +337,7 @@ def _savings_goals(
         ).fetchall()
     out: list[dict[str, Any]] = []
     for row in rows:
+        rule_rows = proactive.rules_for_goal(conn, str(row["id"]))
         goal = {
             "goal_id": str(row["id"]),
             "name": str(row["name"]),
@@ -348,6 +349,19 @@ def _savings_goals(
             "status": str(row["status"]),
             "created_ms": int(row["created_ms"]),
             "updated_ms": int(row["updated_ms"]),
+            # 监测开关由 monitor_rules.enabled 决定：后台节拍器只唤醒开了开关的目标，
+            # 所以界面必须把这个状态如实摆出来，不能让用户以为"存了就会自动盯"。
+            "monitor_rules": [
+                {
+                    "rule_id": str(rule["id"]),
+                    "kind": str(rule["kind"]),
+                    "threshold": int(rule["threshold"]),
+                    "period": str(rule["period"]),
+                    "enabled": bool(int(rule["enabled"])),
+                }
+                for rule in rule_rows
+            ],
+            "monitor_enabled": any(bool(int(rule["enabled"])) for rule in rule_rows),
         }
         if with_plan:
             try:
@@ -525,6 +539,12 @@ def _monitor_runs(conn: sqlite3.Connection, *, limit: int = 5) -> list[dict[str,
             "started_text": _time_text(int(row["started_ms"])),
             "finished_ms": int(row["finished_ms"]) if row["finished_ms"] else None,
             "status": str(row["status"]),
+            "trigger": str(row["trigger"] or proactive.TRIGGER_MANUAL),
+            "trigger_label": (
+                "后台节拍"
+                if str(row["trigger"] or "") == proactive.TRIGGER_SCHEDULER
+                else "手动触发"
+            ),
             "alerts_created": int(row["alerts_created"]),
             "detail": str(row["detail"] or ""),
         }
@@ -550,9 +570,19 @@ def _scheduler_block() -> dict[str, Any]:
             "预约转账由应用进程内的定时器推进。进程退出期间不会执行，"
             "重启后从数据库恢复未到点的任务。"
         ),
+        "monitor": {
+            "auto": True,
+            "interval_ms": proactive.monitor_interval_ms(),
+            "trigger_field": "monitor_runs.trigger",
+            "note": (
+                "储蓄目标监测：只有你自己打开监测开关的目标才会被节拍器唤起，"
+                "同一个目标按上面的间隔节流（默认 6 小时一次），只写提醒、不动钱。"
+            ),
+            "manual_endpoint": "/api/proactive/monitor/run",
+        },
         "monitoring_scope": (
-            "只有预约转账这类已持久化的任务会被自动推进；"
-            "储蓄目标监测目前不会自动跑，需要在「计划与提醒」里手动点一次。"
+            "会自动推进的是两类：已持久化的预约转账；以及你显式打开监测的储蓄目标。"
+            "没打开开关的目标不会自动跑，需要手动点一次。"
         ),
     }
 
@@ -773,6 +803,9 @@ def management_view(conn: sqlite3.Connection) -> dict[str, Any]:
             }
         )
 
+    profile = suitability.load(conn, user_id)
+    inferred = subscriptions.detect_recurring(conn, account_id)
+    upcoming = subscriptions.upcoming(conn, account_id)
     scheduled = _scheduled_tasks(conn, user_id, limit=5)
     holdings_summary = {
         "holding_count": sum(1 for p in products if p["holding_shares_milli"] > 0),
@@ -791,17 +824,45 @@ def management_view(conn: sqlite3.Connection) -> dict[str, Any]:
                 if str(row["period"]) == "monthly" and str(row["status"]) == "active"
             ),
             "boundary": "订阅数据来自本行代扣记录，不是商户会员系统。",
+            # 已知代扣之外：疑似订阅（流水推断）与近期扣费窗口。两者都不动钱。
+            "inferred": inferred,
+            "upcoming": upcoming,
         },
         "scheduled": scheduled,
         "investments": {
             "products": products,
             "summary": holdings_summary,
             "data_source": "fund_products 表（演示数据：净值是固定的，不接行情）",
-            # 适当性评估没做就是没做，不能靠界面上的风险标签假装做过了。
-            "suitability_assessed": False,
+            # 画像从 investor_profiles 读：没测过就是没测过，测过就照实给等级与可买范围。
+            "suitability_assessed": profile is not None,
+            "suitability": {
+                "assessed": profile is not None,
+                "profile": profile,
+                "question_count": len(suitability.QUESTIONS),
+                # 题目跟着画像一起下发：界面不用为了填表再单独请求一次。
+                "questions": [
+                    {
+                        "id": item["id"],
+                        "text": item["text"],
+                        "options": [
+                            {"value": option["value"], "label": option["label"]}
+                            for option in item["options"]
+                        ],
+                    }
+                    for item in suitability.QUESTIONS
+                ],
+                "level_bands": [
+                    {"floor": floor, "level": level, "label": label, "capacity": capacity}
+                    for floor, level, label, capacity in suitability.LEVEL_BANDS
+                ],
+                "disclaimer": "演示用简化问卷，不是监管口径的正式风险评估；不构成投资建议。",
+            },
             "suitability_note": (
-                "当前原型只展示产品风险等级并给出通用风险提示，"
-                "没有做投资者适当性问卷与匹配判定；申购前需要人工判断。"
+                "买基金前必须先做一次 5 题风险测评（C1—C5）：没测评或产品风险高于画像上限，"
+                "buy_fund 会直接拒绝，界面也不会替你判断。问卷是演示简化版。"
+                if profile is None
+                else f"已测评：{profile['level']}（{profile['level_label']}），"
+                     f"{profile['capacity_label']} 风险的产品。"
             ),
             "execution": "申购/赎回走 buy_fund / redeem_fund，均为写操作，需要能力令牌。",
         },
@@ -867,6 +928,8 @@ def plans_view(conn: sqlite3.Connection) -> dict[str, Any]:
     pending = _pending_confirmations(conn)
     alerts = _alerts(conn, user_id, limit=20)
     runs = _monitor_runs(conn)
+    charges = subscriptions.upcoming(conn, str(account["id"]))
+    persisted = plans.list_plans(conn, user_id=user_id, limit=10)
     return {
         "generated_ms": stamp,
         "generated_text": _time_text(stamp),
@@ -886,8 +949,17 @@ def plans_view(conn: sqlite3.Connection) -> dict[str, Any]:
             "empty_reason": None if goals else "还没有保存的计划。可以让 AI 助手按你的收支算一个。",
         },
         "scheduled_tasks": scheduled,
+        # 落库的跨场景计划：check / reminder 会由节拍推进，action 步到期只会提醒你确认。
+        "plans": {
+            "items": persisted,
+            "count": len(persisted),
+            "boundary": plans.ACTION_BOUNDARY,
+            "empty_reason": None if persisted else "还没有跨场景计划。可以让 AI 助手按目标生成一个，保存后由后台节拍推进。",
+        },
         "pending_authorizations": pending,
         "alerts": alerts,
+        # 近期可能发生的支出：已知代扣的下次扣费日期，打开页面时算，不推送。
+        "upcoming_charges": charges,
         "monitor_runs": {
             "items": runs,
             "count": len(runs),

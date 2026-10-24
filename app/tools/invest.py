@@ -19,8 +19,10 @@ from typing import Any, Final
 
 # 模块级导入（不用 from 包 import 模块）：tests/test_imports.py 用 ast 按模块名登记依赖，
 # 包级导入会被它漏掉，允许依赖表就会与代码现状对不上。
+import app.audit as audit  # noqa: PLR0402
 import app.db as db  # noqa: PLR0402
 import app.funds as funds  # noqa: PLR0402
+import app.suitability as suitability  # noqa: PLR0402
 import app.tools.products as products  # noqa: PLR0402
 from app.clock import BankError, InsufficientFunds
 from app.log import log
@@ -66,6 +68,35 @@ def buy_fund(ctx: ToolContext, params: dict[str, Any], token: str | None = None)
     shares_milli = products.shares_for(amount_fen, nav_micro)
     if shares_milli <= 0:
         return fail_result("AMOUNT_TOO_SMALL", "这笔钱按当前净值还买不到 0.001 份，请再加一点。")
+    # 适当性闸门放在动钱之前，但排在金额校验之后：
+    # 起购门槛是用户当下就能改的事（多买一点），测评是另一件事，先说更近的那条。
+    # 结果无论通过与否都记一条 suitability.checked，事后能回答"为什么没买成"。
+    gate = suitability.check(ctx.conn, str(account["user_id"]), product)
+    audit.append(
+        ctx.conn,
+        "suitability.checked",
+        {
+            "user_id": str(account["user_id"]),
+            "product_code": str(product["code"]),
+            "product_risk": int(product["risk_level"]),
+            "profile_level": (gate["profile"] or {}).get("level"),
+            "ok": bool(gate["ok"]),
+            "reason": gate["reason"],
+        },
+        session_id=ctx.session_key(),
+    )
+    if not gate["ok"]:
+        return fail_result(
+            gate["reason"],
+            gate["user_text"],
+            {
+                "product_code": str(product["code"]),
+                "product_name": str(product["name"]),
+                "product_risk": int(product["risk_level"]),
+                "profile": gate["profile"],
+                "next": gate["next"],
+            },
+        )
     ensure_system_payee(ctx.conn, account)
     action = build_action("buy_fund", params, str(account["id"]), amount_fen)
     try:
@@ -230,6 +261,49 @@ def _base_view(
         "hold_id": hold_id,
         "status": status,
     }
+
+
+def assess_suitability(ctx: ToolContext, params: dict[str, Any], token: str | None = None) -> ToolResult:
+    """保存风险测评画像。不碰钱，但会覆盖旧画像，所以走黄灯确认。
+
+    它仍然是写工具（改用户画像），所以和别的写工具一样先验令牌——
+    "不动钱"不等于"可以绕过授权"。
+    """
+    require_token("assess_suitability", params, token)
+    account = primary_account(ctx.conn, ctx.account_id)
+    answers = params.get("answers") if isinstance(params.get("answers"), dict) else None
+    profile = suitability.save(ctx.conn, str(account["user_id"]), answers)
+    data = dict(profile)
+    data["message"] = (
+        f"测评结果：{profile['level']}（{profile['level_label']}），"
+        f"{profile['capacity_label']}的产品。"
+    )
+    data["questions"] = suitability.QUESTIONS
+    return ok_result(data)
+
+
+def get_suitability(ctx: ToolContext, params: dict[str, Any], token: str | None = None) -> ToolResult:
+    """读当前画像；没测评过就返回 assessed=False 和题目，让前端能直接开始答题。"""
+    account = primary_account(ctx.conn, ctx.account_id)
+    profile = suitability.load(ctx.conn, str(account["user_id"]))
+    if profile is None:
+        return ok_result(
+            {
+                "assessed": False,
+                "profile": None,
+                "questions": suitability.QUESTIONS,
+                "message": "还没做过风险测评。买基金之前要先答 5 道题。",
+                "disclaimer": "演示用简化问卷，不是监管口径的正式风险评估；不构成投资建议。",
+            }
+        )
+    return ok_result(
+        {
+            "assessed": True,
+            "profile": profile,
+            "questions": suitability.QUESTIONS,
+            "message": f"当前画像：{profile['level']}（{profile['level_label']}）。",
+        }
+    )
 
 
 def _insufficient(exc: InsufficientFunds) -> ToolResult:

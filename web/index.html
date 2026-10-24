@@ -203,6 +203,7 @@
   }
   .card-head h3 { font-size: var(--fs-md); font-weight: var(--fw-semi); }
   .card-head .spacer { flex: 1 1 auto; }
+  .card-sub { display: flex; align-items: center; gap: 6px; font-size: var(--fs-xs); font-weight: var(--fw-semi); color: var(--muted); margin: var(--s-3) 0 6px; }
   .card-note { font-size: var(--fs-xs); color: var(--muted); margin-top: var(--s-2); line-height: 1.55; }
 
   .stat-label { font-size: var(--fs-xs); color: var(--muted); margin-bottom: 2px; }
@@ -477,6 +478,10 @@
   .factor-list { list-style: none; margin: 0 0 var(--s-2); padding: 0; display: flex; flex-wrap: wrap; gap: 6px; }
   .factor-item { font-size: var(--fs-xs); border: 1px solid var(--red); color: var(--red); border-radius: 6px; padding: 2px 8px; background: var(--red-soft); }
   .factor-input { width: 100%; margin-bottom: var(--s-2); }
+  .factor-codes { display: flex; flex-direction: column; gap: var(--s-2); margin-bottom: var(--s-2); }
+  .factor-code-row { display: flex; align-items: center; gap: var(--s-2); flex-wrap: wrap; }
+  .factor-code-label { font-size: var(--fs-xs); color: var(--text-2); min-width: 92px; }
+  .factor-code-row .factor-input { flex: 1 1 120px; width: auto; margin-bottom: 0; }
   .factor-actions { display: flex; gap: var(--s-2); flex-wrap: wrap; }
 
   /* 收款人候选 */
@@ -572,6 +577,16 @@
   @media (prefers-reduced-motion: reduce) {
     * { animation: none !important; transition: none !important; }
   }
+  /* 跨场景计划步骤行：一行一步，状态标签在右，长文案可换行 */
+  .step-row { display: flex; align-items: center; gap: var(--s-2); justify-content: space-between;
+    padding: 6px 0; border-top: 1px dashed var(--line); flex-wrap: wrap; }
+  .step-main { display: flex; align-items: center; gap: var(--s-2); flex-wrap: wrap; }
+  .step-seq { display: inline-flex; align-items: center; justify-content: center;
+    width: 20px; height: 20px; border-radius: 999px; background: var(--bg-2);
+    color: var(--muted); font-size: var(--fs-xs); font-weight: 600; }
+  .step-title { font-size: var(--fs-sm); color: var(--text); }
+  .tag.warn { background: var(--amber-soft); color: var(--amber); }
+
   </style>
 </head>
 <body>
@@ -754,6 +769,13 @@
         </div>
       </div>
 
+      <div class="grid grid-2">
+        <div class="card"><div class="card-head"><h3>近期可能发生的支出</h3><span class="spacer"></span><span class="tag" id="plan-upcoming-tag">—</span></div><div id="plan-upcoming"></div></div>
+        <div class="card"><div class="card-head"><h3>最近的监测</h3><span class="spacer"></span><span class="tag" id="plan-run-tag">—</span></div><div id="plan-runs"></div><div class="card-note" id="plan-run-note"></div></div>
+      </div>
+
+      <div class="card"><div class="card-head"><h3>跨场景计划（落库，可跨天推进）</h3><span class="spacer"></span><span class="tag" id="plan-persist-tag">—</span></div><div id="plan-persist"></div><div class="card-note" id="plan-persist-note"></div></div>
+
       <div class="card"><div class="card-head"><h3>提醒</h3><span class="spacer"></span><span class="tag" id="plan-alert-tag">—</span></div><div id="plan-alerts"></div></div>
 
       <details class="panel lv-unknown" id="panel-proactive">
@@ -765,7 +787,7 @@
           <span class="panel-badge" data-role="badge">未加载</span>
         </summary>
         <div class="panel-body" data-role="body">
-          <div class="pf-note">所有数字都来自后端接口：金额在后端用整数分计算，模型只做解释，这里只做展示换算。监测只在你点按钮时手动跑一次，不会在后台自动运行。</div>
+          <div class="pf-note">所有数字都来自后端接口：金额在后端用整数分计算，模型只做解释，这里只做展示换算。后台节拍器只会推进你打开了监测开关的目标（默认 6 小时一次，只写提醒、不动钱）；没打开开关的目标只能在这里手动跑。</div>
 
           <div class="pf-block">
             <div class="pf-title">储蓄目标 <span class="pf-sub">元为单位输入，提交时用整数运算换算成分</span></div>
@@ -873,10 +895,10 @@
 
       <div class="grid grid-2">
         <div class="card"><div class="card-head"><h3>银行卡</h3><span class="spacer"></span><span class="tag" id="mg-card-tag">—</span></div><div id="mg-cards"></div></div>
-        <div class="card"><div class="card-head"><h3>订阅与代扣</h3><span class="spacer"></span><span class="tag warn">仅银行侧代扣</span></div><div id="mg-subs"></div></div>
+        <div class="card"><div class="card-head"><h3>订阅与代扣</h3><span class="spacer"></span><span class="tag warn">仅银行侧代扣</span></div><div id="mg-subs"></div><div class="card-note">下面是两类完全不同的数据：银行侧代扣记录（能停），以及从流水推断出来的「疑似订阅」（只能核实，不能停）。</div><div id="mg-subs-inferred"></div><div id="mg-upcoming"></div></div>
       </div>
 
-      <div class="card"><div class="card-head"><h3>理财产品</h3><span class="spacer"></span><span class="tag bad" id="mg-fit">适当性：未评估</span></div><div id="mg-products"></div><div class="card-note" id="mg-fit-note"></div></div>
+      <div class="card"><div class="card-head"><h3>理财产品</h3><span class="spacer"></span><span class="tag bad" id="mg-fit">适当性：未评估</span></div><div id="mg-suit"></div><div id="mg-products"></div><div class="card-note" id="mg-fit-note"></div></div>
 
       <div class="card"><div class="card-head"><h3>能力与边界</h3></div><div id="mg-caps"></div><div class="card-note" id="mg-note"></div></div>
     </div>
@@ -1225,7 +1247,9 @@
       case 'intent': renderIntent(data); break;
       case 'trace': renderPlan(data); renderPolicy(data); renderAudit(fromEvent('policy.decided', data)); break;
       case 'confirm': renderConfirm(data); renderAudit(fromEvent('confirm.requested', data)); break;
-      case 'factor': renderFactor(data); renderAudit(fromEvent('factor.required', data)); break;
+      /* 红灯也要先给确认卡片：用户得先看清收款人/金额/转出账户，再去右侧做验证。
+         只弹验证面板、不给卡片，等于让人在看不见交易内容的情况下签字。 */
+      case 'factor': renderConfirm(data); renderFactor(data); renderAudit(fromEvent('factor.required', data)); break;
       case 'tool': renderToolResult(data); renderAudit(fromEvent('tool.done', data)); break;
       case 'done': renderDone(data); renderAudit(fromEvent('plan.done', data)); break;
       case 'error': renderError(data); renderAudit(fromEvent('request.failed', data)); break;
@@ -1389,6 +1413,11 @@
     const expiresRaw = fieldVal(data, ['expires_in_s', 'expires_in']);
     const amountInfo = fieldInfo(data, AMOUNT_KEYS);
     const payeeInfo = fieldInfo(data, PAYEE_KEYS);
+    /* 没有确认号、也没有金额和操作说明的帧，不是一张可签字的卡片：
+       画出来只会得到一张字段全是「见操作说明全文」的空卡，让人误以为系统出错了。 */
+    if (!cid || (!amountInfo.value && !fieldVal(data, ['action_text', 'action', 'summary']))) {
+      return null;
+    }
     const amountUnit = amountInfo.key.indexOf('fen') !== -1 ? ' 分' : '';
     /* 金额与收款人必须显式出现在卡片和按钮上：拿不到原文就指向操作说明全文，不做二次计算 */
     const amountText = amountInfo.value ? amountInfo.value + amountUnit : '见操作说明全文';
@@ -1449,9 +1478,32 @@
     flash('panel-factor');
   }
 
+  /* 多因子面板：验证码由服务端下发（POST /api/factor/challenge）、服务端校验，
+     前端不再自己造一个「我验过了」的字符串。挑战一次性、5 分钟、绑这条确认号。 */
   function renderFactor(data) {
     const cid = fieldVal(data, ['confirmation_id', 'id']);
-    const required = asList(fieldVal(data, ['required', 'required_factors', 'factors']));
+    let required = asList(fieldVal(data, ['required', 'required_factors', 'factors']));
+    /* 后端有的路径会把因子数组当字符串塞过来（"['face','sms']" 这种），
+       这里拆一层再渲染，免得面板上直接显示一坨 JSON。 */
+    if (required.length === 1 && typeof required[0] === 'string' && required[0].indexOf('[') === 0) {
+      try { required = JSON.parse(required[0]); } catch (err) { required = asList(required[0]); }
+    }
+    /* 红灯但没有因子 = 策略直接拦截（例如日累计越线）：这是额度硬线，
+       再画「需要验证」和提交按钮，会让人以为补个验证码就能过。 */
+    if (!required.length) {
+      const blockedHost = panelBody('panel-factor');
+      if (!blockedHost) { return; }
+      blockedHost.replaceChildren();
+      blockedHost.appendChild(el('div', 'field-label', '这一步不能靠验证码放行'));
+      blockedHost.appendChild(el('div', 'card-note',
+        textOf(data.message) || '这条规则是硬线，验证通过也不能提额。'));
+      blockedHost.appendChild(el('div', 'card-note',
+        '额度类限制由规则常量决定（本赛题设定 1000 元/日、1000 元/笔），不是身份核验问题。'));
+      panelBadge('panel-factor', '直接拦截');
+      setPanelLevel('panel-factor', 'red');
+      flash('panel-factor');
+      return;
+    }
     const host = panelBody('panel-factor');
     if (!host) { return; }
     host.replaceChildren();
@@ -1465,27 +1517,76 @@
       list.appendChild(el('li', 'factor-item', '后端没有说明具体需要哪几步'));
     }
     host.appendChild(list);
-
-    const input = document.createElement('input');
-    input.type = 'text';
-    input.className = 'factor-input';
-    input.placeholder = '填写验证结果（演示环境只做字段校验）';
-    host.appendChild(input);
     host.appendChild(el('div', 'card-note',
-      '能力边界：演示环境不会真的发短信、也不会真的采集人脸，这里填的内容只是「你声明验过了」，' +
-      '后端只检查字段是否齐全。真实银行必须把这一步换成行方验证服务。'));
+      '验证码由服务端下发、服务端校验：一次性、5 分钟内有效、只对这条确认号有效。' +
+      '演示环境走的是桩渠道（不会真的发短信、也不会真的采集人脸），真实银行要换成行方验证服务。'));
 
+    const codeBox = el('div', 'factor-codes');
+    host.appendChild(codeBox);
     const actions = el('div', 'factor-actions');
-    const okBtn = el('button', 'btn btn-red', '提交验证结果');
-    okBtn.type = 'button';
-    okBtn.addEventListener('click', function () {
-      const value = input.value.trim();
-      if (!value) {
-        appendBubble('sys', '请先填写验证结果再提交。');
+    let challenges = [];
+
+    function paint(items) {
+      challenges = items;
+      codeBox.replaceChildren();
+      if (!items.length) {
+        codeBox.appendChild(el('div', 'card-note', '服务端没有可用的验证挑战，点下面「重新获取验证码」再试。'));
         return;
       }
-      confirmAction(cid, true, value);
+      items.forEach(function (item) {
+        const row = el('div', 'factor-code-row');
+        const label = BX_FACTOR_TEXT[textOf(item.factor)] || textOf(item.factor);
+        row.appendChild(el('span', 'factor-code-label', label + (item.target ? '（' + textOf(item.target) + '）' : '')));
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.className = 'factor-input';
+        input.placeholder = '6 位验证码';
+        input.setAttribute('data-challenge', textOf(item.challenge_id));
+        if (item.code) { input.value = textOf(item.code); }
+        row.appendChild(input);
+        if (item.code) { row.appendChild(el('span', 'card-note', '演示验证码已自动填好')); }
+        codeBox.appendChild(row);
+      });
+    }
+
+    function load(btn) {
+      if (!sessionId) { appendBubble('sys', '会话还没建立，拿不到验证码。'); return; }
+      if (btn) { btn.disabled = true; }
+      bxSend('/api/factor/challenge', 'POST', { session_id: sessionId, confirmation_id: cid })
+        .then(function (res) {
+          paint(asList(res && res.challenges));
+          if (res && res.note) { codeBox.appendChild(el('div', 'card-note', textOf(res.note))); }
+        })
+        .catch(function (err) { appendBubble('sys', '获取验证码失败：' + pfErrText(err)); })
+        .then(function () { if (btn) { btn.disabled = false; } });
+    }
+
+    const reloadBtn = el('button', 'btn btn-ghost btn-mini', '重新获取验证码');
+    reloadBtn.type = 'button';
+    reloadBtn.addEventListener('click', function () { load(reloadBtn); });
+
+    const okBtn = el('button', 'btn btn-red', '提交验证并执行');
+    okBtn.type = 'button';
+    okBtn.addEventListener('click', function () {
+      if (!challenges.length) {
+        appendBubble('sys', '还没有可用的验证码，先点「重新获取验证码」。');
+        return;
+      }
+      const proofs = [];
+      let missing = 0;
+      challenges.forEach(function (item) {
+        const box = codeBox.querySelector('input[data-challenge="' + textOf(item.challenge_id) + '"]');
+        const code = box ? textOf(box.value).trim() : '';
+        if (!code) { missing += 1; return; }
+        proofs.push({ factor: textOf(item.factor), challenge_id: textOf(item.challenge_id), code: code });
+      });
+      if (missing) {
+        appendBubble('sys', '还有 ' + missing + ' 个验证码没填，服务端会拒绝这次提交。');
+        return;
+      }
+      confirmAction(cid, true, null, proofs);
     });
+
     const noBtn = el('button', 'btn btn-ghost', '拒绝并终止');
     noBtn.type = 'button';
     noBtn.addEventListener('click', function () {
@@ -1493,11 +1594,13 @@
     });
     actions.appendChild(okBtn);
     actions.appendChild(noBtn);
+    actions.appendChild(reloadBtn);
     host.appendChild(actions);
 
-    panelBadge('panel-factor', required.length ? required.join('/') : '需要验证');
+    panelBadge('panel-factor', required.join('/'));
     setPanelLevel('panel-factor', 'red');
     flash('panel-factor');
+    load(null);
   }
 
   function renderToolResult(data) {
@@ -1626,7 +1729,7 @@
     }
   }
 
-  async function confirmAction(confirmationId, approve, factor) {
+  async function confirmAction(confirmationId, approve, factor, proofs) {
     if (!confirmationId) {
       appendBubble('sys', '这条确认没有确认号，无法提交。');
       return;
@@ -1641,6 +1744,7 @@
       approve: approve === true,
       factor: factor ? String(factor) : null
     };
+    if (proofs && proofs.length) { body.proofs = proofs; }
     let result = null;
     try {
       const response = await fetch(API_CONFIRM, {
@@ -2633,6 +2737,7 @@
     unknown: '数据不足，无法判断'
   };
   const BX_PERIOD_UNIT = { month: '每月', weekly: '每周', week: '每周' };
+  const BX_PRODUCT_CATEGORY = { money: '货币型', bond: '债券型', mixed: '混合型', equity: '股票型' };
   const BX_SCHED_KIND = {
     in_process_ticker: '应用内定时器（随服务进程启动/停止）',
     external_cron: '外部定时任务',
@@ -2821,6 +2926,27 @@
       }
       if (response.status === 401) {
         throw new Error('接口鉴权没通过：请用带 ?token= 的链接打开页面，或先在页面里填好 API Token。');
+      }
+      throw new Error('后端返回 HTTP ' + response.status + (detail ? '：' + detail : ''));
+    }
+    return response.json();
+  }
+
+  /* 写操作统一走这里：页面上的按钮只允许改「计划/目标/提醒」这类非资金状态，
+     转钱之类一律回 AI 助手走权限引擎，避免页面绕过确认流程。 */
+  async function bxSend(url, method, body) {
+    const response = await fetch(url, {
+      method: method || 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: body === undefined ? undefined : JSON.stringify(body)
+    });
+    if (!response.ok) {
+      let detail = '';
+      try {
+        const payload = await response.json();
+        detail = textOf((payload && (payload.user_text || payload.detail)) || '');
+      } catch (err) {
+        detail = '';
       }
       throw new Error('后端返回 HTTP ' + response.status + (detail ? '：' + detail : ''));
     }
@@ -3337,6 +3463,13 @@
       if (scheduler.monitoring_scope) {
         body.appendChild(bxRow('持续监测的范围', textOf(scheduler.monitoring_scope), ''));
       }
+      const monitor = bxIsObj(scheduler.monitor) ? scheduler.monitor : null;
+      if (monitor) {
+        const everyMs = bxNum(monitor.interval_ms) !== null ? Math.round(bxNum(monitor.interval_ms) / 1000) : null;
+        body.appendChild(bxRow('目标监测开关',
+          monitor.auto === true ? '打开的目标会被节拍器唤起' + (everyMs === null ? '' : '（同一个目标最多每 ' + bxCount(everyMs, ' 秒') + ' 一次）') : '不会自动跑',
+          ''));
+      }
     }
     card.appendChild(body);
     if (bxIsObj(scheduler) && scheduler.note) { card.appendChild(el('div', 'card-note', textOf(scheduler.note))); }
@@ -3446,7 +3579,18 @@
           cancel.type = 'button';
           cancel.addEventListener('click', function () { bxCancelGoal(goal.goal_id, cancel); });
           bar.appendChild(cancel);
+          const monitorOn = goal.monitor_enabled === true;
+          const monitor = el('button', 'btn btn-mini' + (monitorOn ? '' : ' btn-green'),
+            monitorOn ? '关闭后台监测' : '开启后台监测');
+          monitor.type = 'button';
+          monitor.title = '打开后，节拍器会按固定间隔检查这个目标并生成提醒；只写提醒，不动钱。';
+          monitor.addEventListener('click', function () { bxToggleMonitor(goal.goal_id, !monitorOn, monitor); });
+          bar.appendChild(monitor);
           box.appendChild(bar);
+          box.appendChild(el('div', 'card-note',
+            monitorOn
+              ? '后台监测：已开启。节拍器会按间隔检查这个目标，提醒写进「提醒」，不会动钱。'
+              : '后台监测：未开启。保存目标不会让它自动跑；需要持续监测时点上面的按钮。'));
           goalHost.appendChild(box);
         });
       }
@@ -3518,6 +3662,182 @@
           alertHost.appendChild(box);
         });
       }
+    }
+
+    bxRenderUpcoming($('plan-upcoming'), data.upcoming_charges);
+    bxRenderPersistedPlans(data.plans);
+    bxRenderMonitorRuns(data.monitor_runs);
+  }
+
+  function bxToggleMonitor(goalId, enabled, btn) {
+    if (!goalId) { return Promise.resolve(null); }
+    if (btn) { btn.disabled = true; }
+    return bxSend('/api/savings/goals/' + encodeURIComponent(goalId), 'PATCH', { monitor_enabled: enabled === true })
+      .then(function () {
+        appendBubble('sys', enabled === true
+          ? '已开启后台监测：节拍器会按间隔检查这个目标，提醒写进「提醒」，不动钱。'
+          : '已关闭后台监测：这个目标不会再被后台唤起，需要时可以在页面手动跑一次。');
+        bxRefresh();
+      })
+      .catch(function (err) {
+        appendBubble('sys', '切换监测开关失败：' + errorText(err));
+      })
+      .finally(function () {
+        if (btn) { btn.disabled = false; }
+      });
+  }
+
+  /* 近期可能发生的支出：已知代扣的下次扣费日期，打开页面时算，不推送。 */
+  /* 落库的跨场景计划：状态与后端一致（active/paused/completed/cancelled/failed），
+     资金动作永远是「等你确认」，所以这里只有「推进到点步骤」，没有自动扣款。 */
+  const BX_PLAN_STATUS = {
+    active: '进行中', paused: '已暂停·待你确认', completed: '已完成',
+    cancelled: '已取消', failed: '已失败'
+  };
+  const BX_STEP_KIND = { check: '检查条件', action: '资金动作', reminder: '提醒' };
+  const BX_STEP_STATE = {
+    pending: '等待到点', running: '正在执行', done: '已完成',
+    failed: '已失败', skipped: '已交回你确认'
+  };
+
+  function bxStepClass(state) {
+    if (state === 'done') { return 'tag ok'; }
+    if (state === 'failed') { return 'tag bad'; }
+    if (state === 'skipped') { return 'tag warn'; }
+    return 'tag info';
+  }
+
+  function bxRunPlans(btn, planId) {
+    btn.disabled = true;
+    btn.textContent = '正在推进…';
+    bxSend('/api/plans/run', 'POST', planId ? { plan_id: planId } : {}).then(function (data) {
+      const done = bxNum(data.count);
+      appendBubble('system', done > 0 ? ('这次推进了 ' + done + ' 步。') : '这次没有到点的步骤。');
+      bxRefresh();
+    }).catch(function (err) {
+      appendBubble('system', '推进失败：' + errorText(err));
+      btn.disabled = false;
+      btn.textContent = '立即推进到点步骤';
+    });
+  }
+
+  function bxRenderPersistedPlans(block) {
+    const host = $('plan-persist');
+    if (!host) { return; }
+    host.replaceChildren();
+    const data = bxIsObj(block) ? block : {};
+    const items = bxArr(data.items);
+    setText($('plan-persist-tag'), bxCount(data.count, ' 个'));
+    const note = $('plan-persist-note');
+    if (note) {
+      note.textContent = textOf(data.boundary) ||
+        '计划里的资金动作不会在后台自动执行，到期只提醒你回来确认。';
+    }
+    if (!items.length) {
+      bxEmpty(host, '还没有跨场景计划', textOf(data.empty_reason));
+      return;
+    }
+    const bar = el('div', 'anomaly-actions');
+    const runAll = el('button', 'btn btn-mini', '立即推进到点步骤');
+    runAll.type = 'button';
+    runAll.addEventListener('click', function () { bxRunPlans(runAll, null); });
+    bar.appendChild(runAll);
+    host.appendChild(bar);
+    items.forEach(function (plan) {
+      const status = textOf(plan.status);
+      const box = el('div', 'anomaly');
+      const head = el('div', 'anomaly-head');
+      head.appendChild(el('span', 'anomaly-title', textOf(plan.title)));
+      head.appendChild(el('span',
+        status === 'completed' ? 'tag ok' : (status === 'failed' || status === 'cancelled' ? 'tag bad' : (status === 'paused' ? 'tag warn' : 'tag info')),
+        BX_PLAN_STATUS[status] || status));
+      box.appendChild(head);
+      box.appendChild(el('div', 'card-note',
+        '进度 ' + bxCount(plan.finished_steps) + ' / ' + bxCount(plan.step_count) + ' 步 · 计划号 ' + textOf(plan.plan_id)));
+      bxArr(plan.steps).forEach(function (step) {
+        const row = el('div', 'step-row');
+        const left = el('div', 'step-main');
+        left.appendChild(el('span', 'step-seq', String(bxNum(step.seq))));
+        left.appendChild(el('span', 'step-title', textOf(step.title)));
+        left.appendChild(el('span', bxStepClass(textOf(step.state)), BX_STEP_STATE[textOf(step.state)] || textOf(step.state)));
+        row.appendChild(left);
+        row.appendChild(el('span', 'card-note',
+          (BX_STEP_KIND[textOf(step.kind)] || textOf(step.kind)) + ' · 到点 ' + textOf(step.due_text)));
+        box.appendChild(row);
+        if (bxNum(step.attempts) > 0) {
+          box.appendChild(el('div', 'card-note',
+            '已检查 ' + bxCount(step.attempts) + ' / ' + bxCount(step.max_attempts) + ' 次'));
+        }
+        if (textOf(step.last_error)) {
+          box.appendChild(el('div', 'card-note', textOf(step.last_error)));
+        }
+      });
+      const acts = el('div', 'anomaly-actions');
+      const runOne = el('button', 'btn btn-mini', '推进这个计划');
+      runOne.type = 'button';
+      runOne.addEventListener('click', function () { bxRunPlans(runOne, plan.plan_id); });
+      acts.appendChild(runOne);
+      if (status !== 'cancelled' && status !== 'completed') {
+        const cancel = el('button', 'btn btn-mini', '取消计划');
+        cancel.type = 'button';
+        cancel.addEventListener('click', function () {
+          cancel.disabled = true;
+          bxSend('/api/plans/' + encodeURIComponent(plan.plan_id), 'PATCH', { status: 'cancelled' })
+            .then(function () { appendBubble('system', '计划已取消：' + textOf(plan.title)); bxRefresh(); })
+            .catch(function (err) { cancel.disabled = false; appendBubble('system', '取消失败：' + errorText(err)); });
+        });
+        acts.appendChild(cancel);
+      }
+      box.appendChild(acts);
+      host.appendChild(box);
+    });
+  }
+
+  function bxRenderUpcoming(host, payload) {
+    if (!host) { return; }
+    const data = bxIsObj(payload) ? payload : {};
+    const items = bxArr(data.items);
+    setText($('plan-upcoming-tag'), bxCount(data.count, ' 笔'));
+    if (!items.length) {
+      bxEmpty(host, '近 7 天没有已知扣费', textOf(data.note) || '后端没有返回窗口内的扣费。');
+      host.appendChild(el('div', 'card-note', textOf(data.action)));
+      return;
+    }
+    host.replaceChildren();
+    const list = el('div', 'list');
+    items.forEach(function (item) {
+      list.appendChild(bxRow(
+        textOf(item.merchant),
+        '预计 ' + textOf(item.next_charge_text) + ' · 还有 ' + bxCount(item.days_left, ' 天') + ' · ' + textOf(item.period_label),
+        textOf(item.amount_yuan) + ' 元'
+      ));
+    });
+    host.appendChild(list);
+    host.appendChild(el('div', 'card-note', textOf(data.note) + ' ' + textOf(data.action)));
+  }
+
+  function bxRenderMonitorRuns(payload) {
+    const host = $('plan-runs');
+    const data = bxIsObj(payload) ? payload : {};
+    const items = bxArr(data.items);
+    setText($('plan-run-tag'), bxCount(data.count, ' 次'));
+    if (host) {
+      if (!items.length) {
+        bxEmpty(host, '还没有监测记录', '打开目标的后台监测，或手动点一次「立即运行监测」。');
+      } else {
+        host.replaceChildren();
+        const list = el('div', 'list');
+        items.forEach(function (run) {
+          const ok = textOf(run.status) === 'ok';
+          list.appendChild(bxRow(
+            (textOf(run.trigger_label) || textOf(run.trigger)) + (ok ? ' · 完成' : ' · 失败'),
+            textOf(run.started_text || run.detail || ''),
+            '新增提醒 ' + bxCount(run.alerts_created) + ' 条'
+          ));
+        });
+        host.appendChild(list);
+      }
+      if (data.note) { setText($('plan-run-note'), textOf(data.note)); }
     }
   }
 
@@ -3608,11 +3928,14 @@
           }
         });
         subHost.appendChild(list);
-        subHost.appendChild(el('div', 'notice warn', textOf(subs.boundary) + ' 月合计 ' + bxCount(subs.monthly_active_fen, ' 分') + '。'));
+        subHost.appendChild(el('div', 'notice warn', textOf(subs.boundary) + ' 月合计 ' + bxMoney(subs, 'monthly_active') + '。'));
       }
     }
+    bxRenderInferred(subs.inferred);
+    bxRenderManageUpcoming(subs.upcoming);
 
     const invest = bxIsObj(data.investments) ? data.investments : {};
+    bxRenderSuitability($('mg-suit'), invest);
     const products = bxArr(invest.products);
     const productHost = $('mg-products');
     if (productHost) {
@@ -3625,7 +3948,7 @@
           products.map(function (product) {
             return [
               textOf(product.name),
-              textOf(product.category),
+              BX_PRODUCT_CATEGORY[textOf(product.category)] || textOf(product.category),
               'R' + textOf(product.risk_level),
               textOf(product.min_buy_yuan) + ' 元',
               textOf(product.nav_updated_text),
@@ -3685,6 +4008,140 @@
     if (note) {
       note.textContent = '写操作统一走 AI 助手 + 权限引擎 + 确认流程，本页只做浏览与入口，不提供绕过策略的直连按钮。';
     }
+  }
+
+  /* 从流水推断出来的「疑似订阅」：只给依据和不确定性，不给「取消」按钮。 */
+  function bxRenderInferred(payload) {
+    const host = $('mg-subs-inferred');
+    if (!host) { return; }
+    const data = bxIsObj(payload) ? payload : {};
+    const items = bxArr(data.items);
+    if (!items.length) {
+      bxEmpty(host, '没有推断出周期性扣款',
+        textOf(data.note) || '近 6 个月没有商户满足「至少 3 次、间隔稳定、金额稳定」的条件。');
+      return;
+    }
+    host.replaceChildren();
+    host.appendChild(el('div', 'card-sub', '疑似订阅（从流水推断，' + bxCount(data.count, ' 个') + '）'));
+    items.forEach(function (item) {
+      const box = el('div', 'anomaly');
+      const head = el('div', 'anomaly-head');
+      head.appendChild(el('span', 'anomaly-title', textOf(item.merchant)));
+      head.appendChild(el('span', 'tag ' + (item.confidence === 'high' ? 'ok' : 'warn'), '把握度：' + textOf(item.confidence_label)));
+      head.appendChild(el('span', 'tag', textOf(item.period_label)));
+      box.appendChild(head);
+      box.appendChild(kvRow('金额', bxMoney(item, 'avg_amount') + '（平均，最近一次 ' + textOf(item.last_amount_yuan) + ' 元）'));
+      box.appendChild(kvRow('次数', bxCount(item.occurrences, ' 次') + '，间隔 ' + bxCount(item.interval_days_min, ' 天') + '–' + bxCount(item.interval_days_max, ' 天')));
+      box.appendChild(kvRow('时间范围', textOf(item.first_text) + ' → ' + textOf(item.last_text)));
+      if (item.basis) { box.appendChild(el('div', 'card-note', '识别依据：' + textOf(item.basis))); }
+      if (item.uncertainty) { box.appendChild(el('div', 'card-note', '不确定性：' + textOf(item.uncertainty))); }
+      const txIds = bxArr(item.evidence).map(function (row) { return textOf(row.transaction_id); }).filter(Boolean);
+      if (txIds.length) { box.appendChild(el('div', 'card-note', '依据流水：' + txIds.join('、'))); }
+      host.appendChild(box);
+    });
+    host.appendChild(el('div', 'card-note', textOf(data.note) + ' ' + textOf(data.boundary)));
+  }
+
+  function bxRenderManageUpcoming(payload) {
+    const host = $('mg-upcoming');
+    if (!host) { return; }
+    const data = bxIsObj(payload) ? payload : {};
+    const items = bxArr(data.items);
+    if (!items.length) {
+      if (data.note) { host.replaceChildren(el('div', 'card-note', textOf(data.note))); }
+      return;
+    }
+    host.replaceChildren(el('div', 'card-sub', '近 ' + bxCount(data.within_days, ' 天') + '可能扣费'));
+    const list = el('div', 'list');
+    items.forEach(function (item) {
+      list.appendChild(bxRow(
+        textOf(item.merchant),
+        textOf(item.next_charge_text) + ' · 还有 ' + bxCount(item.days_left, ' 天') + ' · ' + textOf(item.period_label),
+        textOf(item.amount_yuan) + ' 元'
+      ));
+    });
+    host.appendChild(list);
+    host.appendChild(el('div', 'card-note', textOf(data.note) + ' ' + textOf(data.action)));
+  }
+
+  /* 风险测评：5 道题，提交给后端算分；分数和等级都由后端返回，前端不自己算。 */
+  function bxRenderSuitability(host, invest) {
+    if (!host) { return; }
+    const fit = bxIsObj(invest.suitability) ? invest.suitability : {};
+    const questions = bxArr(fit.questions);
+    host.replaceChildren();
+    const profile = bxIsObj(fit.profile) ? fit.profile : null;
+    if (profile) {
+      const box = el('div', 'anomaly');
+      const head = el('div', 'anomaly-head');
+      head.appendChild(el('span', 'anomaly-title', '你的风险测评：' + textOf(profile.level) + '（' + textOf(profile.level_label) + '）'));
+      head.appendChild(el('span', 'tag ok', '得分 ' + bxCount(profile.score)));
+      box.appendChild(head);
+      box.appendChild(el('div', 'card-note',
+        '最高可买 R' + bxCount(profile.capacity) + ' 风险的产品。' + (fit.disclaimer ? ' ' + textOf(fit.disclaimer) : '')));
+      host.appendChild(box);
+    }
+    if (!questions.length) {
+      host.appendChild(el('div', 'card-note', '后端没有下发测评题目，暂时无法测评。'));
+      return;
+    }
+    const details = el('details', 'caps');
+    const summary = el('summary', 'caps-title',
+      profile ? '重新做一次风险测评（5 道题）' : '做风险测评（5 道题，做完才能买基金）');
+    details.appendChild(summary);
+    const form = el('div', 'pf-form');
+    const picks = {};
+    questions.forEach(function (question) {
+      const field = el('label', 'pf-field pf-field-wide');
+      field.appendChild(el('span', 'field-label', textOf(question.text)));
+      const select = el('select', 'pf-in');
+      select.id = 'suit-' + textOf(question.id);
+      const placeholder = el('option', '', '请选择');
+      placeholder.value = '';
+      select.appendChild(placeholder);
+      bxArr(question.options).forEach(function (option) {
+        const opt = el('option', '', textOf(option.label));
+        opt.value = textOf(option.value);
+        select.appendChild(opt);
+      });
+      select.addEventListener('change', function () {
+        picks[textOf(question.id)] = select.value;
+      });
+      picks[textOf(question.id)] = '';
+      field.appendChild(select);
+      form.appendChild(field);
+    });
+    const bar = el('div', 'pf-actions');
+    const submit = el('button', 'btn btn-green btn-mini', '提交测评');
+    submit.type = 'button';
+    submit.addEventListener('click', function () {
+      const answers = {};
+      const missing = [];
+      questions.forEach(function (question) {
+        const key = textOf(question.id);
+        if (!picks[key]) { missing.push(key); }
+        answers[key] = picks[key];
+      });
+      if (missing.length) {
+        appendBubble('sys', '还有 ' + missing.length + ' 题没选，5 道题都选了才能生成测评结果。');
+        return;
+      }
+      submit.disabled = true;
+      bxSend('/api/investment/suitability', 'POST', { answers: answers })
+        .then(function (json) {
+          const saved = bxIsObj(json && json.profile) ? json.profile : {};
+          appendBubble('sys', '测评已保存：' + textOf(saved.level) + '（' + textOf(saved.level_label) + '），最高可买 R' + bxCount(saved.capacity) + ' 的产品。这是演示用简化问卷，不是监管口径的风险评估。');
+          bxRefresh();
+        })
+        .catch(function (err) {
+          appendBubble('sys', '提交测评失败：' + errorText(err));
+        })
+        .finally(function () { submit.disabled = false; });
+    });
+    bar.appendChild(submit);
+    form.appendChild(bar);
+    details.appendChild(form);
+    host.appendChild(details);
   }
 
   /* --------------------------------------------------- 执行记录与安全中心 */
@@ -3861,14 +4318,33 @@
 
   function bxRenderPendingCard(card) {
     if (!bxIsObj(card)) { return; }
+    const cid = textOf(card.confirmation_id);
+    const rebuilt = bxIsObj(card.card) ? card.card : null;
+    const pending = textOf(card.status) === 'pending';
+    const expired = card.expired === true;
+    /* 服务端现在会用 action_json + dag_nodes.decision_json 把同一张卡重建出来（字段与当时推送的一致）。
+       能重建就画真卡：让人在看不见金额和收款人的情况下再签一次字，等于把确认流程变成走过场。 */
+    if (rebuilt && pending && !expired) {
+      appendBubble('sys', '服务端还留着这张没处理完的确认（确认号 ' + cid + '），下面是它重新拼出来的同一张卡。', 'restore');
+      renderConfirm(rebuilt);
+      if (bxArr(rebuilt.required).length) { renderFactor(rebuilt); }
+      return;
+    }
     const box = el('div', 'notice warn');
+    if (rebuilt && expired) {
+      box.appendChild(el('strong', '', '这张确认已经过期'));
+      box.appendChild(el('div', '', '确认号 ' + cid + ' · 节点 ' + textOf(card.node_id) +
+        '。有效期到了就不能再签了（过期会被服务端按 confirm.expired 记一条审计）；要办的话重新说一次。'));
+      appendNode(box);
+      return;
+    }
     box.appendChild(el('strong', '', '还有一个没处理完的确认'));
-    box.appendChild(el('div', '', '确认号 ' + textOf(card.confirmation_id) + ' · 节点 ' + textOf(card.node_id) +
-      '。刷新后服务端只回传确认号，金额与收款人以重新生成的卡片为准。'));
+    box.appendChild(el('div', '', '确认号 ' + cid + ' · 节点 ' + textOf(card.node_id) +
+      '。这张卡的历史字段不全，服务端重建不出金额与收款人，所以这里不画可签字的卡。'));
     const btn = el('button', 'btn btn-mini', '把这条确认再提交一次');
     btn.type = 'button';
     btn.addEventListener('click', function () {
-      confirmAction(textOf(card.confirmation_id), true, factorValue());
+      confirmAction(cid, true, factorValue());
     });
     box.appendChild(btn);
     appendNode(box);
@@ -3897,7 +4373,11 @@
       (waiting.length ? waiting.length + ' 个还在等你确认。' : '没有待确认的操作。'), 'restore');
     bxRenderPlanNodes(nodes);
     bxMarkSeen(nodes);
+    /* 刷新后默认落在「财务总览」。若还有待确认的卡，必须把用户带回 AI 助手：
+       否则卡片被画在隐藏视图里，用户只看到总览页「待处理的授权」一行，点进来看不见金额与收款人。 */
+    if (waiting.length) { bxSetView('assistant'); }
     waiting.forEach(bxRenderPendingCard);
+    if (waiting.length) { scrollChat(); }
     if (bxIsObj(data) && data.balance_fen !== undefined && data.balance_fen !== null) {
       appendBubble('sys', '服务端当前余额：' + pfYuanFromFen(data.balance_fen) + ' 元（后端原文，不是前端推算）。');
     }

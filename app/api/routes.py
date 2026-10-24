@@ -24,27 +24,34 @@ from typing import Any, Final
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import FileResponse, StreamingResponse
 
+import app.plans as plans
 import app.proactive as proactive
+import app.suitability as suitability
 from app import audit, clock, db
 from app.api.schemas import (
     AlertResolveRequest,
     CancelRequest,
     MonitorRunRequest,
+    PlanCreate,
+    PlanRunRequest,
+    PlanUpdate,
     ResetRequest,
     SavingsGoalCreate,
     SavingsGoalUpdate,
     SimulatedExpenseRequest,
+    SuitabilityAssessRequest,
 )
 from app.clock import BankError, InsufficientFunds, ValidationError
 from app.ids import new_id
 from app.llm import LLMError, build_adapter
-from app.models import ChatRequest, ConfirmRequest
+from app.models import Action, ChatRequest, ConfirmRequest, Decision, FactorChallengeRequest
 from app.money import fen_to_yuan_str
 from app.planner import dag as planner_dag
-from app.planner import executor, intent, payment_guard, ticker
+from app.planner import events as planner_events
+from app.planner import executor, intent, payment_guard, recover, ticker
 from app.planner.clarify import augment as augment_clarification
 from app.planner.clarify import forget as forget_clarification
-from app.security import api_auth
+from app.security import api_auth, factors
 from app.tools.registry import TOOL_NAMES, tool_schemas
 
 log = logging.getLogger(__name__)
@@ -344,15 +351,131 @@ async def confirm(request: ConfirmRequest) -> dict[str, Any]:
         request.confirmation_id,
         request.approve,
         factor=request.factor,
+        proofs=[item.model_dump() for item in (request.proofs or [])],
     )
     _remember(request.session_id, "user", "确认" if request.approve else "取消")
     return result
+
+
+def _mask_phone(phone: str | None) -> str | None:
+    """手机号只在验证提示里露出后四位，别把完整号码回给前端。"""
+    if not phone:
+        return None
+    text = str(phone)
+    if len(text) <= 7:
+        return "*" * len(text)
+    return text[:3] + "****" + text[-4:]
+
+
+@router.post("/api/factor/challenge")
+async def factor_challenge(request: FactorChallengeRequest) -> dict[str, Any]:
+    """签发多因子挑战：真正的放行依据在服务端，前端只拿得到挑战号和一次验证码。"""
+    with _conn() as conn:
+        row = conn.execute(
+            "SELECT * FROM confirmations WHERE id = ? AND session_id = ?",
+            (request.confirmation_id, request.session_id),
+        ).fetchone()
+        if row is None:
+            raise ValidationError("确认不存在或已过期", confirmation_id=request.confirmation_id)
+        if str(row["status"]) != "pending":
+            raise ValidationError("这张确认已经处理过了", status=str(row["status"]))
+        if int(row["expires_ms"]) <= clock.now_ms():
+            raise ValidationError("这张确认已经过期了", confirmation_id=request.confirmation_id)
+        node = conn.execute(
+            "SELECT * FROM dag_nodes WHERE run_id = ? AND node_id = ?",
+            (row["run_id"], row["node_id"]),
+        ).fetchone()
+        decision = json.loads((node["decision_json"] if node else None) or "{}")
+        required = [str(item) for item in (decision.get("required_factors") or [])]
+        if request.factor:
+            if request.factor not in required:
+                raise ValidationError("这一步不需要这个验证因子", factor=request.factor)
+            required = [request.factor]
+        user = conn.execute("SELECT phone FROM users ORDER BY id LIMIT 1").fetchone()
+        target = _mask_phone(user["phone"] if user else None)
+        with db.tx(conn):
+            challenges = [
+                factors.issue(
+                    conn,
+                    session_id=request.session_id,
+                    confirmation_id=request.confirmation_id,
+                    factor=factor,
+                    target=target,
+                )
+                for factor in required
+            ]
+    return {
+        "ok": True,
+        "confirmation_id": request.confirmation_id,
+        "required": required,
+        "challenges": challenges,
+        "note": "验证码由服务端签发、服务端校验、只能用一次；演示环境直接回显，真实环境走短信/人脸网关。",
+    }
+
+
+@router.post("/api/session/{session_id}/recover")
+async def recover_session(session_id: str) -> dict[str, Any]:
+    """服务重启后接着跑：库里有记录就能恢复，不用用户重说一遍。"""
+    return await recover.resume(session_id)
 
 
 @router.post("/api/cancel")
 async def cancel(request: CancelRequest) -> dict[str, Any]:
     """中途取消：释放全部预授权，整轮 DAG 标 cancelled。"""
     return await executor.cancel(request.session_id, request.reason)
+
+
+def _card_view(conn: Any, row: Any) -> dict[str, Any]:
+    """一条确认记录 → 前端能直接渲染的卡片。
+
+    刷新页面时服务端如果只回确认号，用户就得在看不见金额和收款人的情况下再签一次字。
+    所以这里把 action_json 与 dag_nodes.decision_json 重新拼回一张完整的卡：
+    字段和第一次推送时是同一套（planner.events.confirmation_frame），不是另写一份文案。
+    历史数据解析不出来时 card 为 None，前端退回「只有确认号」的提示，不假装能签字。
+    """
+    item: dict[str, Any] = {
+        "confirmation_id": str(row["id"]),
+        "node_id": str(row["node_id"]),
+        "status": str(row["status"]),
+        "expires_ms": int(row["expires_ms"]),
+        "expired": int(row["expires_ms"]) <= clock.now_ms(),
+        "card": None,
+    }
+    try:
+        action = Action.model_validate_json(row["action_json"])
+        node = conn.execute(
+            "SELECT tool, decision_json FROM dag_nodes WHERE run_id = ? AND node_id = ?",
+            (row["run_id"], row["node_id"]),
+        ).fetchone()
+        raw = (node["decision_json"] if node else None) or ""
+        if not raw:
+            return item
+        saved = json.loads(raw)
+        # 老数据里只有 level/rule_id/required_factors（当时没存理由），缺的键补空串，
+        # 不要用严格模型校验把整张卡判死；理由缺了就退回「看执行记录」的指引。
+        decision = Decision(
+            level=str(saved.get("level") or "yellow"),
+            rule_id=str(saved.get("rule_id") or ""),
+            reason_code=str(saved.get("reason_code") or ""),
+            reason_text=str(saved.get("reason_text") or ""),
+            required_factors=[str(factor) for factor in (saved.get("required_factors") or [])],
+            limit_fen=saved.get("limit_fen"),
+            spent_today_fen=saved.get("spent_today_fen"),
+        )
+        remaining = int(row["expires_ms"]) - clock.now_ms()
+        item["card"] = planner_events.confirmation_frame(
+            conn,
+            confirmation_id=str(row["id"]),
+            node_id=str(row["node_id"]),
+            tool=str(node["tool"]),
+            action=action,
+            decision=decision,
+            expires_in_s=max(0, remaining // 1000),
+            status=str(row["status"]),
+        )
+    except Exception:  # noqa: BLE001 - 历史数据缺字段：宁可只回确认号，也不编卡片
+        return item
+    return item
 
 
 @router.get("/api/session/{session_id}")
@@ -376,12 +499,9 @@ async def session(session_id: str) -> dict[str, Any]:
                 (session_id,),
             )
         ]
-        cards = [
-            {"confirmation_id": row["id"], "node_id": row["node_id"], "status": row["status"]}
-            for row in conn.execute(
-                "SELECT * FROM confirmations WHERE session_id = ? ORDER BY created_ms", (session_id,)
-            )
-        ]
+        cards = [_card_view(conn, row) for row in conn.execute(
+            "SELECT * FROM confirmations WHERE session_id = ? ORDER BY created_ms", (session_id,)
+        )]
         balance = conn.execute(
             "SELECT balance_fen FROM accounts ORDER BY CASE type WHEN 'debit' THEN 0 ELSE 1 END, id LIMIT 1"
         ).fetchone()
@@ -540,6 +660,31 @@ async def update_savings_goal(goal_id: str, request: SavingsGoalUpdate) -> dict[
     }
 
 
+@router.get("/api/investment/suitability")
+async def get_suitability() -> dict[str, Any]:
+    """读风险测评画像；没测过时把 5 道题一起给前端，用户不用先问一遍。"""
+    with _conn() as conn:
+        user_id = proactive.default_user_id(conn)
+        profile = suitability.load(conn, user_id)
+    return {
+        "ok": True,
+        "assessed": profile is not None,
+        "profile": profile,
+        "questions": suitability.QUESTIONS,
+        "level_bands": suitability.LEVEL_BANDS,
+        "disclaimer": "演示用简化问卷，不是监管口径的正式风险评估；不构成投资建议。",
+    }
+
+
+@router.post("/api/investment/suitability")
+async def assess_suitability(request: SuitabilityAssessRequest) -> dict[str, Any]:
+    """提交 5 题答案：算分、落画像、写一条 suitability.assessed 审计。"""
+    with _conn() as conn, db.tx(conn):
+        user_id = proactive.default_user_id(conn)
+        profile = suitability.save(conn, user_id, request.answers)
+    return {"ok": True, "profile": profile}
+
+
 @router.post("/api/proactive/monitor/run")
 async def run_proactive_monitor(request: MonitorRunRequest | None = None) -> dict[str, Any]:
     """手动触发一次监测（可重复）：只写提醒与运行记录，不动一分钱。"""
@@ -581,6 +726,76 @@ async def resolve_proactive_alert(
         "idempotent": bool(resolved.get("idempotent", False)),
         "audit_seq": resolved["audit_seq"],
     }
+
+
+@router.post("/api/plans")
+async def create_plan(request: PlanCreate) -> dict[str, Any]:
+    """建跨场景计划：步骤落库，后台节拍按到点时间推进（资金动作只提醒、不代扣）。"""
+    with _conn() as conn:
+        user_id = proactive.default_user_id(conn)
+        created = plans.create(
+            conn,
+            user_id=user_id,
+            title=request.title,
+            steps=[item.model_dump() for item in request.steps],
+            meta=request.meta,
+        )
+    return {"ok": True, "plan": created}
+
+
+@router.get("/api/plans")
+async def list_plans(status: str | None = None, limit: int = 20) -> dict[str, Any]:
+    """计划列表：默认只看当前用户的计划，status=all 时连已完成/已取消一起给。"""
+    if limit < 1 or limit > plans.MAX_LIMIT:
+        raise ValidationError("limit 超出范围", field="limit", minimum=1, maximum=plans.MAX_LIMIT)
+    with _conn() as conn:
+        user_id = proactive.default_user_id(conn)
+        items = plans.list_plans(
+            conn,
+            user_id=user_id,
+            status=None if status in (None, "", "all") else str(status),
+            limit=limit,
+        )
+    return {"ok": True, "plans": items, "count": len(items), "boundary": plans.ACTION_BOUNDARY}
+
+
+@router.get("/api/plans/{plan_id}")
+async def get_plan(plan_id: str) -> dict[str, Any]:
+    """单个计划 + 每一步的状态。"""
+    with _conn() as conn:
+        found = plans.view_plan(conn, plan_id)
+    if found is None:
+        raise NotFound()
+    return {"ok": True, "plan": found}
+
+
+@router.patch("/api/plans/{plan_id}")
+async def update_plan(plan_id: str, request: PlanUpdate) -> dict[str, Any]:
+    """改计划：标题、状态（用来取消/暂停）、还没跑过的步骤。"""
+    fields = request.model_dump(exclude_unset=True)
+    steps = fields.get("steps")
+    with _conn() as conn:
+        user_id = proactive.default_user_id(conn)
+        updated = plans.update(
+            conn,
+            plan_id,
+            user_id=user_id,
+            title=fields.get("title"),
+            status=fields.get("status"),
+            steps=steps,
+        )
+    if updated is None:
+        raise NotFound()
+    return {"ok": True, "plan": updated}
+
+
+@router.post("/api/plans/run")
+async def run_plans(request: PlanRunRequest | None = None) -> dict[str, Any]:
+    """手动推进到点的计划步骤（演示现场想立刻看到推进时用，等价于后台那次节拍）。"""
+    target = request.plan_id if request is not None else None
+    with _conn() as conn:
+        result = plans.run_due(conn, plan_id=target)
+    return {"ok": True, "executed": result["executed"], "count": result["count"]}
 
 
 @router.post("/api/proactive/simulate/expense")

@@ -8,18 +8,24 @@
    到点执行凭这条记录放行，不被当日额度线拦死；
 3. 当日额度不够不算失败：这笔让出今天、顺延到下一个自然日，status 仍是 scheduled，
    审计写 scheduled.deferred；顺延有上限（MAX_DEFERRALS），超过上限才明确失败；
-4. 取消只对还没执行的预约生效，已执行的只能靠冲正（reverse_transfer）。
+4. 取消只对还没执行的预约生效，已执行的只能靠冲正（reverse_transfer）；
+5. 一次执行先抢**租约**（claim_token + claimed_ms），抢不到就跳过：两个进程同时 tick、
+   或者同一进程重入，都只会有一个真的动钱；持有者中途崩掉，租约过期后由下一轮接管；
+6. 创建期验过的因子**有保质期**（AUTH_TTL_MS，30 天）：过期后这笔不再享受「越额度放行」，
+   回到普通额度口径排队（额度不够就顺延）。验过的人脸不能当永久通行证。
 
-执行由 app/scheduler.py 负责，它是一个系统时钟驱动的受信组件，
+执行由 app/planner/ticker.py 的节拍器负责，它是一个系统时钟驱动的受信组件，
 不经模型、也不经意图层——令牌在这里由系统自己签发并留 token.issued 审计。
 这是全仓唯一的自签令牌例外：写工具的令牌本该由 planner 签，但到点执行没有 planner 在场。
 """
 
 from __future__ import annotations
 
+import calendar
 import datetime
 import logging
 import sqlite3
+import uuid
 from typing import Any, Final
 
 import app.audit as audit  # noqa: PLR0402
@@ -50,6 +56,10 @@ MAX_SCHEDULE_AHEAD_MS: Final[int] = 366 * 24 * 3600 * 1000
 SCHEDULED_TEXT: Final[str] = "已经帮你记下了，到时间会自动转。"
 # 当日额度不够时的顺延上限：最多让 7 天，还排不进去就明确失败，不能无限期挂着。
 MAX_DEFERRALS: Final[int] = 7
+# 领取租约：一轮执行最多占这么久，超时视为持有者已崩、允许下一轮接管
+CLAIM_LEASE_MS: Final[int] = 10 * 60 * 1000
+# 创建期因子验证的保质期：过期后不再放行当日额度线，回到普通口径
+AUTH_TTL_MS: Final[int] = 30 * 24 * 3600 * 1000
 
 
 def _new_id(prefix: str) -> str:
@@ -216,9 +226,50 @@ def execute_due(
     ).fetchall()
     done: list[dict[str, Any]] = []
     for row in rows:
-        result = _execute_one(conn, row, stamp, secret)
+        sched_id = str(row["id"])
+        token = _claim(conn, sched_id, stamp)
+        if token is None:
+            # 另一个进程/线程刚抢走（或正持有租约）：这一轮什么都不做，下一轮再看。
+            log.info("scheduled.claim_skipped id=%s", sched_id)
+            done.append({"scheduled_id": sched_id, "status": "skipped",
+                         "reason": "CLAIMED_BY_ANOTHER_WORKER"})
+            continue
+        try:
+            result = _execute_one(conn, row, stamp, secret)
+        finally:
+            _release_claim(conn, sched_id, token)
         done.append(result)
     return done
+
+
+def _claim(conn: sqlite3.Connection, sched_id: str, stamp: int) -> str | None:
+    """原子抢租约；抢到返回 token，抢不到返回 None。
+
+    用一条 UPDATE … WHERE 拿行锁：SQLite 里同一行只有一个写者能成功，rowcount 就是裁决结果。
+    判断条件里带上 status='scheduled'，所以别人刚取消/刚执行完的行不会被抢到；
+    租约过期（claimed_ms 太旧）说明持有者死了，允许接管。
+    """
+    token = uuid.uuid4().hex[:12]
+    with _tx(conn):
+        cur = conn.execute(
+            "UPDATE scheduled_transfers SET claim_token = ?, claimed_ms = ?"
+            " WHERE id = ? AND status = 'scheduled'"
+            " AND (claim_token = '' OR claimed_ms <= ?)",
+            (token, stamp, sched_id, stamp - CLAIM_LEASE_MS),
+        )
+        if cur.rowcount != 1:
+            return None
+    return token
+
+
+def _release_claim(conn: sqlite3.Connection, sched_id: str, token: str) -> None:
+    """放掉租约（只放自己那把，别把别人刚抢到的清掉）。"""
+    with _tx(conn):
+        conn.execute(
+            "UPDATE scheduled_transfers SET claim_token = '', claimed_ms = 0"
+            " WHERE id = ? AND claim_token = ?",
+            (sched_id, token),
+        )
 
 
 def _execute_one(
@@ -237,7 +288,21 @@ def _execute_one(
     sched_id = str(row["id"])
     payee_id = str(row["payee_id"])
     amount_fen = int(row["amount_fen"])
-    verified = int(row["factor_verified_ms"] or 0) > 0
+    verified_at = int(row["factor_verified_ms"] or 0)
+    verified = verified_at > 0 and (stamp - verified_at) <= AUTH_TTL_MS
+    if verified_at > 0 and not verified:
+        # 验过的人脸不是永久通行证：超过 AUTH_TTL_MS 就不再放行当日额度线。
+        # 不直接判失败——这笔预约本身还有效，只是回到普通额度口径排队。
+        with _tx(conn):
+            audit.append(
+                conn,
+                "scheduled.auth_expired",
+                {"scheduled_id": sched_id, "verified_ms": verified_at,
+                 "age_days": round((stamp - verified_at) / 86400000, 1),
+                 "ttl_days": round(AUTH_TTL_MS / 86400000, 1)},
+                session_id=f"sched:{sched_id}",
+            )
+        log.warning("scheduled.auth_expired id=%s age_ms=%s", sched_id, stamp - verified_at)
     action = build_action(
         "scheduled_transfer",
         {"payee_id": payee_id, "amount_fen": amount_fen, "due_ms": int(row["due_ms"])},
@@ -300,8 +365,19 @@ def _execute_one(
 
 
 def _next_month_ms(due_ms: int) -> int:
-    """按月重复的下一期：固定 30 天，演示场景够用，不做日历月推算。"""
-    return due_ms + 30 * 24 * 3600 * 1000
+    """按月重复的下一期：按日历月推进，日期不存在就钳到当月最后一天。
+
+    以前是固定 +30 天，1 月 31 日的月付会漂到 3 月 2 日、直接跳过 2 月；
+    真实的月付是「每月同一天」，2 月没有 31 号就落在 28/29 号。
+    时间用本地墙上时间再折回时间戳，和 _next_day_ms 同一套口径。
+    """
+    local = datetime.datetime.fromtimestamp(due_ms / 1000)
+    year, month = local.year, local.month + 1
+    if month > 12:
+        year, month = year + 1, month - 12
+    last_day = calendar.monthrange(year, month)[1]
+    nxt = local.replace(year=year, month=month, day=min(local.day, last_day))
+    return int(nxt.timestamp() * 1000)
 
 
 def _next_day_ms(due_ms: int) -> int:

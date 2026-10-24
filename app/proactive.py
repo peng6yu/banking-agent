@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 import json
+import os
 import time
 from datetime import date
 from typing import Any, Final
@@ -47,6 +48,17 @@ MAX_LOOKBACK_MONTHS: Final[int] = 24
 
 # 单笔上限 100 万，目标金额允许到 1 亿（竞赛演示够用，且仍在 int 安全区）。
 MAX_TARGET_FEN: Final[int] = 100_000_000_00
+
+# 后台监测的节流：同一个目标最多每 6 小时被节拍器唤起一次。
+# 为什么不是每分钟：目标是月度口径，检查得再密也不会多出信息，只会多出重复提醒。
+MONITOR_INTERVAL_ENV: Final[str] = "PROACTIVE_MONITOR_MS"
+DEFAULT_MONITOR_INTERVAL_MS: Final[int] = 6 * 60 * 60 * 1000
+MIN_MONITOR_INTERVAL_MS: Final[int] = 60 * 1000
+
+# 监测的触发来源，写进 monitor_runs.trigger 与审计：手动点和后台跑必须能分开看。
+TRIGGER_MANUAL: Final[str] = "manual"
+TRIGGER_SCHEDULER: Final[str] = "scheduler"
+MONITOR_TRIGGERS: Final[tuple[str, ...]] = (TRIGGER_MANUAL, TRIGGER_SCHEDULER)
 
 DEFAULT_PROGRESS_TOLERANCE: Final[int] = 10
 MAX_PROGRESS_TOLERANCE: Final[int] = 100
@@ -900,6 +912,7 @@ def alert_view(row) -> dict[str, Any]:
         "created_ms": int(row["created_ms"]),
         "status": str(row["status"]),
         "resolved_ms": int(resolved) if resolved is not None else None,
+        "user_id": str(_get(row, "user_id", "")) or None,
     }
 
 
@@ -921,8 +934,9 @@ def list_alerts(
         clause += " AND a.goal_id = ?"
         args.append(str(goal_id))
     if user_id:
-        clause += " AND g.user_id = ?"
-        args.append(str(user_id))
+        # 两种归属都要认：目标提醒挂在 goal 上，计划提醒没有 goal，只能靠 a.user_id。
+        clause += " AND (a.user_id = ? OR g.user_id = ?)"
+        args.extend([str(user_id), str(user_id)])
     args.append(max(1, min(int(limit), MAX_LIMIT)))
     sql = (
         "SELECT a.* FROM proactive_alerts a LEFT JOIN savings_goals g ON g.id = a.goal_id"
@@ -956,11 +970,14 @@ def resolve_alert(
         return None
     if user_id:
         owner = conn.execute(
-            "SELECT g.user_id FROM proactive_alerts a LEFT JOIN savings_goals g ON g.id = a.goal_id"
-            " WHERE a.id = ?",
+            "SELECT a.user_id AS direct, g.user_id AS via_goal FROM proactive_alerts a"
+            " LEFT JOIN savings_goals g ON g.id = a.goal_id WHERE a.id = ?",
             (str(alert_id),),
         ).fetchone()
-        if owner is None or (owner["user_id"] and str(owner["user_id"]) != str(user_id)):
+        if owner is None:
+            return None
+        names = {str(value) for value in (owner["direct"], owner["via_goal"]) if value}
+        if names and str(user_id) not in names:
             return None
     target_status = "ignored" if act == "ignore" else "resolved"
     if str(row["status"]) != "open":
@@ -1031,6 +1048,49 @@ def _period_end(period: str, day: date) -> date:
     if start.month == 12:
         return date(start.year + 1, 1, 1)
     return date(start.year, start.month + 1, 1)
+
+
+def create_alert(
+    conn,
+    *,
+    goal_id: str | None,
+    reason: str,
+    evidence: dict[str, Any],
+    suggestion: str = "",
+    rule_id: str | None = None,
+    user_id: str | None = None,
+    now: int | None = None,
+) -> str:
+    """插一条待处理提醒，返回 alert_id（调用方负责事务）。
+
+    给 app/plans.py 复用：计划提醒和「到期要你确认的资金动作」都落在 proactive_alerts 里，
+    这样界面上「提醒」只有一个口径，不会出现两个来源各说各的。
+    """
+    stamp = now_ms() if now is None else int(now)
+    alert_id = new_id("pa")
+    owner = str(user_id or "")
+    if not owner and goal_id:
+        row = conn.execute(
+            "SELECT user_id FROM savings_goals WHERE id = ?", (str(goal_id),)
+        ).fetchone()
+        owner = str(row["user_id"]) if row is not None else ""
+    conn.execute(
+        "INSERT INTO proactive_alerts"
+        " (id, goal_id, rule_id, reason, evidence_json, suggestion, created_ms, status,"
+        "  resolved_ms, user_id)"
+        " VALUES (?, ?, ?, ?, ?, ?, ?, 'open', NULL, ?)",
+        (
+            alert_id,
+            goal_id,
+            rule_id,
+            reason,
+            json.dumps(evidence or {}, ensure_ascii=False, sort_keys=True),
+            suggestion,
+            stamp,
+            owner,
+        ),
+    )
+    return alert_id
 
 
 def _alert_exists(conn, goal_id: str, rule_id: str | None, reason: str, since_ms: int) -> bool:
@@ -1227,8 +1287,12 @@ def run_monitor(
     goal_id: str | None = None,
     session_id: str | None = None,
     task_id: str | None = None,
+    trigger: str = TRIGGER_MANUAL,
 ) -> dict[str, Any]:
-    """手动触发一次监测（可重复）：读目标与交易 → 产出提醒 → 记运行与审计。
+    """跑一次监测（可重复）：读目标与交易 → 产出提醒 → 记运行与审计。
+
+    trigger 区分「用户点按钮」和「后台节拍器」，两者都走同一条路径，
+    但审计与 monitor_runs 里必须能分开看到底是谁触发的。
 
     不写 accounts/transactions：只新增 proactive_alerts 与 monitor_runs 两类行。
     失败时回滚整轮提醒并落一条 status='failed' 的运行记录，不假装成功。
@@ -1318,8 +1382,8 @@ def run_monitor(
             finished = monitor_now(conn)
             conn.execute(
                 "INSERT INTO monitor_runs"
-                " (id, started_ms, finished_ms, status, alerts_created, detail)"
-                " VALUES (?, ?, ?, 'ok', ?, ?)",
+                " (id, started_ms, finished_ms, status, alerts_created, detail, trigger)"
+                " VALUES (?, ?, ?, 'ok', ?, ?, ?)",
                 (
                     run_id,
                     stamp,
@@ -1327,6 +1391,7 @@ def run_monitor(
                     len(created),
                     f"goals={len(goals)};rules={rules_checked};"
                     f"expired_skipped={skipped_expired}",
+                    trigger,
                 ),
             )
             seq = audit.append(
@@ -1338,7 +1403,7 @@ def run_monitor(
                     "goals_checked": len(goals),
                     "rules_checked": rules_checked,
                     "alerts_created": len(created),
-                    "trigger": "manual",
+                    "trigger": trigger,
                 },
                 session_id=session_id,
                 task_id=task_id,
@@ -1365,9 +1430,9 @@ def run_monitor(
             with db.tx(conn):
                 conn.execute(
                     "INSERT INTO monitor_runs"
-                    " (id, started_ms, finished_ms, status, alerts_created, detail)"
-                    " VALUES (?, ?, ?, 'failed', 0, ?)",
-                    (run_id, stamp, finished, detail),
+                    " (id, started_ms, finished_ms, status, alerts_created, detail, trigger)"
+                    " VALUES (?, ?, ?, 'failed', 0, ?, ?)",
+                    (run_id, stamp, finished, detail, trigger),
                 )
         except Exception:  # noqa: BLE001 - 落不下失败记录只能记日志，不能再上抛
             log.warn("monitor.run_record_failed", run_id=run_id, detail=detail)
@@ -1383,7 +1448,7 @@ def run_monitor(
                         "rules_checked": rules_checked,
                         "alerts_created": 0,
                         "detail": detail,
-                        "trigger": "manual",
+                        "trigger": trigger,
                     },
                     session_id=session_id,
                     task_id=task_id,
@@ -1416,9 +1481,94 @@ def list_runs(conn, limit: int = DEFAULT_LIMIT) -> list[dict[str, Any]]:
             "status": str(row["status"]),
             "alerts_created": int(row["alerts_created"]),
             "detail": str(row["detail"]),
+            "trigger": str(row["trigger"]),
+            "trigger_label": "后台节拍" if str(row["trigger"]) == TRIGGER_SCHEDULER else "手动触发",
         }
         for row in rows
     ]
+
+
+def monitor_interval_ms() -> int:
+    """两次自动监测之间的最小间隔；非法值退回默认，最小 1 分钟。"""
+    raw = os.getenv(MONITOR_INTERVAL_ENV, "").strip()
+    if not raw:
+        return DEFAULT_MONITOR_INTERVAL_MS
+    try:
+        value = int(raw)
+    except ValueError:
+        log.warn("proactive.bad_monitor_interval", raw=raw)
+        return DEFAULT_MONITOR_INTERVAL_MS
+    return max(value, MIN_MONITOR_INTERVAL_MS)
+
+
+def run_due_monitors(
+    conn,
+    *,
+    now: int | None = None,
+    interval_ms: int | None = None,
+) -> dict[str, Any]:
+    """后台节拍器调用：只监测「用户显式打开监测开关」的目标。
+
+    三条边界，缺一条就会变成偷偷摸摸的管家：
+    1. 没打开监测的目标一律不碰（monitor_rules.enabled 必须有一个是 1）；
+    2. 同一个目标按 PROACTIVE_MONITOR_MS 节流，last_monitored_ms 落库，
+       所以进程重启也不会把同一小时重复算一遍；
+    3. 只写提醒与运行记录，不动钱。
+    """
+    stamp = int(now) if now is not None else monitor_now(conn)
+    interval = monitor_interval_ms() if interval_ms is None else max(int(interval_ms), 0)
+    goals = _goal_rows(conn, status="active", limit=MAX_LIMIT)
+    due: list[str] = []
+    skipped_no_rule = 0
+    skipped_throttled = 0
+    for row in goals:
+        enabled = [
+            rule for rule in rules_for_goal(conn, str(row["id"]), enabled_only=True)
+        ]
+        if not enabled:
+            skipped_no_rule += 1
+            continue
+        last = int(_int_field(row, "last_monitored_ms", 0))
+        if last and stamp - last < interval:
+            skipped_throttled += 1
+            continue
+        due.append(str(row["id"]))
+
+    runs: list[dict[str, Any]] = []
+    failed = 0
+    for goal_id in due:
+        try:
+            run = run_monitor(conn, goal_id=goal_id, trigger=TRIGGER_SCHEDULER)
+        except Exception as exc:  # noqa: BLE001 - 一个目标炸了不能拖垮整轮
+            failed += 1
+            log.warn(
+                "proactive.monitor_failed",
+                goal_id=goal_id,
+                detail=f"{type(exc).__name__}: {exc}"[:200],
+            )
+            continue
+        runs.append(run)
+        if run.get("status") == "ok":
+            with db.tx(conn):
+                conn.execute(
+                    "UPDATE savings_goals SET last_monitored_ms = ? WHERE id = ?",
+                    (stamp, goal_id),
+                )
+        else:
+            failed += 1
+
+    return {
+        "checked": len(due),
+        "runs": runs,
+        "alerts_created": sum(int(r.get("alerts_created") or 0) for r in runs),
+        "failed": failed,
+        "skipped_no_rule": skipped_no_rule,
+        "skipped_throttled": skipped_throttled,
+        "trigger": TRIGGER_SCHEDULER,
+        "interval_ms": interval,
+        "now_ms": stamp,
+        "note": "只监测用户打开监测开关的目标；同一目标按间隔节流；不动钱。",
+    }
 
 
 __all__ = [
@@ -1449,6 +1599,7 @@ __all__ = [
     "budget_deviation",
     "compute_savings_plan",
     "count_open_alerts",
+    "create_alert",
     "create_goal",
     "days_remaining",
     "dedupe_transactions",
@@ -1460,8 +1611,12 @@ __all__ = [
     "list_goals",
     "list_runs",
     "local_date",
-    "month_key",
+    "monitor_interval_ms",
     "monitor_now",
+    "run_due_monitors",
+    "MONITOR_INTERVAL_ENV",
+    "TRIGGER_MANUAL",
+    "TRIGGER_SCHEDULER",
     "parse_target_date",
     "periods_remaining",
     "recent_months",

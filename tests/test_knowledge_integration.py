@@ -313,10 +313,15 @@ def test_bare_surname_payee_asks_which_person() -> None:
 
 
 def test_unbound_role_word_payee_asks_who() -> None:
-    """C042「转500给我同事」：角色词不是收款人。"""
+    """C042「转500给我同事」：角色词不是收款人。
+
+    2026-10-24 起，这一条在 payment_guard 就被拦下了（vague_payee），比先去查一遍
+    「同事」再回「还没登记成收款人」更直接：角色词本来就不该当成姓名去查。
+    """
     result = parse("转500给我同事", Scripted([_transfer_args(payee_name="同事")]))
     assert result.ok is False
-    assert "还没有登记成收款人" in result.question
+    assert result.guard_reason == "vague_payee"
+    assert "不够具体" in result.question
 
 
 def test_two_transfers_in_one_sentence_are_not_silently_truncated() -> None:

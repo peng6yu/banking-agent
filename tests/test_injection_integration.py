@@ -24,6 +24,7 @@ from typing import Any
 
 import pytest
 
+from tests import mfa
 from app import audit, db
 from app.ids import new_id
 from app.models import Dag, DAGNode
@@ -108,7 +109,10 @@ def drive(dag: Dag) -> list[tuple[str, dict[str, Any]]]:
                         if conf.status != "pending" or conf.id in handled:
                             continue
                         handled.add(conf.id)
-                        await executor.resume(SESSION, conf.id, True, factor="face,sms")
+                        await executor.resume(
+                            SESSION, conf.id, True, factor="face,sms",
+                            proofs=mfa.solve(SESSION, conf.id, list(conf.required_factors)),
+                        )
                 await asyncio.sleep(0.005)
 
         task = asyncio.create_task(executor.run(SESSION, dag, emit, secret=SECRET, confirm_timeout_ms=5_000))

@@ -108,13 +108,87 @@ class SimulatedExpenseRequest(BaseModel):
     note: str | None = Field(default=None, max_length=60)
 
 
+class SuitabilityAssessRequest(BaseModel):
+    """POST /api/investment/suitability 的入参：5 道题的题号 -> 选项值。
+
+    选项值由 app/suitability.py 的 QUESTIONS 定义；写成宽松 dict 是为了让
+    "答错题号/选项不存在" 由业务层给出人话错误，而不是 Pydantic 的英文报错。
+    """
+
+    model_config = ConfigDict(extra="forbid", title="风险测评答案")
+
+    answers: dict[str, str] = Field(min_length=1, max_length=10)
+
+
+class PlanStepIn(BaseModel):
+    """计划里的一步：检查条件 / 提醒 / 资金动作。
+
+    action 步只登记「要做什么」，不在后台执行——执行入口永远是助手的确认卡片。
+    """
+
+    model_config = ConfigDict(extra="forbid", title="计划步骤")
+
+    kind: Literal["check", "action", "reminder"]
+    title: str = Field(min_length=1, max_length=60)
+    payload: dict = Field(default_factory=dict)
+    due_ms: int | None = Field(default=None, ge=0)
+    due_in_ms: int | None = Field(default=None, ge=0)
+    max_attempts: int | None = Field(default=None, ge=1, le=10)
+
+
+class PlanStepPatch(BaseModel):
+    """PATCH 计划时改某一步；只能改还没跑过的（pending）步骤。"""
+
+    model_config = ConfigDict(extra="forbid", title="计划步骤修改")
+
+    seq: int = Field(ge=1)
+    title: str | None = Field(default=None, min_length=1, max_length=60)
+    payload: dict | None = None
+    due_ms: int | None = Field(default=None, ge=0)
+    max_attempts: int | None = Field(default=None, ge=1, le=10)
+
+
+class PlanCreate(BaseModel):
+    """POST /api/plans 的入参。"""
+
+    model_config = ConfigDict(extra="forbid", title="新建计划")
+
+    title: str = Field(min_length=1, max_length=60)
+    steps: list[PlanStepIn] = Field(min_length=1, max_length=12)
+    meta: dict = Field(default_factory=dict)
+
+
+class PlanUpdate(BaseModel):
+    """PATCH /api/plans/{plan_id} 的入参：只改传了的字段。"""
+
+    model_config = ConfigDict(extra="forbid", title="修改计划")
+
+    title: str | None = Field(default=None, min_length=1, max_length=60)
+    status: Literal["active", "paused", "completed", "cancelled", "failed"] | None = None
+    steps: list[PlanStepPatch] | None = None
+
+
+class PlanRunRequest(BaseModel):
+    """POST /api/plans/run 的入参：不传 plan_id 就推进所有到点的计划。"""
+
+    model_config = ConfigDict(extra="forbid", title="手动推进计划")
+
+    plan_id: str | None = Field(default=None, min_length=1)
+
+
 __all__ = [
     "AlertResolveRequest",
     "CancelRequest",
     "MonitorRunRequest",
+    "PlanCreate",
+    "PlanRunRequest",
+    "PlanStepIn",
+    "PlanStepPatch",
+    "PlanUpdate",
     "ResetRequest",
     "SIMULATED_EXPENSE_CATEGORIES",
     "SavingsGoalCreate",
     "SavingsGoalUpdate",
     "SimulatedExpenseRequest",
+    "SuitabilityAssessRequest",
 ]

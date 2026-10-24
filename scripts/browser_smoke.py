@@ -237,11 +237,16 @@ def build_sandbox(dest: Path) -> Path:
     return dest
 
 
-def seed_sandbox(dest: Path) -> None:
-    """在沙箱里播一遍种子：确定性（RANDOM_SEED=20261018），余额回到 12,860.50 元。"""
+def seed_sandbox(dest: Path, *, force: bool = False) -> None:
+    """在沙箱里播一遍种子：确定性（RANDOM_SEED=20261018），余额回到 12,860.50 元。
+
+    force=True 会先清库再播（演示中途要把沙箱恢复到初始状态时用）。
+    """
+    argv = [sys.executable, "-m", "scripts.seed"]
+    if force:
+        argv.append("--force")
     proc = subprocess.run(
-        [sys.executable, "-m", "scripts.seed"],
-        cwd=dest, env=sandbox_env(dest), capture_output=True, text=True,
+        argv, cwd=dest, env=sandbox_env(dest), capture_output=True, text=True,
     )
     if proc.returncode != 0:
         raise SystemExit(f"[沙箱] 播种失败：{proc.stdout[-400:]} / {proc.stderr[-400:]}")

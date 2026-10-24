@@ -21,7 +21,7 @@ import logging
 import os
 from typing import Any, Final
 
-from app import db
+from app import db, plans, proactive
 from app.tools import scheduled
 
 log = logging.getLogger(__name__)
@@ -57,14 +57,47 @@ def run_due_once(now: int | None = None) -> list[dict[str, Any]]:
         conn.close()
 
 
+def run_monitor_once(now: int | None = None) -> dict[str, Any]:
+    """按一次节拍推进主动财务管理（只碰用户开了监测开关的目标）。
+
+    和 run_due_once 分开成两个函数，是因为它们失败互不牵连：
+    预约转账炸了不能让储蓄目标监测跟着停，反过来也一样。
+    """
+    conn = db.connect()
+    try:
+        return proactive.run_due_monitors(conn, now=now)
+    finally:
+        conn.close()
+
+
+def run_plans_once(now: int | None = None) -> dict[str, Any]:
+    """按一次节拍推进跨场景计划（check / reminder 自动走，action 交回用户）。
+
+    和上面两个也分开：计划推进失败不该把预约转账或目标监测一起带停。
+    """
+    conn = db.connect()
+    try:
+        return plans.run_due(conn, now=now)
+    finally:
+        conn.close()
+
+
 async def tick_forever(interval_ms: int) -> None:
-    """按间隔检查到点预约；单次失败只记日志，不停表。"""
+    """按间隔检查到点预约 + 推进主动监测；单次失败只记日志，不停表。"""
     while True:
         await asyncio.sleep(interval_ms / 1000)
         try:
             await asyncio.to_thread(run_due_once)
         except Exception:
             log.exception("ticker.tick_failed")
+        try:
+            await asyncio.to_thread(run_monitor_once)
+        except Exception:
+            log.exception("ticker.monitor_failed")
+        try:
+            await asyncio.to_thread(run_plans_once)
+        except Exception:
+            log.exception("ticker.plans_failed")
 
 
 #: 当前后台节拍任务。保存它只为一件事：让 /api/business/plans 能如实回答
@@ -107,6 +140,8 @@ __all__ = [
     "TICK_ENV",
     "is_started",
     "run_due_once",
+    "run_monitor_once",
+    "run_plans_once",
     "start",
     "stop",
     "tick_forever",

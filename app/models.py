@@ -91,6 +91,16 @@ class ChatRequest(BaseModel):
     text: str = Field(min_length=1, max_length=500)
 
 
+class FactorProof(BaseModel):
+    """一条多因子证明：服务端签发的挑战 + 用户手上的验证码。"""
+
+    model_config = _BASE_CONFIG
+
+    factor: str
+    challenge_id: str
+    code: str
+
+
 class ConfirmRequest(BaseModel):
     """POST /api/confirm 的入参。"""
 
@@ -99,10 +109,25 @@ class ConfirmRequest(BaseModel):
     session_id: str
     confirmation_id: str
     approve: bool
+    #: 历史字段，只表示「用户说自己试了哪几个因子」，不再作为放行依据
+    factor: str | None = None
+    #: 真正的放行依据：每条都是服务端签发、服务端校验、一次性的
+    proofs: list[FactorProof] | None = None
+
+
+class FactorChallengeRequest(BaseModel):
+    """POST /api/factor/challenge 的入参。"""
+
+    model_config = _BASE_CONFIG
+
+    session_id: str
+    confirmation_id: str
     factor: str | None = None
 
 
 __all__ = [
+    "FactorChallengeRequest",
+    "FactorProof",
     "RiskLevel",
     "DecisionType",
     "NodeState",

@@ -32,6 +32,7 @@ from typing import Any
 
 import pytest
 
+from tests import mfa
 from app import audit, db
 from app.models import Dag, DAGNode
 from app.planner import executor
@@ -129,7 +130,10 @@ def drive(dag_obj: Dag, *, confirm_timeout_ms: int = 5_000) -> list[tuple[str, d
                     if conf.status != "pending" or conf.future is None or conf.id in handled:
                         continue
                     handled.add(conf.id)
-                    await executor.resume(SESSION, conf.id, True, factor="face,sms")
+                    await executor.resume(
+                        SESSION, conf.id, True, factor="face,sms",
+                        proofs=mfa.solve(SESSION, conf.id, list(conf.required_factors)),
+                    )
             await asyncio.sleep(0.005)
 
     async def main() -> None:

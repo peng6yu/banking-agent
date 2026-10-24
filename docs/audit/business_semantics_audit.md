@@ -369,6 +369,7 @@
 
 - 请求内：`TOKEN_TTL_MS=120_000` + `CONFIRM_TIMEOUT_MS=120_000`（`state.py:41/35`），超时释放 hold——正确。
 - **跨时间：预约转账的授权永不过期**。`schedule_transfer` 接受最长 366 天后的预约（`scheduled.py:49`），执行时自签令牌（`scheduled.py:240-242`），`factor_verified_ms` 只记录不校验。**一个月前做过的（自称的）人脸+短信，会在一个月后再次生效**，且用户不会收到任何再确认请求。
+  > 2026-10-24 更新：本条已修。`AUTH_TTL_MS = 30 天`，过期不再自签红灯令牌，改为退回 yellow 走当日额度并顺延（`defer_count+1`），同时写 `scheduled.auth_expired`；同日补上 `claim_token/claimed_ms` 领取租约（`CLAIM_LEASE_MS = 10 分钟`）。证据：`tests/test_scheduled_lease.py` 7 条。「多因子仍是自称」这一半另见 `app/security/factors.py`（服务端下发/校验，但渠道仍是桩）。
 
 ### 5.11 结果通知 ⚠️
 

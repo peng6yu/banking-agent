@@ -120,11 +120,14 @@ def test_confirm_card_expires_on_time(bank: Path, monkeypatch: pytest.MonkeyPatc
         ).fetchall()
         kinds = [row["event_type"] for row in rows]
         assert "confirm.requested" in kinds
-        rejected = [
-            row for row in rows if row["event_type"] == "confirm.rejected"
+        expired = [
+            row for row in rows if row["event_type"] == "confirm.expired"
         ]
-        assert rejected, "超时没有留下 confirm.rejected 审计"
-        payload_json = json.loads(rejected[0]["payload_json"])
+        assert expired, "超时没有留下 confirm.expired 审计"
+        assert not [row for row in rows if row["event_type"] == "confirm.rejected"], (
+            "超时不是用户拒绝，不应该记 confirm.rejected"
+        )
+        payload_json = json.loads(expired[0]["payload_json"])
         assert payload_json["reason"] == "TIMEOUT"
         assert payload_json["node_id"] == "n3"
 

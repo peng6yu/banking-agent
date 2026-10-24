@@ -30,6 +30,16 @@ EVENT_TYPES: Final[frozenset[str]] = frozenset(
         "confirm.requested",
         "confirm.approved",
         "confirm.rejected",
+        # 超时和「用户说不」必须分开：以前超时也记成 confirm.rejected，
+        # 事后查审计分不清是用户拒绝还是没人点。
+        "confirm.expired",
+        # 策略拦截既不是「用户拒绝」也不是「超时」：卡被规则作废了，用户没有机会说不。
+        # 单独一类，复盘时能直接数出「被策略挡了多少次」。
+        "policy.blocked",
+        # 多因子：挑战签发、校验通过、校验失败三条都要留痕
+        "factor.challenge_issued",
+        "factor.verified",
+        "factor.rejected",
         "token.issued",
         "token.rejected",
         "transfer.initiated",
@@ -55,9 +65,22 @@ EVENT_TYPES: Final[frozenset[str]] = frozenset(
         # 到点执行真的失败了（钱没转出去）：必须留痕，否则库里只剩一个 failed 状态，
         # 查不出是哪一步炸的，用户问"为什么没转"时答不上来。
         "scheduled.failed",
+    # 创建期验过的因子过了保质期：这笔不再享受越额度放行，回到普通口径排队
+    "scheduled.auth_expired",
         # 模拟支出注入：竞赛演示用的假流水，语义上与真实扣款无关，必须单独一类，
         # 否则审计链里分不清「演示注入」和「工具真的动了钱」。
         "proactive.simulated_expense",
+        # 适当性问卷：画像建立/更新时留痕（买基金前必须先有画像）
+        "suitability.assessed",
+        # 申购前的适配性闸门：没测过 / 等级不够 / 通过，三种结果都要能查
+        "suitability.checked",
+        # 订阅：从流水推断出的潜在订阅（不是已确认事实，audit 里要能区分）
+        "subscription.inferred",
+        # 跨场景计划：计划与步骤的生命周期
+        "plan.created",
+        "plan.updated",
+        "plan.step_done",
+        "plan.step_failed",
         "session.end",
     }
 )

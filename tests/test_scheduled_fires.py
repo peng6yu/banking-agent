@@ -32,6 +32,7 @@ from typing import Any
 import httpx
 import pytest
 
+from tests import mfa
 from app import db
 from app import funds as funds_mod
 from app.api import routes
@@ -197,7 +198,13 @@ def drive(
     async def emit(name: str, data: dict[str, Any]) -> None:
         events.append((name, dict(data)))
         if name in ("confirm", "factor"):
-            await executor.resume(session_id, str(data["confirmation_id"]), True, factor=factor)
+            cid = str(data["confirmation_id"])
+            # factor 没给 = 这个用例故意不回答；这时也不能偷偷把证明补上，
+            # 否则「因子没过就不能落库」这类反证就永远测不出来。
+            await executor.resume(
+                session_id, cid, True, factor=factor,
+                proofs=mfa.solve(session_id, cid) if factor else [],
+            )
 
     asyncio.run(
         executor.run(session_id, dag_obj, emit, confirm_timeout_ms=confirm_timeout_ms)

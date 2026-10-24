@@ -122,9 +122,16 @@ def test_r06_yellow_has_no_extra_factor() -> None:
     assert decision.required_factors == []
 
 
-def test_r07_daily_red_has_two_factors() -> None:
+def test_r07_daily_red_is_a_hard_line_without_factors() -> None:
+    """日累计是监管口径的额度，不是「验个脸就能多花」的门槛。
+
+    多因子只能证明「是你」，不能凭空造出额度；所以 R07 是红牌且不带因子，
+    执行器按 POLICY_BLOCKED 直接拒。单笔超限的 R08 才带 face+sms。
+    """
     decision = decide(transfer_action(20_000), PolicyContext(spent_today_fen=90_000))
-    assert decision.required_factors == ["face", "sms"]
+    assert decision.level == "red"
+    assert decision.required_factors == []
+    assert decision.reason_code == "TRANSFER_DAILY_RED"
     assert decision.spent_today_fen == 90_000
 
 
@@ -363,13 +370,14 @@ def test_red_single_text_asks_for_verification_not_refusal() -> None:
     assert "不能直接做" not in decision.reason_text
 
 
-def test_red_daily_text_asks_for_verification_not_refusal() -> None:
-    """R07 与 R08 同理：日累计越线也是双因子验过就放行，不能说「我先不做」。"""
+def test_red_daily_text_explains_the_quota_instead_of_asking_for_biometrics() -> None:
+    """R07 的文案要说清「今天到顶了、明天会重置」，而不是叫用户去验人脸。"""
     decision = decide(transfer_action(20_000), PolicyContext(spent_today_fen=90_000))
     assert decision.rule_id == "R07_transfer_red_daily"
-    assert "人脸" in decision.reason_text
-    assert "短信" in decision.reason_text
-    assert "我先不做" not in decision.reason_text
+    assert "上限" in decision.reason_text
+    assert "明天" in decision.reason_text
+    assert "人脸" not in decision.reason_text
+    assert "短信" not in decision.reason_text
 
 
 # ---------- 预约转账不吃日线：规则空隙的回归（评审 F1 / t18） ----------
@@ -419,4 +427,5 @@ def test_daily_exemption_is_scoped_to_scheduled_transfer_only() -> None:
     decision = decide(transfer_action(50_000), PolicyContext(spent_today_fen=90_000))
     assert decision.level == "red"
     assert decision.rule_id == "R07_transfer_red_daily"
-    assert set(decision.required_factors) == {"face", "sms"}
+    # 硬线：不带因子，执行器直接拒；带因子会让人误以为「验过就能超」
+    assert decision.required_factors == []

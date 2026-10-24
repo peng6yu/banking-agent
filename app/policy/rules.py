@@ -19,12 +19,14 @@ from app.money import fen_to_yuan_str
 SINGLE_LIMIT_FEN: Final[int] = 100_000
 DAILY_LIMIT_FEN: Final[int] = 100_000
 
-# 权威工具表（docs/06 6.1 + 阶段 5）：只读 12 个 + 写 21 个（已实现），共 33 个。
+# 权威工具表（docs/06 6.1 + 阶段 5/6）：只读 13 个 + 写 22 个（已实现），共 35 个。
 # 只读：基础六件套 + 理财只读两件套 + 定时查询 + 阶段 5 目标/计划/提醒三件套
 # （与写工具分开，R01 才能一条规则覆盖全部查询）
 READONLY_TOOLS: Final[frozenset[str]] = frozenset(
     {"query_balance", "query_transactions", "analyze_bill", "list_subs", "list_cards", "resolve_payee",
      "list_products", "estimate_risk", "list_scheduled",
+     # 阶段 6：风险测评画像的读取是纯查询；提交问卷是黄灯写（见 CONFIRM_ONLY_TOOLS）
+     "get_suitability",
      # 阶段 5：储蓄目标、确定性储蓄计划、主动提醒都是纯查询，不写库
      "list_savings_goals", "compute_savings_plan", "list_proactive_alerts"})
 # 会动钱的写工具：金额进 R06/R07/R08 的分档判定。
@@ -40,7 +42,7 @@ SPEND_TOOLS: Final[frozenset[str]] = frozenset(
 CONFIRM_ONLY_TOOLS: Final[frozenset[str]] = frozenset(
     {"cancel_subscription", "apply_virtual_card", "cancel_scheduled",
      "create_savings_goal", "update_savings_goal", "resolve_proactive_alert",
-     "run_proactive_monitor"}
+     "run_proactive_monitor", "assess_suitability"}
 )
 # 日累计线按「钱真正出账的那一天」判。预约的钱到日子才走，所以创建期只判单笔上限，
 # 日线留到执行那天由 app/tools/scheduled.py 的资金闸门原子地核：撞线就顺延次日（t11）。
@@ -197,12 +199,15 @@ def _emit_yellow_transfer(action: Action, ctx: PolicyContext) -> Decision:
 
 
 def _emit_red_daily(action: Action, ctx: PolicyContext) -> Decision:
-    # R07 与 R08 同属「可验证的红」：因子齐了就能继续，文案不能说「我不做」。
+    # R07 是「硬线」，不是「可验证的红」：日累计是监管意义上的额度，
+    # 验过脸也不能凭空多出额度来。所以这里不挂因子——执行器看到 red 且无因子
+    # 就会直接 POLICY_BLOCKED，用户今天不能再从这个账户转这笔。
+    # 与 R08 的区别：R08 是单笔越线，可以靠双因子做例外放行；R07 不行。
     text = (
-        f"今日已用 {_yuan(ctx.spent_today_fen)}，这笔 {_yuan(_amount(action))} "
-        "会超过日累计线，需要人脸和短信验证后才能继续"
+        f"今天已经转出 {_yuan(ctx.spent_today_fen)}，再转 {_yuan(_amount(action))} "
+        f"会超过日累计 {_yuan(ctx.limit_fen)} 的上限，今天这笔不能转了；明天的额度会重新计算。"
     )
-    return _decision("red", "R07_transfer_red_daily", "TRANSFER_DAILY_RED", text, ctx, ("face", "sms"))
+    return _decision("red", "R07_transfer_red_daily", "TRANSFER_DAILY_RED", text, ctx)
 
 
 def _emit_red_single(action: Action, ctx: PolicyContext) -> Decision:
@@ -324,6 +329,7 @@ RULES: Final[tuple[Rule, ...]] = (
         "R07_transfer_red_daily",
         "red",
         "TRANSFER_DAILY_RED",
+        # 语义：日累计是硬线（no factors => 直接拦），单笔越线（R08）才是可验证的红。
         # spent_today_fen > 0 是守卫：否则「单笔刚过线」的请求会被误判成日累计超限，
         # 与 docs/05 5.1 边界表里 1000.01 -> R08 的要求冲突
         # schedule_transfer 不吃这条：日线归出账那天判（创建期只看今天花了多少，

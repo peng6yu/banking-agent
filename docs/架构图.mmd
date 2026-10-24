@@ -19,12 +19,12 @@ flowchart TD
     end
 
     subgraph L3["③ 执行区 · 只认令牌，不认自然语言"]
-        REG["工具网关 app/tools/registry.py · 33 个工具"]
+        REG["工具网关 app/tools/registry.py · 35 个工具"]
         FND["两阶段资金 app/funds.py · hold 然后 commit"]
-        DB[("SQLite 22 张表 + WAL app/db.py")]
+        DB[("SQLite 26 张表 + WAL app/db.py")]
     end
 
-    AUD["审计哈希链 app/audit.py · 30 类事件 append-only"]
+    AUD["审计哈希链 app/audit.py · 43 类事件 append-only"]
 
     API --> ENV --> INT --> DAG
     DAG -->|"Action 参数已过白名单"| PE

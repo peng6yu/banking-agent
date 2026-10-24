@@ -77,8 +77,20 @@ def test_overview_balance_and_month_totals_come_from_the_database(bank: Path) ->
     assert "账单" in credit["available_note"]
 
     month = data["this_month"]
-    assert month["total_out_fen"] == OCT_OUT_FEN
-    assert month["out_count"] == OCT_OUT_COUNT
+    # 种子数据按「当前时刻」往前铺，所以月度合计会随运行日期变化；
+    # 这里直接拿接口给的窗口回库里对账，而不是写死某一天的快照。
+    window = month["window"]
+    conn = db.connect()
+    try:
+        row = conn.execute(
+            "SELECT COALESCE(SUM(amount_fen), 0) AS total, COUNT(*) AS n FROM transactions"
+            " WHERE account_id = ? AND direction = 'out' AND ts_ms >= ? AND ts_ms < ?",
+            (account["account_id"], window["start_ms"], window["end_ms"]),
+        ).fetchone()
+    finally:
+        conn.close()
+    assert month["total_out_fen"] == int(row["total"])
+    assert month["out_count"] == int(row["n"])
     for cat in month["by_category"]:
         # 分类只保证金额是分，不保证有 yuan 字段——前端按 amount_fen 格式化
         assert isinstance(cat["amount_fen"], int)
@@ -151,11 +163,23 @@ def test_bill_period_year_is_supported(bank: Path) -> None:
 # ---------------------------------------------------------------- 业务管理
 
 
-def test_management_marks_suitability_as_not_done(bank: Path) -> None:
+def test_management_reports_the_suitability_gate_honestly(bank: Path) -> None:
+    """适当性闸门是真做了：接口给出画像状态、题目数、等级带，并说清没测评会怎样。
+
+    种子库不带画像，所以这里必须如实是 assessed=False；测过之后的读法在
+    tests/test_suitability.py 里覆盖。重点是：不再有一句"我们没做适当性"的自认缺陷，
+    而是一个真的会拦住申购的闸门 + 一句"这是简化问卷，不是监管口径"的边界。
+    """
     data = get("/api/business/management").json()
     invest = data["investments"]
     assert invest["suitability_assessed"] is False
-    assert "适当性" in invest["suitability_note"]
+    gate = invest["suitability"]
+    assert gate["assessed"] is False
+    assert gate["question_count"] == 5
+    assert {band["level"] for band in gate["level_bands"]} == {"C1", "C2", "C3", "C4", "C5"}
+    assert "不是监管口径" in gate["disclaimer"]
+    note = invest["suitability_note"]
+    assert "风险测评" in note and "拒绝" in note
     assert invest["products"], "产品列表来自本地种子"
     assert invest["data_source"].strip()
 

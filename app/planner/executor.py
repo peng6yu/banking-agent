@@ -27,7 +27,6 @@ from app.planner.state import (
     RunState,
     balance_of,
     confirm_timeout_ms as default_confirm_timeout_ms,
-    factors_ok,
     finish_run,
     mark_confirmation,
     ms_to_seconds,
@@ -45,7 +44,7 @@ from app.planner.state import (
 )
 from app.policy.engine import decide
 from app.policy.rules import SPEND_TOOLS, PolicyContext
-from app.security import breaker, injection
+from app.security import breaker, factors, injection
 from app.tools import base as tool_base
 
 log = logging.getLogger(__name__)
@@ -150,19 +149,58 @@ async def run(
             finish_run(state)
 
 
-async def resume(session_id: str, confirmation_id: str, approve: bool, *, factor: str | None = None) -> dict[str, Any]:
-    """回答一次确认；重复提交返回第一次的结果，不产生第二次副作用。"""
-    state = require_run(session_id)
+async def resume(
+    session_id: str,
+    confirmation_id: str,
+    approve: bool,
+    *,
+    factor: str | None = None,
+    proofs: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """回答一次确认；重复提交返回第一次的结果，不产生第二次副作用。
+
+    factor 只是「用户声明自己做了哪几个因子」的历史字段，不再作为放行依据；
+    真正决定能不能过的是 proofs：每一条都是服务端签发并校验的一次性挑战。
+    """
+    try:
+        state = require_run(session_id)
+    except ValidationError:
+        # 进程重启后再点确认：内存里没有这一轮，但库里有。走恢复通道。
+        from app.planner import recover
+
+        return await recover.confirm(session_id, confirmation_id, approve, proofs=proofs)
     conf = require_confirmation(state, confirmation_id)
     if conf.status != "pending":
         return {"ok": True, "status": conf.status, "idempotent": True}
+    if int(conf.expires_ms) <= clock.now_ms():
+        # 过期与「用户说不」必须分开记，否则审计里分不清是谁的决定。
+        resolve_confirmation(state, conf, "expired", audit_reason="CONFIRM_TIMEOUT")
+        return {"ok": True, "status": "expired", "required": list(conf.required_factors)}
     if not approve:
         resolve_confirmation(state, conf, "rejected", audit_reason="USER_REJECTED")
         return {"ok": True, "status": "rejected"}
-    if not factors_ok(conf, factor):
-        return {"ok": True, "status": "waiting_factor", "required": list(conf.required_factors)}
+    required = list(conf.required_factors)
+    if required:
+        check = factors.verify(
+            state.conn,
+            session_id=session_id,
+            confirmation_id=conf.id,
+            required=required,
+            proofs=proofs or [],
+        )
+        if not check["ok"]:
+            return {
+                "ok": True,
+                "status": "waiting_factor",
+                "required": required,
+                "proof_state": check["reason"],
+                "missing": check["missing"],
+                "invalid": check["invalid"],
+                # 兼容老客户端：继续回传 required；但 outcome 由服务端挑战决定
+                "declared_factors": [part for part in str(factor or "").replace("+", ",").replace(",", " ").split() if part],
+            }
     resolve_confirmation(state, conf, "approved", audit_reason="USER_APPROVED")
-    return {"ok": True, "status": "approved"}
+    return {"ok": True, "status": "approved", "verified": list(conf.required_factors)}
 
 
 async def cancel(session_id: str, reason: str = "用户中途取消") -> dict[str, Any]:
@@ -195,16 +233,21 @@ async def _drive(
     emit: Emit,
     confirm_timeout_ms: int,
     taint: injection.TurnTaint | None = None,
+    *,
+    halt_on_new_confirm: bool = False,
 ) -> None:
     """主循环：拓扑序逐个节点跑，跑不动的下游标 skipped。"""
     for node in planner_dag.topo(state.dag):
         if state.cancelled:
             return
         rec = state.nodes[node.id]
+        # 重启恢复时库里已经有终态节点：绝不能重跑，否则一笔转账会被扣两次。
+        if rec.state in ("done", "failed", "skipped"):
+            continue
         if not _ready(state, node):
             persist_node(state, rec, "skipped", error_code="UPSTREAM_NOT_DONE")
             continue
-        if await _step(state, node, rec, emit, confirm_timeout_ms, taint) == STOP:
+        if await _step(state, node, rec, emit, confirm_timeout_ms, taint, halt_on_new_confirm=halt_on_new_confirm) == STOP:
             return
     await _done(state, emit)
 
@@ -216,6 +259,8 @@ async def _step(
     emit: Emit,
     confirm_timeout_ms: int,
     taint: injection.TurnTaint | None = None,
+    *,
+    halt_on_new_confirm: bool = False,
 ) -> str:
     """一个节点：解析参数 → 问策略 → 该确认就确认 → 执行。"""
     try:
@@ -230,7 +275,10 @@ async def _step(
     persist_decision(state, rec, params, decision)
     await emit_event(emit, "trace", trace_event(node, action, decision))
     if decision.level != "green":
-        approved, stop = await _guard(state, node, rec, action, decision, emit, confirm_timeout_ms)
+        approved, stop = await _guard(
+            state, node, rec, action, decision, emit, confirm_timeout_ms,
+            halt_on_new_confirm=halt_on_new_confirm,
+        )
         if stop:
             return STOP
         if not approved:
@@ -374,12 +422,22 @@ async def _guard(
     decision: Decision,
     emit: Emit,
     confirm_timeout_ms: int,
+    *,
+    halt_on_new_confirm: bool = False,
 ) -> tuple[bool, bool]:
     """黄/红都要用户点头；返回 (是否放行, 是否整轮到此为止)。
 
     confirm_timeout_ms 的单位是**毫秒**。
     """
-    conf = new_confirmation(state, node, action, decision)
+    # 恢复场景：库里已有一张属于这个节点的确认卡（approved/pending），复用它，
+    # 不能新建——新建会让已经批准的授权变成第二张卡，用户要重新点一次。
+    conf = _existing_confirmation(state, node.id) or new_confirmation(
+        state, node, action, decision, ttl_ms=confirm_timeout_ms
+    )
+    if conf.status == "approved":
+        return True, False
+    if conf.status in ("rejected", "expired"):
+        return False, False
     if decision.level == "red" and not decision.required_factors:
         await _blocked(state, node, conf, decision, emit, action)
         return False, True
@@ -396,6 +454,14 @@ async def _guard(
         session_id=state.session_id,
     )
     persist_node(state, rec, "waiting_factor" if decision.level == "red" else "waiting_confirm")
+    # 停在这儿等用户点头：dag_runs 的状态必须跟着变成 waiting。
+    # 否则「执行记录」页会把一张还在等人确认的卡片显示成「执行中」——
+    # 恢复通道（halt_on_new_confirm）也一样，它退出时同样是等人。
+    set_run_status(state, "waiting")
+    if halt_on_new_confirm:
+        # 恢复通道里冒出一张新卡：本次请求先停在这儿，让用户在前端确认，
+        # 不能把一个 HTTP 请求挂 120 秒去等点击。
+        return False, True
     try:
         # wait_for 收的是**秒**，这里存的是**毫秒**（confirm_timeout_ms），换算别省。
         answer = await asyncio.wait_for(wait_for_answer(conf), ms_to_seconds(confirm_timeout_ms))
@@ -408,6 +474,14 @@ async def _guard(
         await _rejected(state, rec, conf, emit)
         return False, False
     return True, False
+
+
+def _existing_confirmation(state: RunState, node_id: str) -> Confirmation | None:
+    """按节点找一张还没被丢掉的确认卡（恢复用）；没有就返回 None。"""
+    for conf in state.confirmations.values():
+        if conf.node_id == node_id:
+            return conf
+    return None
 
 
 async def _blocked(
@@ -432,10 +506,18 @@ async def _blocked(
             "message": decision.reason_text,
         },
     )
+    # 记 policy.blocked，不记 confirm.rejected：用户没点过「拒绝」，是规则不让做。
+    # 三类必须能分开数：approved（做了）/ rejected（人不要）/ expired（没人点）/ blocked（规则不让）。
     audit.append(
         state.conn,
-        "confirm.rejected",
-        {"confirmation_id": conf.id, "node_id": node.id, "reason": "POLICY_BLOCKED"},
+        "policy.blocked",
+        {
+            "confirmation_id": conf.id,
+            "node_id": node.id,
+            "reason": "POLICY_BLOCKED",
+            "rule_id": decision.rule_id,
+            "level": decision.level,
+        },
         session_id=state.session_id,
     )
     record_denial(state, reason="POLICY_BLOCKED", action=action)
@@ -447,9 +529,11 @@ async def _timeout(state: RunState, rec: NodeRec, conf: Confirmation, emit: Emit
     """E3：120 秒没人点头，这笔作废，预授权全部释放。"""
     mark_confirmation(state, conf, "expired")
     released = release_holds(state, "CONFIRM_TIMEOUT")
+    # 超时作废记 confirm.expired，不记 confirm.rejected：用户没点「拒绝」，
+    # 是这张卡过期了。审计里两者必须能分开，否则复盘时无法区分"人不要"和"人没在"。
     audit.append(
         state.conn,
-        "confirm.rejected",
+        "confirm.expired",
         {"confirmation_id": conf.id, "node_id": rec.node_id, "reason": "TIMEOUT", "released_holds": released},
         session_id=state.session_id,
     )

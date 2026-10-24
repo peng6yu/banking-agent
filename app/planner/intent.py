@@ -11,6 +11,7 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from typing import Any, Final, Protocol
 
@@ -53,6 +54,8 @@ SYSTEM_PROMPT: Final[str] = (
 # 意图枚举、槽位白名单与 emit_intent 的 schema 都在 app/planner/intent_schema.py：
 # 词表与 schema 必须同源，模型能填的键和解析器放行的键要一模一样。
 CONFIDENCE_FLOOR: Final[float] = 0.5
+#: 兜底规则的置信度：刚过门槛，能往下走，但审计里不会被当成模型的高置信结论。
+FALLBACK_CONFIDENCE: Final[float] = 0.55
 UNKNOWN_QUESTION: Final[str] = "你是想查询、转账还是看账单？"
 RETRY_HINT: Final[str] = "刚才你没有调用工具。请调用 emit_intent 输出结构化结果，不要直接回答。"
 # 查询主体：本人 self / 他人 other；键名与 app/policy/rules.py 的 OWNER_PARAM 一致（测试钉住）。
@@ -317,6 +320,111 @@ def _first_call_args(client: ChatAdapter, messages: list[dict[str, Any]]) -> dic
     return dict(call.args()) if call is not None else None
 
 
+#: 会动钱的意图名：术语表把它们猜出来之前，先确认原话里真有付款指令。
+_PAYMENT_INTENTS: Final[frozenset[str]] = frozenset({"transfer", "schedule_transfer", "split_bill"})
+
+#: 「一下」「一个」「三号」里的数字不是金额：后面跟这些量词就丢掉。
+_NOT_MONEY_TAIL: Final[str] = "下个天年月次点些号秒分"
+
+#: 兜底金额：数字或中文数字，后面可以跟元/块/圆/钱。
+_LEADING_AMOUNT_RE: Final[re.Pattern[str]] = re.compile(
+    r"^\s*(?P<num>\d+(?:\.\d+)?|[零〇一二两三四五六七八九十百千万]+)\s*(?P<unit>元|块|圆|钱)?"
+)
+
+
+def _leading_amount(piece: str) -> int:
+    text_piece = piece or ""
+    match = _LEADING_AMOUNT_RE.match(text_piece)
+    if match is None:
+        return 0
+    if not match.group("unit"):
+        tail = text_piece[match.end() : match.end() + 1]
+        if tail and tail in _NOT_MONEY_TAIL:
+            # 「问候一下」不是一元钱。
+            return 0
+    try:
+        return parse_amount(match.group("num") + (match.group("unit") or ""))
+    except Exception:  # noqa: BLE001 - 解析失败就当这句没有金额
+        return 0
+
+
+#: 句首还可能残留的付款动词与收款人，一层层削掉再取金额。
+_LEAD_VERB_RE: Final[re.Pattern[str]] = re.compile(
+    r"^(?:转账|汇款|打钱|打款|付款|支付|转给|汇给|打给|付给|转|汇|打|付|给|向|帮|请|麻烦|你|我)+"
+)
+_LEAD_PAYEE_RE: Final[re.Pattern[str]] = re.compile(
+    r"^[\u4e00-\u9fa5A-Za-z·]{1,6}?(?=\s*(?:转|汇|打|付|给|\d|[零〇一二两三四五六七八九十百千万]))"
+)
+
+
+def _strip_lead(piece: str) -> str:
+    """把「转给王强 300」削成「300」：先削动词，再削收款人，最多几轮。"""
+    out = piece.strip()
+    for _ in range(4):
+        stripped = _LEAD_VERB_RE.sub("", out, count=1)
+        stripped = _LEAD_PAYEE_RE.sub("", stripped.strip(), count=1)
+        if stripped == out:
+            break
+        out = stripped.strip()
+    return out
+
+
+def _fallback_amount(text: str) -> int:
+    """按付款动词切句尾再取金额：「给李静打两百块」「帮我转五千给房东」都要能接住。
+
+    只认紧跟在动词后面（或整句开头）的那个数字，不从中间挑——
+    从中间挑最容易把手机号、卡号、日期当成金额。
+    """
+    pieces: list[str] = []
+    for sep in ("打出", "打", "转给", "转账", "转", "汇", "付", "给", "是", "改成", "换"):
+        if sep in text:
+            pieces.append(text.rsplit(sep, 1)[-1].strip())
+    pieces.append(text.strip())
+    for piece in pieces:
+        for candidate in (piece, _strip_lead(piece)):
+            guess = _leading_amount(candidate)
+            if guess > 0:
+                return guess
+    return 0
+
+
+def _fallback_transfer(text: str) -> IntentResult | None:
+    """兜底里的「确定性转账句」：动词 + 收款人 + 金额都在原话里。
+
+    刻意很窄：
+    - 原话被 payment_guard 判为歧义（多收款人/多笔/分摊）时一律不接，交给它反问；
+    - 抽不出人名或金额就不接，不猜、不沿用上一轮；
+    - 置信度 0.55 只是刚过 CONFIDENCE_FLOOR，审计里 source=fallback 一眼可辨。
+    收款人仍然要经过 resolve_payee 在同名候选里消歧，这里只负责把话听懂。
+    """
+    finding = payment_guard.inspect(text)
+    if finding.ambiguous:
+        return None
+    if not payment_guard.has_live_payment(text):
+        return None
+    # 金额取「最后一次改口之后」的内容（给王强转 200，金额改成 800 → 800），
+    # 收款人取整句（改口只改金额时，收款人还在前半句里）。
+    corrected = payment_guard.after_correction(text)
+    amount_fen = _fallback_amount(corrected) or _fallback_amount(text)
+    if amount_fen <= 0:
+        return None
+    candidates = payment_guard.payee_candidates(corrected) or payment_guard.payee_candidates(
+        text, apply_correction=False
+    )
+    if not candidates:
+        return None
+    slots: dict[str, Any] = {"payee_name": candidates[0], "amount_fen": amount_fen}
+    result = IntentResult(
+        intent="transfer",
+        slots=slots,
+        missing=_missing("transfer", slots, None),
+        confidence=FALLBACK_CONFIDENCE,
+        retried=True,
+        source="fallback",
+    )
+    return _apply_branches(result)
+
+
 def _fallback_result(text: str) -> IntentResult:
     """模型两次都没给出结构化结果时的兜底。
 
@@ -337,6 +445,11 @@ def _fallback_result(text: str) -> IntentResult:
             retried=True,
             source="fallback",
         )
+    # 术语表之前先试「标准转账句」：给X转N / 转N给X / 给X打N块。
+    # 这类句子在真实用户里占绝大多数，且信息完整，没必要因为模型没调工具就反问。
+    direct = _fallback_transfer(text)
+    if direct is not None:
+        return direct
     hint = kb_bridge.advise(text, intent="unknown", slots={}, weak=True)
     knowledge = {
         "knowledge_ids": list(hint.knowledge_ids),
@@ -356,6 +469,17 @@ def _fallback_result(text: str) -> IntentResult:
             **knowledge,
         )
     intent = hint.corrected_intent
+    if intent in _PAYMENT_INTENTS and not payment_guard.has_live_payment(text):
+        # 术语表看见「转钱」不等于用户要转钱：「不用转钱」「别转给张三」同样是转钱两个字。
+        return IntentResult(
+            intent="unknown",
+            missing=["intent"],
+            confidence=0.0,
+            question=UNKNOWN_QUESTION,
+            ok=False,
+            retried=True,
+            source="fallback",
+        )
     slots = _slots({"intent": intent}, text, intent)
     return _apply_branches(
         IntentResult(

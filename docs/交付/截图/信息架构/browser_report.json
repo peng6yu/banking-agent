@@ -1,0 +1,168 @@
+{
+  "base_url": "http://127.0.0.1:8124",
+  "shots": {
+    "overview_desktop": "docs/交付/截图/信息架构/overview_desktop.png",
+    "assistant_desktop": "docs/交付/截图/信息架构/assistant_desktop.png",
+    "bill_desktop": "docs/交付/截图/信息架构/bill_desktop.png",
+    "plans_desktop": "docs/交付/截图/信息架构/plans_desktop.png",
+    "manage_desktop": "docs/交付/截图/信息架构/manage_desktop.png",
+    "security_desktop": "docs/交付/截图/信息架构/security_desktop.png",
+    "overview_mobile": "docs/交付/截图/信息架构/overview_mobile.png",
+    "assistant_mobile": "docs/交付/截图/信息架构/assistant_mobile.png",
+    "bill_mobile": "docs/交付/截图/信息架构/bill_mobile.png",
+    "plans_mobile": "docs/交付/截图/信息架构/plans_mobile.png",
+    "manage_mobile": "docs/交付/截图/信息架构/manage_mobile.png",
+    "security_mobile": "docs/交付/截图/信息架构/security_mobile.png"
+  },
+  "checks": [
+    {
+      "view": "overview",
+      "suffix": "desktop",
+      "anchors": [
+        "余额",
+        "本月支出",
+        "需要核实的异常"
+      ],
+      "no_hscroll": true,
+      "bytes": 233656
+    },
+    {
+      "view": "assistant",
+      "suffix": "desktop",
+      "anchors": [
+        "常见操作与工具清单",
+        "发送"
+      ],
+      "no_hscroll": true,
+      "bytes": 76386
+    },
+    {
+      "view": "bill",
+      "suffix": "desktop",
+      "anchors": [
+        "分类支出",
+        "月度趋势"
+      ],
+      "no_hscroll": true,
+      "bytes": 278953
+    },
+    {
+      "view": "plans",
+      "suffix": "desktop",
+      "anchors": [
+        "储蓄目标",
+        "跨场景计划"
+      ],
+      "no_hscroll": true,
+      "bytes": 350208
+    },
+    {
+      "view": "manage",
+      "suffix": "desktop",
+      "anchors": [
+        "卡片",
+        "订阅"
+      ],
+      "no_hscroll": true,
+      "bytes": 519970
+    },
+    {
+      "view": "security",
+      "suffix": "desktop",
+      "anchors": [
+        "执行记录",
+        "审计"
+      ],
+      "no_hscroll": true,
+      "bytes": 157276
+    },
+    {
+      "view": "overview",
+      "suffix": "mobile",
+      "anchors": [
+        "余额",
+        "本月支出",
+        "需要核实的异常"
+      ],
+      "no_hscroll": true,
+      "bytes": 520706
+    },
+    {
+      "view": "assistant",
+      "suffix": "mobile",
+      "anchors": [
+        "常见操作与工具清单",
+        "发送"
+      ],
+      "no_hscroll": true,
+      "bytes": 142045
+    },
+    {
+      "view": "bill",
+      "suffix": "mobile",
+      "anchors": [
+        "分类支出",
+        "月度趋势"
+      ],
+      "no_hscroll": true,
+      "bytes": 620878
+    },
+    {
+      "view": "plans",
+      "suffix": "mobile",
+      "anchors": [
+        "储蓄目标",
+        "跨场景计划"
+      ],
+      "no_hscroll": true,
+      "bytes": 775981
+    },
+    {
+      "view": "manage",
+      "suffix": "mobile",
+      "anchors": [
+        "卡片",
+        "订阅"
+      ],
+      "no_hscroll": true,
+      "bytes": 1192570
+    },
+    {
+      "view": "security",
+      "suffix": "mobile",
+      "anchors": [
+        "执行记录",
+        "审计"
+      ],
+      "no_hscroll": true,
+      "bytes": 335346
+    }
+  ],
+  "js_errors": [],
+  "payee": {
+    "picker": "/home/peng/peng_workspace/deepseek harness/银行agent/banking-agent/docs/交付/截图/信息架构/main_01_payee_picker.png",
+    "card": "/home/peng/peng_workspace/deepseek harness/银行agent/banking-agent/docs/交付/截图/信息架构/main_02_confirm_card.png",
+    "done": "/home/peng/peng_workspace/deepseek harness/银行agent/banking-agent/docs/交付/截图/信息架构/main_03_executed.png",
+    "card_text": "确认这笔操作：转账 / 金额（后端原文） / 500.00 / 收款人 / 张三（民生银行 · 尾号 6620 · 同事B · 139****8004） / 转出账户 / 工资储蓄卡 · 尾号 1234 · 当前余额 12,860.50 元（当前余额，不是扣款后的余额。） / 转账方式 / 转账 · 银行卡转账 · 实时到账 / 手续费 / 本演示环境不计算手续费；真实资费以银行公示为准。 / 权限等级 / 中 · 需要你点确认才会执行。 / 验证步骤 / 核对收款人与金额后点「确认」授权这笔操作 / 操作说明（全文） / 500.00 元（转账，张三） / 有效期 / 120 秒 / 点确认只是提交这次授权，不等于交易成功；最终状态以服务端执行结果为准。 / 确认：500.00 → 张三 / 拒绝 / 确认号 cf_cb593fb3"
+  },
+  "red_flow": {
+    "mfa": "/home/peng/peng_workspace/deepseek harness/银行agent/banking-agent/docs/交付/截图/信息架构/main_04_red_mfa.png",
+    "done": "/home/peng/peng_workspace/deepseek harness/银行agent/banking-agent/docs/交付/截图/信息架构/main_05_red_executed.png",
+    "card_text": "确认这笔操作：转账 / 金额（后端原文） / 2,000.00 / 收款人 / 妈妈（农业银行 · 尾号 7788 · 我妈 · 138****8000） / 转出账户 / 工资储蓄卡 · 尾号 1234 · 当前余额 12,860.50 元（当前余额，不是扣款后的余额。） / 转账方式 / 转账 · 银行卡转账 · 实时到账 / 手续费 / 本演示环境不计算手续费；真实资费以银行公示为准。 / 权限等级 / 高 · 需要先通过下面的验证步骤，验证结果只对这一次操作有效。 / 验证步骤 / 人脸识别 → 短信验证码 → 验证通过后点右侧「提交验证并执行」 / 操作说明（全文） / 2,000.00 元（转账，妈妈） / 有效期 / 120 秒 / 点确认只是提交这次授权，不等于交易成功；最终状态以服务端执行结果为准。 / 确认：2,000.00 → 妈妈 / 拒绝 / 确认号 cf_faa274d4",
+    "challenges": 2
+  },
+  "daily_block": {
+    "shot": "/home/peng/peng_workspace/deepseek harness/银行agent/banking-agent/docs/交付/截图/信息架构/main_06_daily_limit.png",
+    "cards": 1,
+    "factor_rows": 0
+  },
+  "idempotent_refresh": {
+    "shot": "/home/peng/peng_workspace/deepseek harness/银行agent/banking-agent/docs/交付/截图/信息架构/main_07_idempotent_refresh.png",
+    "executed_bubbles": 1,
+    "balance_before_fen": 1286050,
+    "balance_after_fen": 1256050,
+    "refresh_recovered": true,
+    "pending_card_before_reload": "确认这笔操作：转账 / 金额（后端原文） / 300.00 / 收款人 / 李静（工商银行 · 尾号 8821 · 房东 · 139****8001） / 转出账户 / 工资储蓄卡 · 尾号 1234 · 当前余额 12,860.50 元（当前余额，不是扣款后的余额。） / 转账方式 / 转账 · 银行卡转账 · 实时到账 / 手续费 / 本演示环境不计算手续费；真实资费以银行公示为准。 / 权限等级 / 中 · 需要你点确认才会执行。 / 验证步骤 / 核对收款人与金额后点「确认」授权这笔操作 / 操作说明（全文） / 300.00 元（转账，李静） / 有效期 / 120 秒 / 点确认只",
+    "card_after_reload": "确认这笔操作：转账 / 金额（后端原文） / 200.00 / 收款人 / 李静（工商银行 · 尾号 8821 · 房东 · 139****8001） / 转出账户 / 工资储蓄卡 · 尾号 1234 · 当前余额 12,560.50 元（当前余额，不是扣款后的余额。） / 转账方式 / 转账 · 银行卡转账 · 实时到账 / 手续费 / 本演示环境不计算手续费；真实资费以银行公示为准。 / 权限等级 / 中 · 需要你点确认才会执行。 / 验证步骤 / 核对收款人与金额后点「确认」授权这笔操作 / 操作说明（全文） / 200.00 元（转账，李静） / 有效期 / 119 秒 / 点确认只"
+  }
+}

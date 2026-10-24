@@ -126,6 +126,9 @@ class RunState:
     user_text: str = ""
     question: str | None = None
     balance_after_fen: int | None = None
+    #: 已经通过服务端校验、等待执行的确认卡 id。重启恢复时用：那张卡已经在
+    #: 库里被标成 approved，重新跑 _drive 时不要再等一次用户点击。
+    preapproved: set[str] = field(default_factory=set)
 
 
 def action_text(tool: str, action: Action, *, payee: str | None = None) -> str:
@@ -214,8 +217,22 @@ def finish_run(state: RunState) -> None:
         RUNS.pop(state.session_id, None)
 
 
-def new_confirmation(state: RunState, node: Any, action: Action, decision: Decision) -> Confirmation:
+def new_confirmation(
+    state: RunState,
+    node: Any,
+    action: Action,
+    decision: Decision,
+    *,
+    ttl_ms: int | None = None,
+) -> Confirmation:
+    """建一张确认卡。
+
+    ttl_ms 必须跟「本次到底等多久」一致：执行器用 wait_for(confirm_timeout_ms) 等答案，
+    卡片有效期却按默认 120 秒算，两边一旦不同（测试缩短超时、环境变量调小），
+    就会出现「卡片还没过期，执行器已经判定超时」或反过来「执行器还在等，卡片已作废」。
+    """
     now_ms = clock.now_ms()
+    ttl = int(ttl_ms) if ttl_ms else confirm_timeout_ms()
     who = _display_payee(state.conn, action)
     conf = Confirmation(
         id=new_id("cf"),
@@ -225,7 +242,7 @@ def new_confirmation(state: RunState, node: Any, action: Action, decision: Decis
         required_factors=list(decision.required_factors),
         action_text=action_text(node.tool, action, payee=who),
         created_ms=now_ms,
-        expires_ms=now_ms + confirm_timeout_ms(),
+        expires_ms=now_ms + ttl,
         payee_name=who,
         # future 在这里就建好，不推迟到 wait_for_answer 那一刻：
         # 答案可能早到——程序化客户端（IM Bot、自动化脚本）收到 confirm 帧就立刻
@@ -302,9 +319,13 @@ def mark_confirmation(state: RunState, conf: Confirmation, status: str) -> None:
 def resolve_confirmation(state: RunState, conf: Confirmation, status: str, *, audit_reason: str) -> None:
     """落定一次确认：改状态、写审计、唤醒等待中的执行器。"""
     mark_confirmation(state, conf, status)
+    event = {
+        "approved": "confirm.approved",
+        "expired": "confirm.expired",
+    }.get(status, "confirm.rejected")
     audit.append(
         state.conn,
-        "confirm.approved" if status == "approved" else "confirm.rejected",
+        event,
         {"confirmation_id": conf.id, "node_id": conf.node_id, "reason": audit_reason},
         session_id=state.session_id,
     )
@@ -370,7 +391,12 @@ def persist_node(state: RunState, rec: NodeRec, node_state: str, *, error_code: 
         "UPDATE dag_nodes SET state = ?, result_json = ?, ts_ms = ? WHERE run_id = ? AND node_id = ?",
         (
             node_state,
-            json.dumps({"summary": rec.summary, "error_code": rec.error_code}, ensure_ascii=False),
+            # 结果数据一并落库：重启后要重建 results 给下游 resolve_refs 用，
+            # 只存一句 summary 的话恢复出来的 DAG 找不到 n1 解析出的 payee_id。
+            json.dumps(
+                {"summary": rec.summary, "error_code": rec.error_code, "data": rec.result or {}},
+                ensure_ascii=False,
+            ),
             clock.now_ms(),
             state.run_id,
             rec.node_id,
@@ -384,6 +410,10 @@ def persist_decision(state: RunState, rec: NodeRec, params: dict[str, Any], deci
         "level": decision.level,
         "rule_id": decision.rule_id,
         "required_factors": list(decision.required_factors),
+        # reason_code/reason_text 也落库：刷新页面时要把同一张卡重建出来，
+        # 只存「几级」，用户就只看到「中/高」两个字的结论，拿不到判断理由。
+        "reason_code": decision.reason_code,
+        "reason_text": decision.reason_text,
     }
     state.conn.execute(
         "UPDATE dag_nodes SET params_json = ?, decision_json = ? WHERE run_id = ? AND node_id = ?",
@@ -400,9 +430,18 @@ def insert_run(state: RunState) -> None:
     now_ms = clock.now_ms()
     with db.tx(state.conn):
         state.conn.execute(
-            "INSERT INTO dag_runs (id, session_id, dag_json, status, created_ms, updated_ms)"
-            " VALUES (?, ?, ?, 'running', ?, ?)",
-            (state.run_id, state.session_id, state.dag.model_dump_json(), now_ms, now_ms),
+            "INSERT INTO dag_runs (id, session_id, dag_json, status, meta_json, created_ms, updated_ms)"
+            " VALUES (?, ?, ?, 'running', ?, ?, ?)",
+            (
+                state.run_id,
+                state.session_id,
+                state.dag.model_dump_json(),
+                # 恢复通道要靠这一行把账户还原回来：能力令牌绑的是账户 id，
+                # 少了它重建出来的 RunState 账户是空串，签发出来的令牌必然 ACCOUNT_MISMATCH。
+                json.dumps({"account_id": state.account_id, "user_text": state.user_text}, ensure_ascii=False),
+                now_ms,
+                now_ms,
+            ),
         )
         for node in state.dag.nodes:
             state.conn.execute(

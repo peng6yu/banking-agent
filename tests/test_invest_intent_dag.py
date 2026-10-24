@@ -16,7 +16,8 @@ from typing import Any
 
 import pytest
 
-from app import audit, db
+from tests import mfa
+from app import audit, db, suitability
 from app.llm import LLMResponse, ToolCall
 from app.models import Action
 from app.planner import dag as planner_dag
@@ -64,6 +65,12 @@ def bank(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     conn = db.connect()
     db.init_db(conn)
     seed(conn)
+    # 这些用例测的是"因子/令牌是否真的挡住了申购"，不是适当性。
+    # 给测试用户一份 C5 画像，让适当性闸门放行，闸门本身在 tests/test_suitability.py 里测。
+    suitability.save(conn, "u_9f2c41ab", {
+        "q_horizon": "gt_3y", "q_experience": "equity", "q_loss": "buy_more",
+        "q_goal": "aggressive", "q_share": "lt_10",
+    })
     conn.close()
     executor.RUNS.clear()
     return db.DEFAULT_DB_PATH
@@ -96,8 +103,13 @@ def drive(session_id: str, dag_obj: Any, *, answers: list[dict[str, Any]] | None
                         continue
                     reply = answers[min(used, len(answers) - 1)]
                     used += 1
+                    approve = bool(reply.get("approve", True))
+                    card_proofs = (
+                        mfa.solve(session_id, conf.id, list(conf.required_factors))
+                        if approve and conf.required_factors else []
+                    )
                     await executor.resume(
-                        session_id, conf.id, bool(reply.get("approve", True)), factor=reply.get("factor")
+                        session_id, conf.id, approve, factor=reply.get("factor"), proofs=card_proofs
                     )
             await asyncio.sleep(0.005)
 

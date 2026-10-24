@@ -17,6 +17,7 @@ from typing import Any
 
 import pytest
 
+from tests import mfa
 from app import audit, db
 from app.clock import BreakerOpen
 from app.ids import new_id
@@ -89,8 +90,13 @@ def drive(
                         continue
                     reply = answers[min(used, len(answers) - 1)]
                     used += 1
+                    approve = bool(reply.get("approve", True))
+                    card_proofs = (
+                        mfa.solve(session_id, conf.id, list(conf.required_factors))
+                        if approve and conf.required_factors else []
+                    )
                     await executor.resume(
-                        session_id, conf.id, bool(reply.get("approve", True)), factor=reply.get("factor")
+                        session_id, conf.id, approve, factor=reply.get("factor"), proofs=card_proofs
                     )
             await asyncio.sleep(0.005)
 

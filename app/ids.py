@@ -19,6 +19,8 @@ ID_PREFIXES: Final[frozenset[str]] = frozenset(
         "u", "a", "c", "p", "t", "h", "s", "sch", "r", "n", "cf", "dn", "au", "tr",
         # 阶段 5 主动财务管理：储蓄目标 / 监测规则 / 提醒 / 监测运行
         "sg", "mr", "pa", "mnr",
+        # 多因子挑战与本轮新增的跨场景计划
+        "fc", "pl", "ps",
     }
 )
 

@@ -1,4 +1,4 @@
-"""工具权威表：33 个工具的名字、参数模式、处理器与写标记。
+"""工具权威表：35 个工具的名字、参数模式、处理器与写标记。
 
 对应文档：docs/06_工具层与场景实现规格.md 6.1/6.2。
 
@@ -671,6 +671,47 @@ TOOL_SPECS: Final[tuple[ToolSpec, ...]] = (
             "additionalProperties": False,
         },
         handler=proactive_tools.run_proactive_monitor,
+        writes=True,
+    ),
+    # ---------------------------------------------------------------- 阶段 6 投资者适当性
+    # 买基金前的硬前置：没测评或等级不够，buy_fund 直接拒（PRODUCT_RISK_TOO_HIGH）。
+    # 问卷是简化版，不是监管口径的正式评估，回执里要照实说。
+    ToolSpec(
+        name='get_suitability',
+        description='查当前的风险测评画像（C1—C5、最高可买 R 几），以及还没做时的 5 道题。买基金前先看这里。',
+        params={
+            "type": "object",
+            "properties": {},
+            "required": [],
+            "additionalProperties": False,
+        },
+        handler=invest.get_suitability,
+        writes=False,
+    ),
+    ToolSpec(
+        name='assess_suitability',
+        description='提交风险测评答案，保存/更新画像（C1—C5）。5 道题都要答：q_horizon、q_experience、q_loss、q_goal、q_share，选项值先用 get_suitability 查。这是简化演示问卷，不是监管口径的正式风险评估。',
+        params={
+            "type": "object",
+            "properties": {
+                "answers": {
+                    "type": "object",
+                    "description": "题号 -> 选项值，5 道题都要有",
+                    "properties": {
+                        "q_horizon": {"type": "string", "enum": ["lt_6m", "6m_1y", "1y_3y", "gt_3y"]},
+                        "q_experience": {"type": "string", "enum": ["deposit_only", "money_bond", "mixed", "equity"]},
+                        "q_loss": {"type": "string", "enum": ["sell_all", "sell_part", "hold", "buy_more"]},
+                        "q_goal": {"type": "string", "enum": ["preserve", "steady", "growth", "aggressive"]},
+                        "q_share": {"type": "string", "enum": ["gt_50", "30_50", "10_30", "lt_10"]}
+                    },
+                    "required": ['q_horizon', 'q_experience', 'q_loss', 'q_goal', 'q_share'],
+                    "additionalProperties": False
+                }
+            },
+            "required": ['answers'],
+            "additionalProperties": False,
+        },
+        handler=invest.assess_suitability,
         writes=True,
     ),
 )

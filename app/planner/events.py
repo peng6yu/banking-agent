@@ -216,7 +216,7 @@ def describe_confirmation(
     if decision.level == "yellow":
         steps = [{"id": "confirm", "label": "核对收款人与金额后点「确认」授权这笔操作", "required": True}]
     elif decision.level == "red":
-        steps = steps + [{"id": "confirm", "label": "验证通过后点「确认」提交这笔操作", "required": True}]
+        steps = steps + [{"id": "confirm", "label": "验证通过后点右侧「提交验证并执行」", "required": True}]
     return {
         "tool_name": display.get("name", tool_name(name)),
         "method": display.get("method", "这项操作"),
@@ -242,6 +242,90 @@ def prompt_event(decision: Decision) -> str:
     return "factor" if decision.level == "red" else "confirm"
 
 
+def _frame_core(
+    *,
+    confirmation_id: str,
+    node_id: str,
+    tool: str,
+    level: str,
+    rule_id: str,
+    reason_text: str,
+    text: str,
+    amount_fen: int | None,
+    payee_name: str | None,
+    required: list[str],
+    expires_in_s: int,
+) -> dict[str, Any]:
+    """确认卡里「跟这次操作绑定」的那几个字段；SSE 与刷新恢复共用同一份定义。"""
+    amount = fen_to_yuan_str(amount_fen) if amount_fen else None
+    return {
+        "confirmation_id": confirmation_id,
+        "node_id": node_id,
+        "tool": tool,
+        "level": level,
+        "rule_id": rule_id,
+        "action_text": text,
+        "amount_fen": amount_fen,
+        "amount": amount,
+        "amount_yuan": amount,
+        "payee_name": payee_name,
+        "slots": {"payee_name": payee_name} if payee_name else {},
+        "required": list(required),
+        "expires_in_s": int(expires_in_s),
+        "reason_text": reason_text,
+    }
+
+
+def confirmation_frame(
+    conn: Any,
+    *,
+    confirmation_id: str,
+    node_id: str,
+    tool: str,
+    action: Action,
+    decision: Decision,
+    required: list[str] | None = None,
+    expires_in_s: int | None = None,
+    status: str = "pending",
+) -> dict[str, Any]:
+    """从库里重建一张确认卡：刷新、SSE 断流、重连都该看到同一张卡。
+
+    只回一个确认号是不负责任的：用户看不见金额和收款人，却要按「再提交一次」。
+    所以卡片的每个字段都从 confirmations.action_json 与 dag_nodes.decision_json 重建，
+    来源账户和收款人也重新查库，跟第一次推送时用的是同一套 describe_confirmation。
+    """
+    details = describe_confirmation(conn, action, decision, tool=tool)
+    payee = details.get("payee") or {}
+    payload = _frame_core(
+        confirmation_id=confirmation_id,
+        node_id=node_id,
+        tool=tool,
+        level=decision.level,
+        rule_id=decision.rule_id,
+        reason_text=decision.reason_text,
+        text=action_text(tool, action, payee=payee.get("name")),
+        amount_fen=action.amount_fen,
+        payee_name=payee.get("name"),
+        required=list(decision.required_factors if required is None else required),
+        expires_in_s=(
+            confirm_timeout_ms() // 1000 if expires_in_s is None else int(expires_in_s)
+        ),
+    )
+    for key in (
+        "tool_name",
+        "method",
+        "arrival",
+        "source_account",
+        "payee",
+        "scheduled_for",
+        "fee",
+        "verification",
+    ):
+        payload[key] = details.get(key)
+    payload["status"] = status
+    return payload
+
+
 def prompt_payload(
     node: Any,
     conf: Confirmation,
@@ -253,24 +337,20 @@ def prompt_payload(
     details 由 describe_confirmation 从库里查出来（来源账户、收款人、手续费口径）；
     老调用方只传三个参数也能用，缺的字段是 None 而不是编出来的值。
     """
-    amount = conf.action.amount_fen
-    payload = {
-        "confirmation_id": conf.id,
-        "node_id": node.id,
-        "tool": node.tool,
-        "level": conf.level,
-        "rule_id": decision.rule_id,
-        "action_text": conf.action_text,
-        "amount_fen": amount,
-        "amount": fen_to_yuan_str(amount) if amount else None,
-        "amount_yuan": fen_to_yuan_str(amount) if amount else None,
-        "payee_name": conf.payee_name,
-        "slots": {"payee_name": conf.payee_name} if conf.payee_name else {},
-        "required": list(conf.required_factors),
+    payload = _frame_core(
+        confirmation_id=conf.id,
+        node_id=node.id,
+        tool=node.tool,
+        level=conf.level,
+        rule_id=decision.rule_id,
+        reason_text=decision.reason_text,
+        text=conf.action_text,
+        amount_fen=conf.action.amount_fen,
+        payee_name=conf.payee_name,
+        required=list(conf.required_factors),
         # 前端倒计时用的是实际生效的那一档（CONFIRM_TIMEOUT_S 可调），不是写死的 120。
-        "expires_in_s": confirm_timeout_ms() // 1000,
-        "reason_text": decision.reason_text,
-    }
+        expires_in_s=confirm_timeout_ms() // 1000,
+    )
     if details:
         payload.update(
             {
@@ -313,6 +393,7 @@ __all__ = [
     "LEVEL_LABELS",
     "TOOL_DISPLAY",
     "action_text",
+    "confirmation_frame",
     "describe_confirmation",
     "emit_event",
     "prompt_event",
