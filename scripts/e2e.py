@@ -53,6 +53,10 @@ if str(ROOT) not in sys.path:
 SECRET = "5ec1f0a3d9b47268b1c07e5f3a92d6148d7b0c25e93a1f6c480d72b5e3f19a64"
 os.environ.setdefault("CAPABILITY_SECRET", SECRET)
 os.environ.setdefault("MOCK_MODE", "1")
+# 这个脚本自己起一个只监听 127.0.0.1 随机端口的演示服务；干净 clone 里没有 .env，
+# app/security/api_auth.py 的 load_token() 会 fail closed 成空串，所有 /api 请求 401，
+# 于是每一步都只能看到「意图 None、裁决 None」。演示脚本要能开箱就跑，所以显式关掉鉴权。
+os.environ.setdefault("API_AUTH_DISABLED", "1")
 
 import httpx  # noqa: E402
 import uvicorn  # noqa: E402
