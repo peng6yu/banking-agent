@@ -1,10 +1,10 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-10-24T21:32:10+08:00",
+  "generated_at": "2026-10-24T22:40:38+08:00",
   "git": {
-    "head": "803e78ef5ec51239154ef5c45f386aef2c4e4315",
-    "head_short": "803e78e",
-    "subject": "feat(packaging): 答辩包装轮——PPT 12 页 / 6 图、README 首屏、效率表与演示加演",
+    "head": "077e400be8adeee071619dea857b2ffee3cbda32",
+    "head_short": "077e400",
+    "subject": "fix(docs): 收口 G07 状态、大纲页数与清单 head 语义",
     "branch": "main",
     "dirty": false,
     "changed_paths": 0
@@ -527,5 +527,5 @@
       "detail": "Playwright 真浏览器 + 服务端状态双证。j3 用真模型后端单独跑（其余六条为 MOCK_MODE=script 确定性桩），J4/J5 的步骤是 API 驱动的流程级断言，不是纯点击级；J6/J7 是点击级。详见 docs/benchmark/browser_journey_audit.md。"
     }
   ],
-  "note": "文档里的数字必须与本文件一致；改代码后重新跑本脚本，不要手工改文档里的计数。"
+  "note": "文档里的数字必须与本文件一致；改代码后重新跑本脚本，不要手工改文档里的计数。git.head 是生成本清单时的提交；清单自身与其后的纯文档/PPT 提交不改变代码事实。"
 }
