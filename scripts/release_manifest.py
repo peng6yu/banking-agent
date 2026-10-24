@@ -307,7 +307,7 @@ def main() -> int:
         "ab": gather_ab(),
         "browser": gather_browser(),
         "limits": gather_limits(),
-        "note": "文档里的数字必须与本文件一致；改代码后重新跑本脚本，不要手工改文档里的计数。",
+        "note": "文档里的数字必须与本文件一致；改代码后重新跑本脚本，不要手工改文档里的计数。git.head 是生成本清单时的提交；清单自身与其后的纯文档/PPT 提交不改变代码事实。",
     }
     out = Path(args.out)
     out.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
