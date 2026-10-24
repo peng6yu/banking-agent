@@ -1,10 +1,10 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-10-24T22:40:38+08:00",
+  "generated_at": "2026-10-24T23:34:56+08:00",
   "git": {
-    "head": "077e400be8adeee071619dea857b2ffee3cbda32",
-    "head_short": "077e400",
-    "subject": "fix(docs): 收口 G07 状态、大纲页数与清单 head 语义",
+    "head": "6124667eef19d4093768421c0e4256d67789578e",
+    "head_short": "6124667",
+    "subject": "fix(docs): 最后一轮文档收口——AA/沙箱/生日授权/AIR 状态/A-B 预检",
     "branch": "main",
     "dirty": false,
     "changed_paths": 0
@@ -125,64 +125,6 @@
   },
   "ab": {
     "rounds": [
-      {
-        "dir": "tests/eval/results/20261023T185131",
-        "started_at": "2026-10-23T18:51:31+08:00",
-        "model": "MiniMax-M3.1-Flash-Preview",
-        "adapter": "LLMAdapter",
-        "cases": 2,
-        "knowledge_version": {
-          "a": "59ff01419aac0b29",
-          "b": "59ff01419aac0b29"
-        },
-        "groups": {
-          "a": {
-            "intent_accuracy": 1.0,
-            "slot_accuracy": 1.0,
-            "clarify_accuracy": 1.0,
-            "dag_validity": 1.0,
-            "knowledge_citation": 0,
-            "unauthorized_write_attempts": 0
-          },
-          "b": {
-            "intent_accuracy": 1.0,
-            "slot_accuracy": 1.0,
-            "clarify_accuracy": 1.0,
-            "dag_validity": 1.0,
-            "knowledge_citation": 0.0,
-            "unauthorized_write_attempts": 0
-          }
-        }
-      },
-      {
-        "dir": "tests/eval/results/20261023T185227",
-        "started_at": "2026-10-23T18:52:27+08:00",
-        "model": "MiniMax-M3.1-Flash-Preview",
-        "adapter": "LLMAdapter",
-        "cases": 2,
-        "knowledge_version": {
-          "a": "59ff01419aac0b29",
-          "b": "59ff01419aac0b29"
-        },
-        "groups": {
-          "a": {
-            "intent_accuracy": 1.0,
-            "slot_accuracy": 1.0,
-            "clarify_accuracy": 1.0,
-            "dag_validity": 1.0,
-            "knowledge_citation": 0,
-            "unauthorized_write_attempts": 0
-          },
-          "b": {
-            "intent_accuracy": 1.0,
-            "slot_accuracy": 1.0,
-            "clarify_accuracy": 1.0,
-            "dag_validity": 1.0,
-            "knowledge_citation": 0.0,
-            "unauthorized_write_attempts": 0
-          }
-        }
-      },
       {
         "dir": "tests/eval/results/20261023T185338",
         "started_at": "2026-10-23T18:53:38+08:00",
@@ -416,6 +358,67 @@
         }
       }
     ],
+    "preflight": [
+      {
+        "dir": "tests/eval/results/20261023T185131",
+        "started_at": "2026-10-23T18:51:31+08:00",
+        "model": "MiniMax-M3.1-Flash-Preview",
+        "adapter": "LLMAdapter",
+        "cases": 2,
+        "knowledge_version": {
+          "a": "59ff01419aac0b29",
+          "b": "59ff01419aac0b29"
+        },
+        "groups": {
+          "a": {
+            "intent_accuracy": 1.0,
+            "slot_accuracy": 1.0,
+            "clarify_accuracy": 1.0,
+            "dag_validity": 1.0,
+            "knowledge_citation": 0,
+            "unauthorized_write_attempts": 0
+          },
+          "b": {
+            "intent_accuracy": 1.0,
+            "slot_accuracy": 1.0,
+            "clarify_accuracy": 1.0,
+            "dag_validity": 1.0,
+            "knowledge_citation": 0.0,
+            "unauthorized_write_attempts": 0
+          }
+        }
+      },
+      {
+        "dir": "tests/eval/results/20261023T185227",
+        "started_at": "2026-10-23T18:52:27+08:00",
+        "model": "MiniMax-M3.1-Flash-Preview",
+        "adapter": "LLMAdapter",
+        "cases": 2,
+        "knowledge_version": {
+          "a": "59ff01419aac0b29",
+          "b": "59ff01419aac0b29"
+        },
+        "groups": {
+          "a": {
+            "intent_accuracy": 1.0,
+            "slot_accuracy": 1.0,
+            "clarify_accuracy": 1.0,
+            "dag_validity": 1.0,
+            "knowledge_citation": 0,
+            "unauthorized_write_attempts": 0
+          },
+          "b": {
+            "intent_accuracy": 1.0,
+            "slot_accuracy": 1.0,
+            "clarify_accuracy": 1.0,
+            "dag_validity": 1.0,
+            "knowledge_citation": 0.0,
+            "unauthorized_write_attempts": 0
+          }
+        }
+      }
+    ],
+    "preflight_note": "cases < 20 的小样本预检，不计入 8 轮完整 80 例配对统计。",
     "latest": {
       "dir": "tests/eval/results/20261024T160805",
       "started_at": "2026-10-24T16:08:05+08:00",

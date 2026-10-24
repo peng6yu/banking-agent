@@ -19,6 +19,8 @@
 | 20261023T185227 | 只有 2 个 case，是冒烟轮，不足 80 条完整集 |
 | 20261024T104704 | 缺少 cases_a.jsonl / cases_b.jsonl（未完成或被中断的轮次） |
 
+> `release_manifest.json` 已把前两条 2 例记录放进 `ab.preflight`（`cases < 20`，不计入 8 轮完整 80 例配对统计），`ab.rounds` 只保留 8 轮完整实验。
+
 ## 2. 逐轮配对结果（80 例合计）
 
 「配对差值」= B−A 在同一批 case 上的均值差；CI 只反映测试 case 抽样的不确定性。
