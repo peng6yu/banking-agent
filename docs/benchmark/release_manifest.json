@@ -1,10 +1,10 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-10-24T16:45:45+08:00",
+  "generated_at": "2026-10-24T17:13:56+08:00",
   "git": {
-    "head": "e07a732bf1ea869729d2891a33cd05c4cc34b731",
-    "head_short": "e07a732",
-    "subject": "test: 加 pytest.ini 把收集范围固定在 tests/，避免 tmp 下的临时克隆被当成第二份 tests",
+    "head": "df89439f795c589af7b72f1a3d586375e7076745",
+    "head_short": "df89439",
+    "subject": "test(lease+web): 多进程抢同一批预约只出一次账；点击级旅程 J6/J7 与澄清取代轮",
     "branch": "main",
     "dirty": false,
     "changed_paths": 0
@@ -82,11 +82,11 @@
       "plan_steps",
       "plan_budgets"
     ],
-    "audit_event_types": 48,
+    "audit_event_types": 49,
     "api_paths": 30,
     "policy_rules": 12,
     "intent_templates": 9,
-    "test_files": 80,
+    "test_files": 81,
     "knowledge": {
       "version": "2c4fbe8d4be2906c",
       "terms": 40,
@@ -100,11 +100,11 @@
   },
   "tests": {
     "command": ".venv/bin/python -m pytest -q",
-    "passed": 1330,
+    "passed": 1336,
     "failed": 0,
     "skipped": 4,
-    "duration_s": 31.64,
-    "log": "tmp/pytest_final.log",
+    "duration_s": 36.2,
+    "log": "tmp/pytest_lease2.log",
     "parsed": true
   },
   "redteam": {
@@ -465,6 +465,8 @@
         "j2": "pass",
         "j4": "pass",
         "j5": "pass",
+        "j6": "pass",
+        "j7": "pass",
         "j3": "pass"
       },
       "demo_db_unchanged": true
