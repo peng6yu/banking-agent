@@ -47,6 +47,9 @@ class Hold:
     created_ms: int
     expires_ms: int
     settled_ms: int | None = None
+    # 建 hold 那一刻令牌裁决出来的等级。commit 只认这一列——
+    # 它是「用户当时到底验过什么」的服务端记录，不是调用方现在怎么说。
+    risk_level: str = "yellow"
 
 
 @dataclass(frozen=True)
@@ -114,14 +117,93 @@ def fetch_hold(conn: sqlite3.Connection, hold_id: str) -> Hold | None:
     return Hold(**dict(row))
 
 
+def _hold_by_key(conn: sqlite3.Connection, key: str) -> Hold | None:
+    row = conn.execute("SELECT * FROM holds WHERE idempotency_key = ?", (key,)).fetchone()
+    return Hold(**dict(row)) if row is not None else None
+
+
+def account_user_id(conn: sqlite3.Connection, account_id: str) -> str | None:
+    """账户属于谁。日累计按这个人的**所有账户**合起来算（赛题口径：用户维度）。"""
+    row = conn.execute("SELECT user_id FROM accounts WHERE id = ?", (account_id,)).fetchone()
+    return str(row["user_id"]) if row else None
+
+
 def spent_today_fen(conn: sqlite3.Connection, account_id: str, *, at_ms: int | None = None) -> int:
-    """今日已用金额（分），供 PolicyContext 用。"""
+    """今日已用金额（分），供 PolicyContext 用。
+
+    口径是**用户维度**：同一自然人名下所有账户当日出账合计。
+    赛题原文把「日累计 ≤1000 元 / >1000 元」定义成同一个人当天的大额分级，
+    按账户各算各的会给出「换张卡就绕过红档」的漏洞。
+    账户维度的那本账仍在 daily_limits 里（账单口径），由 account_spent_today_fen 读。
+    """
+    stamp_ms = at_ms if at_ms is not None else now_ms()
+    user_id = account_user_id(conn, account_id)
+    if user_id is None:
+        # 账户不存在时按账户口径兜底，保证纯函数式查询不会抛异常
+        return account_spent_today_fen(conn, account_id, at_ms=stamp_ms)
+    row = conn.execute(
+        "SELECT spent_fen FROM daily_user_limits WHERE user_id = ? AND day = ?",
+        (user_id, day_of(stamp_ms)),
+    ).fetchone()
+    return int(row["spent_fen"]) if row else 0
+
+
+def account_spent_today_fen(
+    conn: sqlite3.Connection, account_id: str, *, at_ms: int | None = None
+) -> int:
+    """账户维度的今日出账（账务/账单口径，不参与策略分级）。"""
     stamp_ms = at_ms if at_ms is not None else now_ms()
     row = conn.execute(
         "SELECT spent_fen FROM daily_limits WHERE account_id = ? AND day = ?",
         (account_id, day_of(stamp_ms)),
     ).fetchone()
     return int(row["spent_fen"]) if row else 0
+
+
+def reserved_budget_fen(conn: sqlite3.Connection, account_id: str) -> int:
+    """生日/计划预算里仍然有效（status='reserved'）的预留金额。
+
+    status='paying' 不计：那一刻已经建了资金 hold，钱由 hold 占着，
+    再算一遍预算就是同一笔钱占两次，会把用户的可支配金额凭空砍半。
+    兼容老库：plan_budgets 还没有 account_id 列时视为没有预留。
+    """
+    cols = {str(r["name"]) for r in conn.execute("PRAGMA table_info(plan_budgets)").fetchall()}
+    if "account_id" not in cols:
+        return 0
+    row = conn.execute(
+        "SELECT COALESCE(SUM(amount_fen), 0) FROM plan_budgets"
+        " WHERE account_id = ? AND status = 'reserved'",
+        (account_id,),
+    ).fetchone()
+    return int(row[0]) if row else 0
+
+
+def held_fen(conn: sqlite3.Connection, account_id: str) -> int:
+    """仍在途的资金 hold 金额（状态 held 且没过期）。"""
+    row = conn.execute(
+        "SELECT COALESCE(SUM(amount_fen), 0) FROM holds"
+        " WHERE account_id = ? AND status = 'held' AND expires_ms > ?",
+        (account_id, now_ms()),
+    ).fetchone()
+    return int(row[0]) if row else 0
+
+
+def available_fen(conn: sqlite3.Connection, account_id: str) -> int:
+    """可支配金额 = 账面余额 - 在途资金 hold - 有效预算预留。
+
+    三层的区别必须体现在数字上，否则「可支配」就是一句空话：
+    - 账面余额是银行侧的事实，不因为 hold 或预算而变；
+    - hold 是马上要落账的临时冻结（5 分钟），再拿去花会在 commit 时失败；
+    - 预算预留是用户自己安排给未来项目的钱，动它之前得先改安排。
+    所有资金写操作（即时转账、预约出账、AA、商户付款、理财申购）校验余额时都过
+    _create_hold 这一层；hold 在 commit 里还有并发 UPDATE … >= amount 的原子性兜底。
+    """
+    row = conn.execute("SELECT balance_fen FROM accounts WHERE id = ?", (account_id,)).fetchone()
+    if row is None:
+        raise ValidationError("账户不存在", account_id=account_id)
+    return int(row["balance_fen"]) - held_fen(conn, account_id) - reserved_budget_fen(
+        conn, account_id
+    )
 
 
 def initiate(
@@ -144,20 +226,41 @@ def initiate(
     拦的是回款额度，出账方向才需要先看卡里有没有钱。
     """
     token_mod.require_token(token, conn, session_id=session_id)
-    token_mod.verify(conn, str(token), action, secret=secret)
+    tok_payload = token_mod.verify(conn, str(token), action, secret=secret)
 
     amount_fen = _require_amount(action)
     payee = payee_id or str(action.params.get("payee_id") or SYSTEM_PAYEE_ID)
-    key = idempotency_key_for(
-        session_id, node_id, token_mod.params_hash(action.params), run_id=run_id
-    )
-    row = conn.execute("SELECT * FROM holds WHERE idempotency_key = ?", (key,)).fetchone()
+    params_hash = token_mod.params_hash(action.params)
+    key = idempotency_key_for(session_id, node_id, params_hash, run_id=run_id)
+    row = _hold_by_key(conn, key)
+    if row is not None and row.status not in _TERMINAL_STATUSES:
+        audit.append(
+            conn,
+            "transfer.initiated",
+            {"hold_id": row.id, "amount_fen": row.amount_fen, "payee_id": payee, "reused": True},
+            session_id=session_id,
+        )
+        return _to_outcome(row, reused=True)
     if row is not None:
-        replayed = Hold(**dict(row))
-        payload = {"hold_id": replayed.id, "amount_fen": replayed.amount_fen, "payee_id": payee}
-        audit.append(conn, "transfer.initiated", {**payload, "reused": True}, session_id=session_id)
-        return _to_outcome(replayed, reused=True)
-    hold_id = _create_hold(conn, action, amount_fen, payee, key, session_id, check_balance)
+        # 旧幂等键指着一份已经释放/过期的 hold（典型：撞日累计线被资金层拒掉，
+        # 用户补完强验证再来一次）。继续用它只会拿到 HoldExpired，
+        # 所以用令牌 nonce 派生一把新键：同一张新授权仍然幂等，旧尸体不再挡住重试。
+        key = idempotency_key_for(
+            session_id, f"{node_id}#{tok_payload.nonce}", params_hash, run_id=run_id
+        )
+        row = _hold_by_key(conn, key)
+        if row is not None:
+            audit.append(
+                conn,
+                "transfer.initiated",
+                {"hold_id": row.id, "amount_fen": row.amount_fen, "payee_id": payee, "reused": True},
+                session_id=session_id,
+            )
+            return _to_outcome(row, reused=True)
+    hold_id = _create_hold(
+        conn, action, amount_fen, payee, key, session_id, check_balance,
+        risk_level=tok_payload.level,
+    )
     return _to_outcome(fetch_hold(conn, hold_id), reused=False)
 
 
@@ -179,7 +282,7 @@ def initiate_split(
     三条硬校验：份额之和必须等于令牌授权的总额、每份金额为正、每份的收款人不能重复。
     """
     token_mod.require_token(token, conn, session_id=session_id)
-    token_mod.verify(conn, str(token), action, secret=secret)
+    tok_payload = token_mod.verify(conn, str(token), action, secret=secret)
     total = _require_amount(action)
     if not shares:
         raise ValidationError("没有指定分摊对象", reason="SPLIT_EMPTY")
@@ -199,10 +302,24 @@ def initiate_split(
             account_id=action.account_id,
             amount_fen=amount,
         )
-        key = idempotency_key_for(
-            session_id, f"{node_id}#{index}", token_mod.params_hash(sub.params), run_id=run_id
+        params_hash = token_mod.params_hash(sub.params)
+        key = idempotency_key_for(session_id, f"{node_id}#{index}", params_hash, run_id=run_id)
+        existing = _hold_by_key(conn, key)
+        if existing is not None:
+            if existing.status not in _TERMINAL_STATUSES:
+                outcomes.append(_to_outcome(existing, reused=True))
+                continue
+            # 同 initiate：旧 hold 已作废，用 nonce 派生新键再建一份。
+            key = idempotency_key_for(
+                session_id, f"{node_id}#{index}#{tok_payload.nonce}", params_hash, run_id=run_id
+            )
+            existing = _hold_by_key(conn, key)
+            if existing is not None:
+                outcomes.append(_to_outcome(existing, reused=True))
+                continue
+        hold_id = _create_hold(
+            conn, sub, amount, payee_id, key, session_id, True, risk_level=tok_payload.level
         )
-        hold_id = _create_hold(conn, sub, amount, payee_id, key, session_id, True)
         outcomes.append(_to_outcome(fetch_hold(conn, hold_id), reused=False))
     return outcomes
 
@@ -212,17 +329,23 @@ def commit(
     hold_id: str,
     *,
     counterparty: str | None = None,
-    daily_limit_fen: int | None = None,
+    daily_risk_threshold_fen: int | None = None,
+    absolute_daily_cap_fen: int | None = None,
 ) -> CommitOutcome:
     """第 2 阶段：真正扣钱。重复 commit 幂等；已释放或已过期一律 HoldExpired。
 
     counterparty 只给「钱付给谁不是收款人」的场景用（理财申购付给基金）；
     不给就按 hold 的收款人取名字，和转账表现一致。
 
-    daily_limit_fen 是**扣钱这一刻**要守的日累计硬线（分）。给了就在同一个事务里
-    条件 upsert：超线则整笔回滚——余额不动、hold 仍留在 held 等过期释放，
-    钱既不会凭空少也不会凭空多。给 None 表示这笔出账不占用日消费额度
-    （入账、冲正、理财申购这类）。
+    两个日累计参数都在**扣钱这一刻**、与扣款同一个事务里核对（先读后判的并发洞
+    只有这一层能补）：
+
+    - daily_risk_threshold_fen：黄/红分级线。本笔会让当日累计越线时，
+      只有 hold.risk_level == 'red'（用户真的验过人脸+短信）才放行；
+      黄卡一律整笔回滚并抛 DAILY_RISK_UPGRADE_REQUIRED——旧黄卡不能替红操作签字。
+    - absolute_daily_cap_fen：可选绝对上限，与验证等级无关，越线就
+      DAILY_ABSOLUTE_CAP_EXCEEDED（因子不能给监管额度加码）。
+    - 两个都传 None 表示这笔出账不占用日消费额度（入账、冲正、理财申购这类）。
     """
     hold = fetch_hold(conn, hold_id)
     if hold is None:
@@ -235,7 +358,11 @@ def commit(
         _expire(conn, hold)
         raise HoldExpired(reason="HOLD_EXPIRED", hold_id=hold_id)
     try:
-        return _settle(conn, hold, counterparty, daily_limit_fen=daily_limit_fen)
+        return _settle(
+            conn, hold, counterparty,
+            daily_risk_threshold_fen=daily_risk_threshold_fen,
+            absolute_daily_cap_fen=absolute_daily_cap_fen,
+        )
     except PolicyDenied as exc:
         # 拒绝也要留痕：事务已回滚（钱没扣、hold 还在），这条补在事务外。
         audit.append(
@@ -358,6 +485,8 @@ def _create_hold(
     key: str,
     session_id: str,
     check_balance: bool,
+    *,
+    risk_level: str = "yellow",
 ) -> str:
     """余额不足时抛 InsufficientFunds，并在事务外补一条 transfer.initiated 审计。"""
     stamp_ms = now_ms()
@@ -376,7 +505,9 @@ def _create_hold(
             ).fetchone()
             if row is None:
                 raise ValidationError("账户不存在", account_id=action.account_id)
-            balance_fen = int(row["balance_fen"])
+            # 余额校验必须用**可支配金额**：生日预算预留过的钱不算可支配，
+            # 否则「额度查询说已预留、转账照样花掉」就是假预留。
+            balance_fen = int(row["balance_fen"]) - reserved_budget_fen(conn, action.account_id)
             if check_balance and balance_fen < amount_fen:
                 raise InsufficientFunds(
                     balance_fen=balance_fen, amount_fen=amount_fen, account_id=action.account_id
@@ -385,9 +516,9 @@ def _create_hold(
             note = str(action.params.get("note") or "")
             conn.execute(
                 "INSERT INTO holds (id, account_id, payee_id, amount_fen, note, status,"
-                " idempotency_key, session_id, created_ms, expires_ms)"
-                " VALUES (?, ?, ?, ?, ?, 'held', ?, ?, ?, ?)",
-                (hold_id, action.account_id, payee_id, amount_fen, note, key,
+                " risk_level, idempotency_key, session_id, created_ms, expires_ms)"
+                " VALUES (?, ?, ?, ?, ?, 'held', ?, ?, ?, ?, ?)",
+                (hold_id, action.account_id, payee_id, amount_fen, note, risk_level, key,
                  session_id, stamp_ms, stamp_ms + HOLD_TTL_MS),
             )
             audit.append(
@@ -474,11 +605,21 @@ def _settle(
     hold: Hold,
     counterparty: str | None = None,
     *,
-    daily_limit_fen: int | None = None,
+    daily_risk_threshold_fen: int | None = None,
+    absolute_daily_cap_fen: int | None = None,
 ) -> CommitOutcome:
-    """扣余额、写流水、改 hold、更新日累计、写审计：五件事一个事务，任一步失败整体回滚。"""
+    """扣余额、写流水、改 hold、更新日累计、写审计：五件事一个事务，任一步失败整体回滚。
+
+    分级判定放在事务里、扣款之前：事务是 BEGIN IMMEDIATE，同一时刻只有一个写者，
+    所以这里读到的「今日已用」就是本笔 commit 时点的真实值——两个会话并发提交时，
+    第二笔必然看见第一笔已经记进去的累计，不会双双拿旧的黄灯裁决。
+    """
     stamp_ms = now_ms()
     with tx(conn):
+        if daily_risk_threshold_fen is not None or absolute_daily_cap_fen is not None:
+            _assert_daily_tier(conn, hold, stamp_ms,
+                               daily_risk_threshold_fen=daily_risk_threshold_fen,
+                               absolute_daily_cap_fen=absolute_daily_cap_fen)
         # 建 hold 到扣款之间用户可能把卡冻了：扣钱这一刻再核一次通道，
         # 与「余额在扣款那一刻再核一次」是同一个道理。
         channels.assert_spendable(conn, hold.account_id, hold.amount_fen)
@@ -491,7 +632,7 @@ def _settle(
             "UPDATE holds SET status = 'committed', settled_ms = ? WHERE id = ? AND status = 'held'",
             (stamp_ms, hold.id),
         )
-        _bump_daily_limit(conn, hold.account_id, hold.amount_fen, stamp_ms, limit_fen=daily_limit_fen)
+        _bump_daily_counters(conn, hold.account_id, hold.amount_fen, stamp_ms)
         audit.append(
             conn,
             "transfer.committed",
@@ -551,54 +692,86 @@ def _counterparty(conn: sqlite3.Connection, payee_id: str | None) -> str:
     return str(row["name"]) if row else payee_id
 
 
-def _bump_daily_limit(
+def _assert_daily_tier(
+    conn: sqlite3.Connection,
+    hold: Hold,
+    stamp_ms: int,
+    *,
+    daily_risk_threshold_fen: int | None,
+    absolute_daily_cap_fen: int | None,
+) -> None:
+    """扣款前在这个事务里核对日累计分级（调用方已在 BEGIN IMMEDIATE 里）。
+
+    为什么守卫必须长在这里：策略层判「今天已花多少」是**先读后判**，
+    两个会话并发时会同时读到同一个旧值，于是两笔都放行——分级形同虚设。
+    钱真正动的这一层才有与扣款同一个事务的原子视图。
+
+    两条线语义不同，不能合并：
+    - 风险阈值：越线 = 大额 = 红。红灯的 hold（risk_level='red'，即用户
+      在这次支付上真的验过人脸+短信）可以过；黄卡一律拦，抛
+      DAILY_RISK_UPGRADE_REQUIRED，让上层重新走强验证流程。
+      「验过就能继续」正是赛题对红档的定义，而「不许继续」是没有依据的硬拒绝。
+    - 绝对上限：只在部署显式配置了绝对限额时存在，与验证等级无关。
+    """
+    amount_fen = hold.amount_fen
+    user_id = account_user_id(conn, hold.account_id)
+    day = day_of(stamp_ms)
+    spent_before = spent_today_fen(conn, hold.account_id, at_ms=stamp_ms)
+    after = spent_before + amount_fen
+    if absolute_daily_cap_fen is not None and after > absolute_daily_cap_fen:
+        raise PolicyDenied(
+            "DAILY_ABSOLUTE_CAP_EXCEEDED",
+            account_id=hold.account_id,
+            hold_id=hold.id,
+            amount_fen=amount_fen,
+            absolute_cap_fen=absolute_daily_cap_fen,
+            spent_fen=spent_before,
+        )
+    if (
+        daily_risk_threshold_fen is not None
+        and after > daily_risk_threshold_fen
+        and hold.risk_level != "red"
+    ):
+        raise PolicyDenied(
+            "DAILY_RISK_UPGRADE_REQUIRED",
+            account_id=hold.account_id,
+            hold_id=hold.id,
+            amount_fen=amount_fen,
+            threshold_fen=daily_risk_threshold_fen,
+            spent_fen=spent_before,
+            hold_risk_level=hold.risk_level,
+            user_id=user_id,
+            day=day,
+        )
+
+
+def _bump_daily_counters(
     conn: sqlite3.Connection,
     account_id: str,
     amount_fen: int,
     stamp_ms: int,
-    *,
-    limit_fen: int | None = None,
 ) -> None:
-    """记今天花了多少；给了 limit_fen 就顺手守住这条线。
+    """把本笔记进两本账：账户维度（账单口径）与用户维度（策略口径），同一事务。
 
-    为什么守卫必须长在这里：策略层判「今天已花多少」是**先读后判**，
-    两个会话并发时会同时读到同一个旧值，于是两笔都放行——日线形同虚设
-    （t4 的 test_concurrent_daily_limit_blocks_the_second_transfer 复现的就是这个洞）。
-    钱真正动的这一层才有与扣款同一个事务的原子视图：条件 upsert 的
-    WHERE spent_fen + excluded.spent_fen <= ? 让超线的那笔 rowcount 为 0（没写进去），
-    调用方在同一事务里回滚——余额不动、hold 仍留在 held 等过期释放。
+    两本账必须同源更新，否则「按账户看的账单」和「判级用的累计」会长期打架，
+    这正是本轮要修的口径不一致。
     """
-    if limit_fen is None:
-        conn.execute(
-            "INSERT INTO daily_limits (account_id, day, spent_fen, tx_count) VALUES (?, ?, ?, 1)"
-            " ON CONFLICT(account_id, day) DO UPDATE SET"
-            " spent_fen = spent_fen + excluded.spent_fen, tx_count = tx_count + 1",
-            (account_id, day_of(stamp_ms), amount_fen),
-        )
-        return
-    if amount_fen > limit_fen:
-        raise PolicyDenied(
-            "DAILY_LIMIT_EXCEEDED",
-            account_id=account_id,
-            amount_fen=amount_fen,
-            limit_fen=limit_fen,
-            spent_fen=spent_today_fen(conn, account_id, at_ms=stamp_ms),
-        )
-    cursor = conn.execute(
+    day = day_of(stamp_ms)
+    conn.execute(
         "INSERT INTO daily_limits (account_id, day, spent_fen, tx_count) VALUES (?, ?, ?, 1)"
         " ON CONFLICT(account_id, day) DO UPDATE SET"
-        " spent_fen = spent_fen + excluded.spent_fen, tx_count = tx_count + 1"
-        " WHERE spent_fen + excluded.spent_fen <= ?",
-        (account_id, day_of(stamp_ms), amount_fen, limit_fen),
+        " spent_fen = spent_fen + excluded.spent_fen, tx_count = tx_count + 1",
+        (account_id, day, amount_fen),
     )
-    if cursor.rowcount != 1:
-        raise PolicyDenied(
-            "DAILY_LIMIT_EXCEEDED",
-            account_id=account_id,
-            amount_fen=amount_fen,
-            limit_fen=limit_fen,
-            spent_fen=spent_today_fen(conn, account_id, at_ms=stamp_ms),
-        )
+    user_id = account_user_id(conn, account_id)
+    if user_id is None:  # 账户不存在：上面的 UPDATE 已经会失败，这里只是防御
+        return
+    conn.execute(
+        "INSERT INTO daily_user_limits (user_id, day, spent_fen, tx_count) VALUES (?, ?, ?, 1)"
+        " ON CONFLICT(user_id, day) DO UPDATE SET"
+        " spent_fen = spent_fen + excluded.spent_fen, tx_count = tx_count + 1",
+        (user_id, day, amount_fen),
+    )
 
 
 def _committed_outcome(conn: sqlite3.Connection, hold: Hold, *, idempotent: bool) -> CommitOutcome:

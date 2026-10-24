@@ -28,6 +28,7 @@ import app.birthday as birthday
 import app.plans as plans
 import app.proactive as proactive
 import app.suitability as suitability
+import app.tools.scheduled as scheduled
 from app import audit, clock, db
 from app.api.schemas import (
     AlertResolveRequest,
@@ -40,6 +41,8 @@ from app.api.schemas import (
     PlanUpdate,
     ResetRequest,
     SavingsGoalCreate,
+    ScheduledChallengeRequest,
+    ScheduledVerifyRequest,
     SavingsGoalUpdate,
     SimulatedExpenseRequest,
     SuitabilityAssessRequest,
@@ -567,6 +570,29 @@ async def run_scheduled() -> dict[str, Any]:
     return {"ok": True, "executed": len(done), "items": done[:5]}
 
 
+@router.post("/api/scheduled/{scheduled_id}/challenge")
+async def scheduled_challenge(
+    scheduled_id: str, request: ScheduledChallengeRequest
+) -> dict[str, Any]:
+    """给一笔到点复判变红的预约签发一次强验证挑战。
+
+    挑战绑定 sched:<id>，复用一次就作废——它不能拿去给别的转账当证明。
+    """
+    with _conn() as conn, db.tx(conn):
+        return scheduled.challenge_scheduled(conn, scheduled_id, request.factor)
+
+
+@router.post("/api/scheduled/{scheduled_id}/verify")
+async def scheduled_verify(
+    scheduled_id: str, request: ScheduledVerifyRequest
+) -> dict[str, Any]:
+    """补一次强验证并立即尝试执行这笔预约（执行前仍会重新裁决）。"""
+    with _conn() as conn, db.tx(conn):
+        return scheduled.verify_and_execute(
+            conn, scheduled_id, proofs=request.proofs
+        )
+
+
 @router.post("/api/demo/reset")
 async def reset_demo(request: ResetRequest | None = None) -> dict[str, Any]:
     """演示重置：收回智能体动过的钱、清掉 hold 与限额账，进行中的会话收掉。"""
@@ -597,7 +623,10 @@ def _rewind_demo(conn: Any) -> tuple[str | None, int | None]:
         conn.execute("UPDATE accounts SET balance_fen = balance_fen + ? WHERE id = ?", (delta, row["account_id"]))
     conn.execute("DELETE FROM transactions WHERE hold_id IS NOT NULL")
     conn.execute("DELETE FROM holds")
+    # 两本日累计账都要清：账户账是账单口径，用户账才是 R06/R07 的判级口径。
+    # 只清账户账会让重演示的下一笔直接撞上上一轮留下的用户级累计。
     conn.execute("DELETE FROM daily_limits")
+    conn.execute("DELETE FROM daily_user_limits")
     conn.execute("DELETE FROM confirmations")
     account = conn.execute(
         "SELECT id, balance_fen FROM accounts ORDER BY CASE type WHEN 'debit' THEN 0 ELSE 1 END, id LIMIT 1"
@@ -796,18 +825,32 @@ async def update_plan(plan_id: str, request: PlanUpdate) -> dict[str, Any]:
 
 @router.post("/api/plans/run")
 async def run_plans(request: PlanRunRequest | None = None) -> dict[str, Any]:
-    """手动推进到点的计划步骤（演示现场想立刻看到推进时用，等价于后台那次节拍）。"""
+    """手动推进到点的计划步骤（演示现场想立刻看到推进时用，等价于后台那次节拍）。
+
+    顺序和 ticker.run_plans_once 一致：先跑**已授权**的生日付款，再推进通用计划。
+    手动触发不是旁路——自动付款仍然按最新日累计重新裁决，红灯/参数漂移/取消都不扣。
+    plan_id 只缩小扫描范围，不改变任何安全校验。
+    """
     target = request.plan_id if request is not None else None
     with _conn() as conn:
+        authorized = birthday.run_due_authorized(conn, plan_id=target)
         result = plans.run_due(conn, plan_id=target)
-    return {"ok": True, "executed": result["executed"], "count": result["count"]}
+    return {
+        "ok": True,
+        "executed": result["executed"],
+        "count": result["count"],
+        "authorized": authorized,
+    }
 
 
 @router.post("/api/plans/birthday")
 async def create_birthday_plan(request: BirthdayPlanCreate) -> dict[str, Any]:
-    """建生日计划：1000 元预算、鲜花与蛋糕两项、生日前两天到点提醒，全部落库。
+    """建生日计划：预算、鲜花与蛋糕两项、生日前两天到点提醒，全部落库。
 
-    预算占用是记账级（plan_budgets），不是资金冻结；到期也不代扣，付款要用户确认。
+    预算预留真实占用所选账户的可支配金额（余额本身不动），所以余额不够时整份计划
+    建不起来，不会留「计划建好了但付不出」的半成品。默认只提醒、付款要用户确认；
+    save_authorization=True 才保存与计划版本绑定的一次性授权，到点后仍按最新日累计
+    重新裁决，红灯/改计划/取消/参数漂移都会停下来，不会无限期代扣。
     """
     with _conn() as conn:
         user_id = proactive.default_user_id(conn)
@@ -818,6 +861,8 @@ async def create_birthday_plan(request: BirthdayPlanCreate) -> dict[str, Any]:
             budget_fen=request.budget_fen,
             items=[item.model_dump() for item in request.items] or None,
             title=request.title,
+            account_id=request.account_id,
+            save_authorization=request.save_authorization,
         )
     return {"ok": True, "plan": created}
 

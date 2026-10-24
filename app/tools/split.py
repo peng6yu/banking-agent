@@ -31,7 +31,7 @@ from app.money import fen_to_yuan_str
 from app.tools.base import (
     ToolContext,
     build_action,
-    daily_cap_fen,
+    commit_limits,
     fail_result,
     ok_result,
     primary_account,
@@ -158,13 +158,22 @@ def _settle(
     done: list[dict[str, Any]] = []
     problems: list[dict[str, Any]] = []
     committed: set[str] = set()
+    risk_fen, cap_fen = commit_limits(token, ctx.secret)
+    fatal: str | None = None
     for payee_id, amount, hold in zip(payee_ids, shares, holds, strict=True):
         try:
             outcome = funds.commit(
-                ctx.conn, hold.hold_id, daily_limit_fen=daily_cap_fen(token, ctx.secret)
+                ctx.conn, hold.hold_id,
+                daily_risk_threshold_fen=risk_fen,
+                absolute_daily_cap_fen=cap_fen,
             )
         except BankError as exc:
             problems.append({"payee_id": payee_id, "code": exc.code})
+            # 日累计分级拒绝不是「这一份没成功」，而是整笔授权已经不成立了：
+            # 继续往下提交剩下的份额就是在拆分一笔本该重新验证的操作。
+            if exc.code in ("DAILY_RISK_UPGRADE_REQUIRED", "DAILY_ABSOLUTE_CAP_EXCEEDED"):
+                fatal = exc.code
+                break
             continue
         committed.add(hold.hold_id)
         done.append(
@@ -176,6 +185,17 @@ def _settle(
                 "hold_id": hold.hold_id,
                 "balance_after_fen": int(outcome.balance_after_fen),
             }
+        )
+    if fatal is not None:
+        _release_leftovers(ctx, [h for h in holds if h.hold_id not in committed])
+        text = (
+            "这几份加起来会让今天的累计超过 1000 元，属于大额转账："
+            "需要人脸和短信验证后才能继续，不是不能转。"
+            if fatal == "DAILY_RISK_UPGRADE_REQUIRED"
+            else "这几份加起来超过了本账户的绝对每日限额，今天不能再转。"
+        )
+        return fail_result(
+            fatal, text, {"shares": done, "problems": problems, "settle_error": fatal}
         )
     if problems:
         _release_leftovers(ctx, [h for h in holds if h.hold_id not in committed])

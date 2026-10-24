@@ -57,6 +57,8 @@ EVENT_TYPES: Final[frozenset[str]] = frozenset(
         "scheduled.executed",
         "scheduled.deferred",
         "tool.executed",
+        # 黄档操作在提交时发现日累计已被别的会话推过红线：重新裁决并升级为红
+        "policy.upgraded",
         "injection.detected",
         "breaker.open",
         # 阶段 3 知识层：本轮检索了哪些知识条目/来源；知识降级或冲突时记 warning
@@ -73,6 +75,12 @@ EVENT_TYPES: Final[frozenset[str]] = frozenset(
         "scheduled.failed",
     # 创建期验过的因子过了保质期：这笔不再享受越额度放行，回到普通口径排队
     "scheduled.auth_expired",
+    # 到点复判为红且缺少有效强验证：挂起等用户补验证（持久列 needs_verification）。
+    # 这三类事件是「预约不能绕过日累计」这条边界的审计证据，缺了就只能看状态列。
+    "scheduled.needs_verification",
+    "scheduled.verified",
+    "scheduled.verification_failed",
+    "scheduled.verification_waived",
         # 生日计划：预算占用、单项付款成功/失败/被拒都要留痕，
         # 否则库里只剩一个 plan_budgets.status，查不出「为什么这束花没买成」。
         "plan.budget_reserved",
@@ -93,6 +101,16 @@ EVENT_TYPES: Final[frozenset[str]] = frozenset(
         "plan.updated",
         "plan.step_done",
         "plan.step_failed",
+        # 人工接管（handoff）：建单、领取、拒绝、补充信息、取消、恢复成功/失败。
+        # 「恢复失败」必须单独一类：它是「转人工之后仍然没救回来」的证据，
+        # 和操作员拒绝、用户取消不是一回事，混在一起复盘时数不出来。
+        "handoff.created",
+        "handoff.claimed",
+        "handoff.rejected",
+        "handoff.need_info",
+        "handoff.cancelled",
+        "handoff.resumed",
+        "handoff.resume_failed",
         "session.end",
     }
 )

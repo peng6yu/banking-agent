@@ -97,11 +97,11 @@ docs(05): 补充 hold 超时后的补偿路径
 | tag | 里程碑 | 完成标志 |
 |---|---|---|
 | `m0` | 骨架 | 目录、依赖、health 端点、CI 可跑 |
-| `m1` | 数据层 | 27 张表 + 种子 + audit 哈希链单测通过 |
+| `m1` | 数据层 | 30 张表 + 种子 + audit 哈希链单测通过 |
 | `m2` | 工具层 | 14 工具全实现，纯函数单测通过（后续扩到 19：卡片五件套） |
-| `m3` | 安全层 | 12 条规则 + token 七步 + 两阶段资金，单测覆盖 100% |
+| `m3` | 安全层 | 12 条规则 + token 七步 + 两阶段资金，单测覆盖 100%（历史基线；现为 13 条 R01–R13，见 `app/policy/rules.py`） |
 | `m4` | 规划执行 | intent/DAG/executor 跑通转账全链路 |
-| `m5` | API | 10 端点 + SSE 全事件 |
+| `m5` | API | 10 端点 + SSE 全事件（历史基线；现为 39 path / 44 operation，含 business 与 handoffs） |
 | `m6` | 前端 | 双栏 + 决策剧场实时流 |
 | `m7` | 红队 | 43 条红队用例：PASS 43 / FAIL 0（2026-10-23 实跑 **43/43 全过**；历史 14 条 FAIL 的逐条归因、修了哪些夹具/口径、产品侧补了什么，见 `docs/红队失败归因.md`） |
 | `m8` | 交付 | README/PPT/安全自评/演示脚本齐 |
@@ -153,7 +153,7 @@ git checkout main && git merge --no-ff feat/m3-policy && git push
 
 ```
 ## m3 安全层  2026-10-25
-- [x] 12 条规则 engine.decide
+- [x] 13 条规则 engine.decide（R01–R13，求值顺序见 `app/policy/rules.py:RULES`）
 - [x] token 签发与七步校验
 - [x] 两阶段资金 hold/commit/release
 - 测试：pytest 62 passed，policy 覆盖率 100%

@@ -313,6 +313,9 @@ def update(
             audit.append(
                 conn, "plan.updated", {"plan_id": plan_id, "changes": changes, "source": "api"}
             )
+            # 预算预留/一次性授权必须跟计划状态一起收尾：取消要释放额度、改参数要让
+            # 旧授权对不上版本。放在同一事务里，避免「计划取消了、额度还占着」。
+            _birthday_sync(conn, plan_id, status=status, changes=changes)
     return view_plan(conn, plan_id)
 
 
@@ -457,6 +460,23 @@ def _run_step(conn, row: Any, now: int) -> dict[str, Any]:
     return {"outcome": "skipped", "detail": {"alert_id": alert_id, "needs_user": True}}
 
 
+def _birthday_sync(
+    conn,
+    plan_id: str,
+    *,
+    status: str | None = None,
+    changes: tuple[str, ...] | list[str] = (),
+) -> None:
+    """通知生日模块做预算/授权收尾（延迟导入，避免 plans ↔ birthday 循环导入）。
+
+    这里不做「是不是生日计划」的判断：计划类型和 meta 的解读归生日模块管，
+    on_plan_updated 对非生日计划直接 return。
+    """
+    from app import birthday
+
+    birthday.on_plan_updated(conn, plan_id, status=status, changes=changes)
+
+
 def _settle_plan(conn, plan_id: str, now: int) -> None:
     plan = conn.execute("SELECT status FROM plans WHERE id = ?", (plan_id,)).fetchone()
     if plan is None or str(plan["status"]) != "active":
@@ -473,6 +493,13 @@ def _settle_plan(conn, plan_id: str, now: int) -> None:
         conn.execute("UPDATE plans SET status='completed', updated_ms=? WHERE id=? AND status <> 'cancelled'", (now, plan_id))
     elif states == {"failed"} or (states <= {"done", "skipped", "failed"} and "failed" in states):
         conn.execute("UPDATE plans SET status='failed', updated_ms=? WHERE id=? AND status='active'", (now, plan_id))
+    else:
+        return
+    settled = conn.execute("SELECT status FROM plans WHERE id = ?", (plan_id,)).fetchone()
+    if settled is not None and str(settled["status"]) in ("completed", "failed"):
+        # 计划收尾（完成/失败）同样要释放还没付掉的预留，否则额度跟着一个结束的计划
+        # 一直占着。钩子内部按当前状态判断，重复调用是幂等的。
+        _birthday_sync(conn, plan_id, status=str(settled["status"]), changes=("status",))
 
 
 def run_due(conn, *, now: int | None = None, plan_id: str | None = None) -> dict[str, Any]:

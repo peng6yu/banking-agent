@@ -326,11 +326,79 @@ async def _step(
             return CONTINUE
     token = issue_token(state, action, decision)
     status = await execute_node(state, node, rec, params, action, token, emit)
+    if rec.error_code == "DAILY_RISK_UPGRADE_REQUIRED":
+        # 判档时还是黄灯，提交前别的交易把用户日累计推过了线——资金层按红灯拒了。
+        # 这正说明「确认卡上的权限决定」不能当免验证通行证：旧的黄卡就地作废，
+        # 用最新累计重新裁决；升级成红灯就走一次强验证，绝不拿黄卡放行。
+        return await _retry_after_upgrade(
+            state, node, rec, params, action, emit, confirm_timeout_ms,
+            halt_on_new_confirm=halt_on_new_confirm,
+        )
     if is_security_denial(rec.error_code):
         # 执行阶段被安全边界拒掉（令牌七步没过 / 策略层抛拒）同样计一次；
         # 余额不足、参数写错、用户改主意都不计。
         record_denial(state, reason=str(rec.error_code), action=action)
     return status
+
+
+async def _retry_after_upgrade(
+    state: RunState,
+    node: Any,
+    rec: NodeRec,
+    params: dict[str, Any],
+    action: Action,
+    emit: Emit,
+    confirm_timeout_ms: int,
+    *,
+    halt_on_new_confirm: bool = False,
+) -> str:
+    """提交时被资金层按红灯拒掉：重新裁决 + 按新等级重新授权。
+
+    顺序不能反：先重算（拿最新日累计），再作废旧卡（等级不等就不会被复用），
+    最后才发新令牌。任何一步省略，都会出现「黄卡点过 = 红灯放行」。
+    """
+    upgraded = ask_policy(state, action, node)
+    audit.append(
+        state.conn,
+        "policy.upgraded",
+        {
+            "node_id": node.id,
+            "tool": node.tool,
+            "from_level": "yellow",
+            "to_level": upgraded.level,
+            "rule_id": upgraded.rule_id,
+            "required_factors": list(upgraded.required_factors),
+            "trigger": "DAILY_RISK_UPGRADE_REQUIRED",
+        },
+        session_id=state.session_id,
+    )
+    persist_decision(state, rec, params, upgraded)
+    await emit_event(emit, "trace", trace_event(node, action, upgraded))
+    if upgraded.level == "red" and upgraded.required_factors:
+        rec.error_code = None
+        approved, stop = await _guard(
+            state, node, rec, action, upgraded, emit, confirm_timeout_ms,
+            halt_on_new_confirm=halt_on_new_confirm,
+        )
+        if stop:
+            return STOP
+        if not approved:
+            return CONTINUE
+        token = issue_token(state, action, upgraded)
+        status = await execute_node(state, node, rec, params, action, token, emit)
+        if is_security_denial(rec.error_code):
+            record_denial(state, reason=str(rec.error_code), action=action)
+        return status
+    # 升级后仍然没有可用的强验证因子（例如绝对每日限额）：明确失败，不能静默成功。
+    code = upgraded.reason_code or "POLICY_BLOCKED"
+    persist_node(state, rec, "failed", error_code=code)
+    await emit_event(
+        emit,
+        "error",
+        {"code": code, "user_text": upgraded.reason_text or "这笔操作被安全策略拦下了。"},
+    )
+    record_denial(state, reason=code, action=action)
+    return CONTINUE
 
 
 def log_injection_hit(field: str, result: Any) -> None:
@@ -472,7 +540,7 @@ async def _guard(
     """
     # 恢复场景：库里已有一张属于这个节点的确认卡（approved/pending），复用它，
     # 不能新建——新建会让已经批准的授权变成第二张卡，用户要重新点一次。
-    conf = _existing_confirmation(state, node.id) or new_confirmation(
+    conf = _existing_confirmation(state, node.id, decision) or new_confirmation(
         state, node, action, decision, ttl_ms=confirm_timeout_ms
     )
     if conf.status == "approved":
@@ -517,11 +585,23 @@ async def _guard(
     return True, False
 
 
-def _existing_confirmation(state: RunState, node_id: str) -> Confirmation | None:
-    """按节点找一张还没被丢掉的确认卡（恢复用）；没有就返回 None。"""
+def _existing_confirmation(
+    state: RunState, node_id: str, decision: Decision | None = None
+) -> Confirmation | None:
+    """按节点找一张可以复用的确认卡（恢复用）；没有就返回 None。
+
+    等级必须一致才复用：并发下今天的累计可能把一笔黄卡推成红卡，
+    拿用户点过的黄卡去放行红灯，等于把「确认」当成了「免强验证通行证」。
+    等级变了的旧卡就地作废，避免它继续挂在恢复流程里被误用。
+    """
     for conf in state.confirmations.values():
-        if conf.node_id == node_id:
-            return conf
+        if conf.node_id != node_id:
+            continue
+        if decision is not None and conf.level != decision.level:
+            if conf.status == "pending":
+                mark_confirmation(state, conf, "expired")
+            continue
+        return conf
     return None
 
 

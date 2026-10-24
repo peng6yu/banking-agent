@@ -24,7 +24,7 @@ from typing import Any, Final
 
 from fastapi import APIRouter, Depends, Query
 
-from app import audit, db, plans, proactive, subscriptions, suitability
+from app import audit, db, funds, plans, proactive, subscriptions, suitability
 from app.api.routes import require_api_token
 from app.clock import now_ms
 from app.money import fen_to_yuan_str
@@ -159,8 +159,13 @@ def _accounts(conn: sqlite3.Connection) -> list[dict[str, Any]]:
         view = queries.account_view(row)
         view["type_label"] = "储蓄卡" if view["type"] == "debit" else "信用卡"
         if view["type"] == "debit":
-            view["available_fen"] = view["balance_fen"]
-            view["available_yuan"] = view["balance_yuan"]
+            # 可支配金额不是账面余额：在途 hold 和生日预算预留都不能再花。
+            # 查询接口与资金写操作读同一个 funds.available_fen，避免两套口径。
+            available = funds.available_fen(conn, str(row["id"]))
+            view["available_fen"] = available
+            view["available_yuan"] = fen_to_yuan_str(available)
+            view["held_fen"] = funds.held_fen(conn, str(row["id"]))
+            view["reserved_budget_fen"] = funds.reserved_budget_fen(conn, str(row["id"]))
         else:
             view["available_fen"] = None
             view["available_yuan"] = None

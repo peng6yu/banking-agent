@@ -2,7 +2,7 @@
 
 > **用途**：2026 深圳国际金融科技大赛「人工智能赛道 · 银行 AI 智能体」阶段 0.3 / 0.4 交付物。把 Revolut AIR 的公开能力逐维度拆成可执行的改造项，回答三件事：差在哪、值不值得补、补完怎么验收。
 > **对标对象**：Revolut AIR（AI by Revolut），证据全部复用 `docs/benchmark/revolut_air_research.md` 的台账编号（A1–A17 / B1–B15 / F1–F7）与四档证据状态，**不新增来源、不升级证据等级**。
-> **本项目证据口径**：代码路径 + 测试。基线数字来自 `docs/改造实施基线.md`（改造前基线：**904 passed / 4 skipped**）；本文写作时（2026-10-23）一度处于并行改造中间态（916/935 passed），**已收口**。最终交付状态：**1336 passed / 4 skipped**（`.venv/bin/python -m pytest -q`，19.94s）、前端静态检查 **66/66**、红队 **PASS 43 / FAIL 0**、A/B 评估 **80 例**（详见 `docs/benchmark/final_acceptance_report.md`）。中间态数字只作过程记录，不作交付依据。
+> **本项目证据口径**：代码路径 + 测试。基线数字来自 `docs/改造实施基线.md`（改造前基线：**904 passed / 4 skipped**）；本文写作时（2026-10-23）一度处于并行改造中间态（916/935 passed），**已收口**。最终交付状态：**1415 passed / 4 skipped**（`.venv/bin/python -m pytest -q`，196.86s，2026-10-24 终态复跑；历史基线 **1336 passed / 4 skipped**，19.94s）、前端静态检查 **66/66**、红队 **PASS 43 / FAIL 0**、集成联调 **13/13**（`scripts.e2e --offline`）、浏览器旅程 **7 条 / 失败 0**、A/B 评估 **80 例**（详见 `docs/benchmark/final_acceptance_report.md`）。中间态数字只作过程记录，不作交付依据。
 > **硬约束**：本矩阵不改代码；所有"本项目"结论都能回指真实文件；拿不准的一律写「待核实」，不用常识补齐。
 
 ---
@@ -42,7 +42,7 @@
 | # | 流传说法 | 代码实际 | 处置 |
 |---|---|---|---|
 | 1 | README 称"AA 拆分未实现" | `app/planner/split_plan.py:42 build_split` + `app/tools/registry.py` 的 `split_transfer` + `tests/test_split.py`（8 条）**已实现** | 以代码为准，矩阵按"已实现"写；README 待改 |
-| 2 | README/旧架构图称 14 个工具 | 调研时 `registry.TOOLS` 实测 **26**；最终交付为 **33**（新增知识层与主动财务工具） | 历史快照 26；当前以 33 为准 |
+| 2 | README/旧架构图称 14 个工具 | 调研时 `registry.TOOLS` 实测 **26**；2026-10-23 为 **33**；2026-10-24 加入适当性测评与主动财务工具后 **35**（只读 13 + 写 22） | 历史快照 26 / 33；当前以 35 为准 |
 | 3 | `docs/提交物对照表` 称"多轮上下文缺失" | `app/planner/clarify.py` 有 Pending/remember/augment，但只服务收款人歧义续答，**不是通用多轮** | 写成"局部多轮"，缺口仍成立（G09） |
 
 ### 0.5 摘要矩阵（扫读用）
@@ -51,19 +51,19 @@
 |---|---|---|---|---|---|
 | D01 产品定位与交互 | G01 | 官方证实 | 部分（PC 网页 5 面板 + SSE） | P1 | 2–3 |
 | D02 个人财务洞察 | G02 G03 | 能力官方证实；可视化未核实 | 已实现（账单分析 + 储蓄测算/预算偏离，3 个只读工具 + 前端面板） | P1 | 5–7 |
-| D03 转账与工具调用 | G16 G17 | 动作清单官方证实；工具协议未核实 | 已实现（33 工具 / 9 模板 / 动态 AA / 原话层付款 guard） | P2（G16/G17） | 6–10 |
+| D03 转账与工具调用 | G16 G17 | 动作清单官方证实；工具协议未核实 | 已实现（35 工具 / 9 模板 / 动态 AA / 原话层付款 guard） | P2（G16/G17） | 6–10 |
 | D04 卡片管理 | G04 | 官方证实 | 已实现（7 工具） | P1（G04） | 2–3 |
 | D05 订阅代扣 | G05 | 查询/管理官方证实；识别/一键取消未核实 | 部分（查询+取消，无识别/提醒） | P0 | 5–7 |
 | D06 理财与适当性 | G06 | 官方证实（读写边界） | 部分（申赎+风险提示，无适当性） | P0 | 4–6 |
 | D07 跨场景规划 | G07 | 官方证实 + B1 | 部分（生日模板 + 知识层跨场景链路，非通用组合） | P0 | 6–8 |
 | D08 主动服务 | G08 | **尚未核实（倾向否定）** | 部分（4 表 + 7 工具 + 前端闭环已注册；仅手动触发，无后台常驻调度） | P1 | 8–12 |
 | D09 上下文与多轮 | G09 | B1（原页未打开）；窗口未核实 | 部分（4–6 轮 + 局部澄清） | P1 | 4–6 |
-| D10 安全确认 | G10 | 官方证实（分级表未核实） | 已实现（R01–R12 + 令牌七步） | P0（已有） | 8–12（P2 部分） |
+| D10 安全确认 | G10 | 官方证实（分级表未核实） | 已实现（R01–R13 + 令牌七步 + 用户维度日累计分级） | P0（已有） | 8–12（P2 部分） |
 | D11 隐私与数据最小化 | G11 | 官方证实（三条承诺） | 已实现（信封 + 审计不落原文） | P1 | 1–2 |
 | D12 可解释与来源引用 | G12 | 部分官方证实；"为什么"未核实 | 部分（审计已落知识 ids；explain 仍硬编码） | P0 | 3–5 |
-| D13 评估与可观测性 | G13 | B1（原页未打开） | 部分（916 测试 + 43 红队 + 哈希链，无 NLU 评测） | P0 | 3–5 |
-| D14 领域知识与术语 | G14 | B1 + A6 | 进行中（5 个 YAML 已齐、kb_bridge 已接 intent；测试未全绿） | P0 | 8–12 |
-| D15 中断/回退/人工接管 | G15 | 仅"转人工"官方证实 | 部分（取消/超时/冲正有，转人工无） | P0（已有）/P2 | 5–8 |
+| D13 评估与可观测性 | G13 | B1（原页未打开） | 已补强（1415 测试 + 80 例评估集 + 43 红队 + 哈希链；仍无延迟/token/成本指标与人工抽样） | P0 | 3–5 |
+| D14 领域知识与术语 | G14 | B1 + A6 | 已完成（5 个 YAML 齐、kb_bridge 已接 intent/dag/审计；version 2c4fbe8d4be2906c） | P0 | 8–12 |
+| D15 中断/回退/人工接管 | G15 | 仅"转人工"官方证实 | 部分→收窄版已实现（取消/超时/冲正 + 本地人工接管队列 + 断点恢复；无 RBAC/坐席对接） | P0（已有）/P2（仅剩坐席对接） | 5–8 |
 
 ---
 
@@ -92,14 +92,14 @@
 |---|---|
 | ① AIR 公开能力 | 消费洞察（"instant spending insights"、"Where's my money going?"）、分类与趋势、预算辅助、储蓄测算（"How much can I save this month?"）、投资收益查询；官方**没有**说明做异常交易识别或月/年报 |
 | ② AIR 依据与证据状态 | A3、A4、A5、A6 https://www.revolut.com/legal/rita-disclaimer/ ——消费/趋势/预算/储蓄测算**官方资料明确证实**；"消费者端图表形态"、"异常交易识别"、"月/年报"**尚未核实**（研究文档 Q3） |
-| ③ 本项目真实实现状态 | 部分：`analyze_bill` 支持 `period=month/year`（`app/tools/bill.py:43`、`:89 _period_range`、`:85 _range_label`），分类统计（`:145 _by_category`）、Top 商户（`:164 _top_merchants`）、3 类异常（`:34` 常量 `split_orders/odd_hour_overseas/subscription_hike`、`:192 _detect_anomalies`）；无储蓄/预算测算、无图表、无月报导出。**复核补记（2026-10-23 19:00）**：储蓄测算 compute_savings_plan 与预算偏离 budget_deviation 已在 app/proactive.py 实现，但未注册为工具，DAG 里没有入口 |
+| ③ 本项目真实实现状态 | 部分：`analyze_bill` 支持 `period=month/year`（`app/tools/bill.py:43`、`:89 _period_range`、`:85 _range_label`），分类统计（`:145 _by_category`）、Top 商户（`:164 _top_merchants`）、3 类异常（`:34` 常量 `split_orders/odd_hour_overseas/subscription_hike`、`:192 _detect_anomalies`）；无储蓄/预算测算、无图表、无月报导出。**复核补记（2026-10-23 19:00）**：储蓄测算 compute_savings_plan 与预算偏离 budget_deviation 已在 app/proactive.py 实现，但未注册为工具，DAG 里没有入口。**2026-10-24 复核更新**：compute_savings_plan **已注册为工具**（`app/tools/proactive.py:31`、`app/tools/tool_specs.py:572`，有单测），但 9 条意图模板（`dag.INTENT_TEMPLATES`）里仍无储蓄测算入口，自然语言仍走不通；`budget_deviation`（`app/proactive.py:451`）仍是内部函数、未注册 |
 | ④ 代码位置与测试证据 | 工具在 `registry.TOOLS`（只读，R01 直接放行）；DAG 模板 `dag.py:43-71` 的 `bill_analysis→analyze_bill`；测试 `tests/test_tools.py`、`tests/test_acceptance.py`、`tests/test_planner.py` 覆盖账单意图与统计 |
-| ⑤ 能力缺口 | **G02** 储蓄/预算测算（"这个月能存多少"）缺失；**G03** 洞察无可视化（前端无图表，只有文本摘要） |
+| ⑤ 能力缺口 | **G02** 收窄：储蓄测算工具已注册可用，但缺意图模板（问"这个月能存多少"仍进不来），预算偏离仍只是内部函数；**G03** 洞察无可视化（前端无图表，只有文本摘要） |
 | ⑥ 可借鉴设计 | E2 最小可见性（账单只算本人账户）；E3 查询不打扰；测算类输出必须给"口径+区间"，不能给一个裸数字 |
 | ⑦ 改造复杂度与风险 | G02 3–4 人日：新增只读工具 `compute_savings_plan`（收入−固定支出−近 3 月均值），金额用 int 分；G03 2–3 人日：前端加 2 张图（分类占比、月度趋势），不引入图表库可用内联 SVG；风险：测算被误读为理财建议，文案必须限定"基于本人历史流水的估算" |
 | ⑧ 对应赛题要求 | 场景 2 账单分析（分类统计、异常识别、月/年报）；40% 任务完成率 |
 | ⑨ 验收方法 | 固定种子库里"上月餐饮支出"与 SQL 手算一致；断言"分类金额之和 = 总支出"；异常三类各有 1 条正例 + 1 条反例；"今年一共花了多少"返回年报表且区间标签来自 `bill._range_label` |
-| ⑩ 优先级 | **P1**（赛题场景 2 的主体已达标，G02/G03 是增强） |
+| ⑩ 优先级 | **P1**（赛题场景 2 的主体已达标，G02/G03 是增强；G02 剩余部分只是"给已注册工具补一条意图模板"） |
 
 ### D03 转账与工具调用
 
@@ -107,7 +107,7 @@
 |---|---|
 | ① AIR 公开能力 | "代客执行动作"：卡片冻结、单次虚拟卡、限额、暂停周期付款、屏蔽商户、买 eSIM；投资写侧被法律禁止；官方未公开工具协议/端点/参数 schema |
 | ② AIR 依据与证据状态 | A4、A5、A6 ——动作清单**官方资料明确证实**；"工具调用面 = 写操作白名单"属**合理推断**（研究文档 C.3-4）；协议与端点**尚未核实**（C.4-3） |
-| ③ 本项目真实实现状态 | 已实现：26 个受管工具（`app/tools/registry.py TOOLS`），9 条固定模板 + AA 动态拆图（`app/planner/split_plan.py:42 build_split`）；人名/手机号/卡尾号收款人（`resolve_payee`，24 条关系词 + 消歧测试）；定时转账（`app/tools/scheduled.py:48` 仅 `once/monthly`）；金额两阶段 hold→commit（`app/funds.py`） |
+| ③ 本项目真实实现状态 | 已实现：35 个受管工具（`app/tools/registry.py TOOLS`；历史基线 26，2026-10-23 为 33），9 条固定模板 + AA 动态拆图（`app/planner/split_plan.py:42 build_split`）；人名/手机号/卡尾号收款人（`resolve_payee`，24 条关系词 + 消歧测试）；定时转账（`app/tools/scheduled.py:48` 仅 `once/monthly`）；金额两阶段 hold→commit（`app/funds.py`） |
 | ④ 代码位置与测试证据 | `app/planner/dag.py:43-71`、`:180 split`；`app/tools/scheduled.py:71 schedule_transfer`、`:193 execute_due`；`app/policy/rules.py` R06/R07/R08；测试 `tests/test_e2e_transfer.py`、`tests/test_split.py`（8 条含"分不丢一分钱"）、`tests/test_scheduled.py`、`tests/test_phone_payee.py`、`tests/test_relation_payee.py`、`tests/test_reverse.py` |
 | ⑤ 能力缺口 | **G16** 无对外工具协议（MCP/OpenAPI），第三方无法接入；**G17** 定时仅一次性/每月，缺季付、每周、指定工作日 |
 | ⑥ 可借鉴设计 | E5 知识库+产品生态直连（我们已有工具面，缺知识面）；E13 一句指令一步到位；工具返回必须结构化 + 可核验 |
@@ -212,7 +212,7 @@
 |---|---|
 | ① AIR 公开能力 | 敏感动作要求生物识别；Business 版动作前校验角色权限；写操作范围受限（投资写侧整类禁止） |
 | ② AIR 依据与证据状态 | A4（生物识别）、A7 https://www.revolut.com/legal/assistant-business-disclaimer/ （角色权限）——**官方资料明确证实**；逐动作权限分级表**尚未核实**（C.4-7） |
-| ③ 本项目真实实现状态 | 已实现（本项目最强项）：12 条规则 R01–R12（`app/policy/rules.py`）、令牌七步（`app/policy/token.py`）、`params_hash` 绑定、日累计 1000 元（`SINGLE_LIMIT_FEN=DAILY_LIMIT_FEN=100_000`）、熔断（5 分钟 3 次→60 秒）、三因子（mock）、哈希链审计 + `/api/audit/verify`。缺口：多因子是模拟（R6）、无登录/多用户/RBAC（R7）、额度固定不可配置 |
+| ③ 本项目真实实现状态 | 已实现（本项目最强项）：13 条规则 R01–R13（`app/policy/rules.py`；R13 默认不启用）、令牌七步（真实路径 `app/security/token.py`，旧文档写的 `app/policy/token.py` 不存在）、`params_hash` 绑定、日累计按**用户维度风险分级**（`DAILY_RISK_THRESHOLD_FEN=100_000`：越线判红 + face/sms，强验证通过后真实出账；硬拒只在部署显式配置 `ABSOLUTE_DAILY_CAP_FEN` 时由 R13 触发，默认 `None`；`SINGLE_LIMIT_FEN=100_000` 仍是单笔黄灯线）、双账本（`daily_user_limits` 判级 / `daily_limits` 账单视图）、并发升级重裁（`DAILY_RISK_UPGRADE_REQUIRED`）、熔断（5 分钟 3 次→60 秒）、三因子（mock）、哈希链审计 + `/api/audit/verify`。缺口：多因子是模拟（R6）、无登录/多用户/RBAC（R7）、分级阈值与绝对上限只能改配置 |
 | ④ 代码位置与测试证据 | `app/policy/rules.py`、`token.py`、`breaker.py`、`app/audit.py`；测试 `tests/test_policy.py`、`test_token.py`、`test_breaker.py`、`test_confirm_*`、`test_injection*.py`、`tests/redteam/cases.yaml`（43 条；2026-10-24 复跑两次，最终代码 + DeepSeek 下 **43/43 PASS**） |
 | ⑤ 能力缺口 | **G10**：真实认证通道（短信/UKey/人脸）与多用户 RBAC、分级额度配置——属"需外部服务"的 P2；安全内核本身不缺 |
 | ⑥ 可借鉴设计 | E3/E12：动作前二次校验、权限先于执行；多因子做成**可插拔 provider**，演示用桩、生产可换 |
@@ -257,7 +257,7 @@
 |---|---|
 | ① AIR 公开能力 | 官方未公开评测方法；B1 称有多 Agent 平台、guardrails、evals、monitoring、标注与 QA/QC 流程、集中式 AI 网关 |
 | ② AIR 依据与证据状态 | B1（**可信公开技术资料证实，原页未打开**）；具体指标/阈值/数据集规模**尚未核实** |
-| ③ 本项目真实实现状态 | **已补强**：`tests/eval/` 80 例中文评估集 + 可复现脚本 + A/B 报告（真模型，6 项指标：intent/slot/clarify/dag/knowledge_citation/unauthorized）；全量 **1336 passed / 4 skipped**（2026-10-24 终测）、81 个测试文件、43 条红队 **PASS 43 / FAIL 0**、前端 66 项、哈希链审计可验证。**仍无**延迟/token/成本指标与人工质量抽样 |
+| ③ 本项目真实实现状态 | **已补强**：`tests/eval/` 80 例中文评估集 + 可复现脚本 + A/B 报告（真模型，6 项指标：intent/slot/clarify/dag/knowledge_citation/unauthorized）；全量 **1415 passed / 4 skipped**（2026-10-24 终态复跑，196.86s；历史基线 1336）、88 个测试文件（`tests/test_*.py`）、43 条红队 **PASS 43 / FAIL 0**、前端 66 项、哈希链审计可验证。**仍无**延迟/token/成本指标与人工质量抽样 |
 | ④ 代码位置与测试证据 | `tests/`、`tests/eval/{intent_cases.yaml,run_eval.py,evaluation_report.md,test_eval_harness.py}`、`scripts/redteam.py`、`scripts/check_frontend.py`、`app/api/routes.py /api/audit/verify` |
 | ⑤ 能力缺口 | **G13**：40% 完成率需要"可量化的意图理解准确率"，当前只有"测试全绿"这一间接证据 |
 | ⑥ 可借鉴设计 | E7：小步引入 evals + 标注集，不建平台；指标只做三项（意图准确率、工具成功率、P95 延迟） |
@@ -272,13 +272,13 @@
 |---|---|
 | ① AIR 公开能力 | 直连内部知识库与产品生态，能回答产品/条款类问题；未见术语表或法规知识库的公开细节 |
 | ② AIR 依据与证据状态 | B1（**可信公开技术资料证实，原页未打开**）；A6（AI 透明度）——**官方资料明确证实**；知识库结构**尚未核实** |
-| ③ 本项目真实实现状态 | **已完成**：`app/knowledge/` 6 个模块 + 5 个 YAML（terms 40 / entities 25 / relations 22 / intents 11 / workflows 10 / sources 34），`app/planner/kb_bridge.py` 接入 intent + dag + routes，`knowledge.retrieved` 审计落库；知识集成测试 7 条失败已收口，全量 1336 passed；加载失败降级为「空知识 + warning + 追问」并有专门测试 |
+| ③ 本项目真实实现状态 | **已完成**：`app/knowledge/` 6 个模块 + 5 个 YAML（terms 40 / entities 25 / relations 22 / intents 11 / workflows 10 / sources 34），`app/planner/kb_bridge.py` 接入 intent + dag + routes，`knowledge.retrieved` 审计落库；知识集成测试 7 条失败已收口，全量 1415 passed（历史基线 1336）；加载失败降级为「空知识 + warning + 追问」并有专门测试 |
 | ④ 代码位置与测试证据 | `app/knowledge/loader.py`、`retrieve.py`（docstring 明确"不引入向量检索"）、`app/planner/kb_bridge.py`、`app/api/routes.py:_audit_knowledge`；测试 `tests/test_knowledge_{loader,normalize,retrieve,integration}.py`、`tests/test_security_knowledge.py`；43 条红队已复跑 PASS 43 / FAIL 0 |
 | ⑤ 能力缺口 | **G14 已关闭**（原缺口：缺 4 个数据文件、缺接线、缺审计与降级策略）；残余：知识仅参与「问不问/填什么/怎么解释」，不进模型上下文（受 SYSTEM_PROMPT 逐字测试约束），语义泛化仍靠别名表 |
 | ⑥ 可借鉴设计 | E5 知识库+产品生态直连；知识是**数据不是指令**（基线原则），冲突时降级并审计；检索用结构化/关键词即可，**不上向量库** |
 | ⑦ 改造复杂度与风险 | 8–12 人日：补 terms 80–120 条、ontology、intent_rules 同义词、workflows 与 6 场景对齐；接线 4 处（parse 前后、build_messages、dag 校验、policy 只收窄）；风险：R1（不改 SYSTEM_PROMPT，知识只能从 user 消息注入）、注入攻击（知识文本按 DATA 处理）、加载失败拖垮主链路（需降级为空知识+告警）、R2 事件闭集 |
 | ⑧ 对应赛题要求 | 3.3 领域理解；技术文档"知识来源可追溯"；40% 完成率 |
-| ⑨ 验收方法 | 80 条术语命中/未命中测试；缺文件时降级不崩且写 `knowledge.warning`；现有 916 条测试零回归；`knowledge.retrieved` 审计含 ids 与版本 |
+| ⑨ 验收方法 | 80 条术语命中/未命中测试；缺文件时降级不崩且写 `knowledge.warning`；现有 1415 条测试零回归（历史基线 916）；`knowledge.retrieved` 审计含 ids 与版本 |
 | ⑩ 优先级 | **P0**（阶段 0 已投入，不接线等于白做；也是 G12 的前置） |
 
 ### D15 中断/回退/人工接管
@@ -287,14 +287,16 @@
 |---|---|
 | ① AIR 公开能力 | 有转人工/live agent 的表述（法律声明中出现）；任务取消、步骤回退、人工接管的产品化细节未公开 |
 | ② AIR 依据与证据状态 | A6——"转人工"**官方资料明确证实**（仅限声明语境）；取消/回退/接管机制**尚未核实** |
-| ③ 本项目真实实现状态 | 部分：`/api/cancel` 取消进行中请求；确认超时（`tests/test_confirm_timeout.py`）；两阶段资金 hold 超时释放；`reverse_transfer` 冲正 + 审计；熔断降级；执行器失败降级（`executor`）。**无**转人工队列/工单、无"从断点继续未完成 DAG"的产品化入口 |
-| ④ 代码位置与测试证据 | `app/api/routes.py`（cancel 端点）、`app/tools/funds.py`、`app/tools/reverse.py`、`app/policy/breaker.py`；测试 `test_reverse.py`、`test_confirm_timeout.py`、`test_breaker.py`、`test_funds.py` |
-| ⑤ 能力缺口 | **G15**：无人工接管通道与工单号；DAG 中断后只能重新发起，不能续跑 |
+| ③ 本项目真实实现状态 | 部分→**收窄版已实现（2026-10-24）**：`/api/cancel` 取消进行中请求；确认超时（`tests/test_confirm_timeout.py`）；两阶段资金 hold 超时释放；`reverse_transfer` 冲正 + 审计；熔断降级；执行器失败降级（`executor`）。**本轮补齐**：本地人工接管队列（`handoffs` 表（30 表之一，含活跃单部分唯一索引）+ `app/handoffs.py` + `app/api/handoffs_api.py`，状态闭集 `pending/claimed/need_info/rejected/cancelled/resumed/failed`，8 个受保护端点）；`runner._settle` 收款人歧义（`PAYEE_AMBIGUOUS/PAYEE_NOT_FOUND`）时自动建 `pending` 单；领取用条件 `UPDATE ... WHERE id=? AND status='pending'`（并发只有一个赢家，另一个 `HANDOFF_ALREADY_CLAIMED`）；`resume` 前重查新轮次/确认卡有效期/计划一次性授权/账户/余额，再走 `executor._drive` 断点续跑（不重跑 `done/failed/skipped` 节点）；失败置 `failed` + 审计 `handoff.resume_failed`，绝不把 run 标成功。**已覆盖**：用户回答澄清时旧单自动关闭（`executor` → `conflict.supersede_answered_clarifications` → `handoffs.close_for_run`，审计 `handoff.cancelled`/`closed_by=run.superseded`）；**仍无**：多操作员 RBAC/工单分派/通知/Web 操作台、与真实坐席系统对接、用户既不作答也不取消时的超时/巡检关单 |
+| ④ 代码位置与测试证据 | `app/api/routes.py`（cancel 端点）、`app/tools/funds.py`、`app/tools/reverse.py`、`app/policy/breaker.py`、`app/planner/recover.py`；人工接管：`app/handoffs.py`（1017 行）、`app/api/handoffs_api.py`（124 行）、`app/planner/runner.py`（建单入口）；测试 `test_reverse.py`、`test_confirm_timeout.py`、`test_breaker.py`、`test_funds.py`、`tests/test_handoff.py`（13 条，2026-10-24 实测 `13 passed`，2.37s） |
+| ⑤ 能力缺口 | **G15 收窄版已落实**：本地队列 + 断点恢复可用；剩余缺口是"接坐席系统/工单号 + 多操作员 RBAC + 分派/通知/操作台"，以及用户既不作答也不取消时的超时/巡检关单（用户补答自动关单已实现，见 ③） |
 | ⑥ 可借鉴设计 | 赛题 3.3 明确要求"中断/回退/人工接管"；最小实现=转人工卡片（生成 ticket_id + 原因 + 上下文快照）+ DAG 断点表 |
-| ⑦ 改造复杂度与风险 | 5–8 人日（真正接坐席系统则更高）；风险：无外部工单系统 → 只能做占位；DAG 续跑要处理幂等与已执行节点 |
+| ⑦ 改造复杂度与风险 | 收窄版本轮已落地（`app/handoffs.py` 1017 行 + `app/api/handoffs_api.py` 124 行 + 13 条测试）；真正接坐席系统仍需 5–8 人日（外部工单 API + 用户体系 + 分派通知）。风险：无外部工单系统 → 本地队列只是替代设计，不能宣称"已对接坐席"；DAG 续跑依赖 `executor._drive` 跳过已完成节点，且恢复前必须重查确认卡/授权/账户/余额，否则会复用过期写令牌 |
 | ⑧ 对应赛题要求 | 3.3 中断/回退/人工接管；30% 安全合规 |
-| ⑨ 验收方法 | 取消后 hold 释放、无副作用；冲正后余额复原且审计两条（原交易+冲正）；转人工生成 ticket 并带上下文快照；中断的 DAG 可续跑且不重复扣款 |
-| ⑩ 优先级 | 取消/冲正 **P0 已有**；转人工与断点续跑 **P2** |
+| ⑨ 验收方法 | 取消后 hold 释放、无副作用；冲正后余额复原且审计两条（原交易+冲正）；人工接管按 8 项验收跑 `tests/test_handoff.py`（自动建单、重开库仍读得到 pending、并发单赢家、reject 后不可 resume、need-info 记 note、过期确认卡/授权不可 resume、不重跑已完成资金节点、每个动作有审计；2026-10-24 实测 **12 passed**）；中断的 DAG 可续跑且不重复扣款 |
+| ⑩ 优先级 | 取消/冲正 **P0 已有**；转人工与断点续跑：**收窄版已落地（本轮）**，接真实坐席仍 **P2** |
+
+> **历史判断（已推翻）**：2026-10-23 本表把"转人工队列/断点续跑"判为 P2 且未做；2026-10-24 已以本地队列收窄版落地（见 ③），旧判断保留作过程记录。
 
 ---
 
@@ -306,7 +308,7 @@
 |---|---|---|
 | **P0** | G14 知识层、G12 来源引用、G05 订阅识别+提醒、G06 适当性、G07 通用跨场景、G13 评测集 | 直接对应赛题六场景与 40% 完成率；G14 已投入沉没成本；G12 是"可解释"的硬证据 |
 | **P1** | G01 交互、G02 储蓄测算、G03 可视化、G04 商户限制、G08 主动监测、G09 通用多轮、G11 隐私文档 | 提升完成度与观感，但不做也能跑通六场景；G11 成本极低应提前 |
-| **P2** | G10 真实认证/RBAC、G15 转人工、G16 MCP、G17 定时周期 | 需外部服务/账号体系/协议面，10 天内不可控 |
+| **P2** | G10 真实认证/RBAC、G15 接坐席（收窄版已落地）、G16 MCP、G17 定时周期 | 需外部服务/账号体系/协议面，10 天内不可控；G15 的本地队列与断点恢复本轮已完成，剩余仅"对接真实坐席 + 操作员身份体系" |
 
 ### 2.2 依赖关系（关键路径）
 
@@ -330,6 +332,7 @@ G01 交互 ──演示前最后做（避免中途改前端影响联调）
 | 敏感动作生物识别（A4） | 三因子为 mock | 明确标注"演示桩"，接口可插拔，不宣称已对接银行 |
 | 只访问已可见数据（A4） | 相同 | 信封白名单 + 审计不落原文 |
 | 无主动服务证据 | 自研主动提醒（G08） | 对外不称"对标 AIR"，只称"自研增强" |
+| 无人工接管/坐席证据（A6 仅声明语境） | 自研**本地**人工接管队列（G15 收窄版） | 受保护 API（`require_api_token`）+ 条件 UPDATE 单赢家 + 恢复前重校验 + 全动作 `handoff.*` 审计；**不宣称对接坐席系统**，操作员仅审计字符串、无 RBAC |
 
 ---
 
@@ -378,10 +381,13 @@ G01 交互 ──演示前最后做（避免中途改前端影响联调）
 | # | 事项 | 现状 |
 |---|---|---|
 | 1 | 43 条红队用例 | **已复跑：PASS 43 / FAIL 0**（`python3.12 -m scripts.redteam`，约 12 秒） |
-| 2 | 知识层加载 | **已收口**：5 个 YAML 可加载（version 59ff01419aac0b29）；集成测试全绿；降级策略有测试（`KNOWLEDGE_ENABLED=0` 与加载失败两路） |
+| 2 | 知识层加载 | **已收口**：5 个 YAML 可加载（version `2c4fbe8d4be2906c`，历史基线 `59ff01419aac0b29`）；集成测试全绿；降级策略有测试（`KNOWLEDGE_ENABLED=0` 与加载失败两路） |
 | 3 | 多因子认证 | 代码为 mock（基线 R6），未接真实短信/UKey |
 | 4 | 季付/周付定时 | README 称未实现，代码 `RECURRENCES=("once","monthly")` 一致，确认缺失 |
 | 5 | 前端移动端适配 | 未做断点验证，未测真机 |
+| 6 | 人工接管（G15 收窄版） | **已落地**：本地队列 + 8 端点 + 13 条测试（`tests/test_handoff.py`）；用户补答澄清后旧单会自动关（`closed_by=run.superseded`）；**未做** RBAC/分派/通知/坐席对接，也没有「用户既不作答也不取消」的超时/巡检关单 |
+| 7 | 沙箱隔离 | **未部署容器**：架构选择是"消除执行面"（`scripts/prove_no_exec_surface.py` 实测执行面 0 命中、出网仅 `app/llm.py` 3 处）；不得宣称"已实现沙箱"（详见 `docs/security_sandbox.md`） |
+| 8 | 知识层版本号 | 当前 `version=2c4fbe8d4be2906c`（terms 40/entities 25/relations 22/intents 11/workflows 10/sources 34）；旧文档的 `59ff01419aac0b29` 为历史基线 |
 
 ---
 

@@ -123,11 +123,13 @@ def _row(sched_id: str | None = None) -> Any:
     try:
         if sched_id is None:
             return conn.execute(
-                "SELECT id, status, amount_fen, due_ms, defer_count, factor_verified_ms"
+                "SELECT id, status, amount_fen, due_ms, defer_count, factor_verified_ms,"
+                " needs_verification"
                 " FROM scheduled_transfers ORDER BY created_ms LIMIT 1"
             ).fetchone()
         return conn.execute(
-            "SELECT id, status, amount_fen, due_ms, defer_count, factor_verified_ms"
+            "SELECT id, status, amount_fen, due_ms, defer_count, factor_verified_ms,"
+                " needs_verification"
             " FROM scheduled_transfers WHERE id = ?",
             (sched_id,),
         ).fetchone()
@@ -321,18 +323,25 @@ def test_factor_approved_schedule_executes_and_moves_the_money(bank: Path) -> No
     assert str(_row(sched_id)["status"]) == "executed"
 
 
-def test_small_schedule_defers_when_the_day_is_over_the_limit(bank: Path) -> None:
-    """当日额度不够不是失败：顺延到下一个自然日，状态仍是 scheduled。
+def test_small_schedule_pauses_for_verification_when_the_day_is_over_the_limit(bank: Path) -> None:
+    """到点复判为红（当日累计已越线）且没有有效强验证：挂起待验证，不自动执行、也不失败。
 
-    反证：把到点执行撞额度时的顺延分支去掉，这里就会看到 failed。
+    2026-10 整改前这里会「顺延到明天」：等于把红的钱默默排到用户看不见的时候再扣，
+    既没有强验证也不告诉用户。现在改成持久化的 needs_verification，等用户补一次
+    人脸/短信；ticker 下一轮不会重跑它（execute_due 查询排除该标记）。
     """
     old_due = ticker_now() - 1_000
     conn = _conn()
     with db.tx(conn):
-        # 今天已经花满了 1000 元的额度
+        # 今天已经花满了 1000 元（两本账都要种：用户维度才是判级口径）
         conn.execute(
             "INSERT INTO daily_limits (account_id, day, spent_fen, tx_count) VALUES (?, ?, ?, 1)",
             (DEBIT_ACCOUNT_ID, funds_mod.day_of(ticker_now()), 100_000),
+        )
+        conn.execute(
+            "INSERT INTO daily_user_limits (user_id, day, spent_fen, tx_count)"
+            " SELECT user_id, ?, ?, 1 FROM accounts WHERE id = ?",
+            (funds_mod.day_of(ticker_now()), 100_000, DEBIT_ACCOUNT_ID),
         )
         _insert(conn, old_due, amount_fen=30_000)
     conn.close()
@@ -340,29 +349,19 @@ def test_small_schedule_defers_when_the_day_is_over_the_limit(bank: Path) -> Non
     resp = call("/api/scheduled/run")
     assert resp.status_code == 200
     items = resp.json()["items"]
-    assert items and items[0]["status"] == "scheduled", "额度不够不该算执行成功"
+    assert items and items[0]["status"] == "needs_verification", "越线应当挂起等强验证"
 
     row = _row()
-    assert str(row["status"]) == "scheduled", f"撞额度不该判 failed：{row['status']}"
-    assert int(row["defer_count"]) == 1
+    assert str(row["status"]) == "scheduled", f"挂起不该判 failed：{row['status']}"
+    assert int(row["needs_verification"]) == 1
+    assert int(row["defer_count"]) == 0, "挂起不是顺延，别混用同一个计数器"
+    assert int(row["due_ms"]) == old_due, "挂起不改到期时间"
 
-    # 顺延到下一个自然日的同一时刻
-    local = datetime.datetime.fromtimestamp(old_due / 1000)
-    expect = int(
-        datetime.datetime.combine(
-            local.date() + datetime.timedelta(days=1), local.time()
-        ).timestamp()
-        * 1000
-    )
-    assert int(row["due_ms"]) == expect
-    assert int(row["due_ms"]) > ticker_now()
-
-    # 审计要留痕：原 due_ms、新 due_ms、原因
-    events = _audit_events("scheduled.deferred")
+    # 审计要留痕：规则、金额、所需因子
+    events = _audit_events("scheduled.needs_verification")
     assert len(events) == 1
-    assert int(events[0]["original_due_ms"]) == old_due
-    assert int(events[0]["due_ms"]) == expect
-    assert events[0]["reason"] == "DAILY_LIMIT_EXCEEDED"
+    assert events[0]["rule_id"] == "R07_transfer_red_daily"
+    assert set(events[0]["required_factors"]) == {"face", "sms"}
 
     # 钱没动，hold 也不能白占着
     assert _balance() == SEED_BALANCE_FEN

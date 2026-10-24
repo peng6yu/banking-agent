@@ -19,6 +19,14 @@
 边界说明（不掩饰）：零代码执行面不等于零 I/O 面。app/llm.py 会向模型 API
 出网（endpoint 来自环境变量配置），这是赛题要求的模型调用，不是用户代码执行面。
 脚本把两类命中分开报，出网面照实列出来，不靠口径把它藏掉。
+
+第三类命中是「动态 SQL」：conn.execute(拼接串)。它不是代码执行面（SQL 语法位置
+里不会被解释成 Python），但把变量拼进 SQL 文本就可能把用户文本变成语法，
+所以单独报出来逐条确认参数化；数量与行号不冻结，作为人工复核清单。
+
+另外单独扫 scripts/ 并把 subprocess / os.system 逐条列出来：那些是离线脚本与
+测试装置（起 uvicorn、跑种子数据、取 git 事实），不在在线 Agent 的调用链上。
+区分「离线脚手架用系统命令」和「在线路径执行模型输出」，正是本文件要讲清的事。
 """
 
 from __future__ import annotations
@@ -60,6 +68,9 @@ EXEC_MODULES: frozenset[str] = frozenset(
         "multiprocessing", "pty", "code", "codeop", "imp", "shelve", "commands",
     }
 )
+# 动态 SQL：不是代码执行面，但拼接错一个变量就等于把用户文本送进 SQL 语法位置。
+# 只报「首参是 f-string 或 + 拼接」的调用；首参是整串常量（哪怕分两段常量拼）不算。
+SQL_CALL_NAMES: frozenset[str] = frozenset({"execute", "executemany", "executescript"})
 # 网络出网面（照实报，不当执行面算，但要让人看见）
 EGRESS_DOTTED: frozenset[str] = frozenset(
     {
@@ -103,6 +114,8 @@ class Report:
     lines: int
     exec_hits: tuple[Hit, ...]
     egress_hits: tuple[Hit, ...]
+    # 动态 SQL 不进 ok 的判定：它不是执行面，但必须被看见、被逐条人工确认
+    sql_hits: tuple[Hit, ...] = ()
 
     @property
     def ok(self) -> bool:
@@ -124,6 +137,37 @@ def _dotted(node: ast.AST) -> str | None:
 
 def _literal_str(node: ast.AST) -> str | None:
     return node.value if isinstance(node, ast.Constant) and isinstance(node.value, str) else None
+
+
+def _all_constants(node: ast.AST) -> bool:
+    """整条 + 表达式是否全由字符串常量组成；是则 SQL 文本仍是常量，不必报。"""
+    if isinstance(node, ast.Constant):
+        return isinstance(node.value, str)
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
+        return _all_constants(node.left) and _all_constants(node.right)
+    return False
+
+
+def _sql_lead(node: ast.AST) -> str | None:
+    """返回动态 SQL 的字面量片段（给人工复核用）；全常量或非拼接返回 None。"""
+    if isinstance(node, ast.JoinedStr):
+        if not any(isinstance(part, ast.FormattedValue) for part in node.values):
+            return None
+        text = "".join(
+            part.value for part in node.values if isinstance(part, ast.Constant) and isinstance(part.value, str)
+        )
+        return text.strip()[:60] or "<f-string>"
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add) and not _all_constants(node):
+        parts: list[str] = []
+        current: ast.AST = node
+        while isinstance(current, ast.BinOp) and isinstance(current.op, ast.Add):
+            if isinstance(current.left, ast.Constant) and isinstance(current.left.value, str):
+                parts.append(current.left.value)
+            current = current.right
+        if isinstance(current, ast.Constant) and isinstance(current.value, str):
+            parts.append(current.value)
+        return "".join(parts).strip()[:60] or "<拼接>"
+    return None
 
 
 def scan_source(source: str, path: str = "<memory>") -> list[Hit]:
@@ -149,6 +193,13 @@ def scan_source(source: str, path: str = "<memory>") -> list[Hit]:
                 add("执行面", str(target), node)
             elif target in EGRESS_DOTTED:
                 add("出网面", str(target), node)
+            elif (
+                isinstance(node.func, ast.Attribute)
+                and node.func.attr in SQL_CALL_NAMES
+                and node.args
+                and _sql_lead(node.args[0]) is not None
+            ):
+                add("动态 SQL", str(target or node.func.attr), node)
             elif target in {"getattr", "builtins.getattr"} and len(node.args) >= 2:
                 first = _dotted(node.args[0])
                 second = _literal_str(node.args[1])
@@ -197,16 +248,23 @@ def scan_tree(target: Path) -> Report:
     total = 0
     exec_hits: list[Hit] = []
     egress_hits: list[Hit] = []
+    sql_hits: list[Hit] = []
     for path in files:
         count, hits = scan_file(path, root)
         total += count
         for hit in hits:
-            (egress_hits if hit.kind == "出网面" else exec_hits).append(hit)
+            if hit.kind == "出网面":
+                egress_hits.append(hit)
+            elif hit.kind == "动态 SQL":
+                sql_hits.append(hit)
+            else:
+                exec_hits.append(hit)
     return Report(
         files=tuple(p.relative_to(root).as_posix() for p in files),
         lines=total,
         exec_hits=tuple(exec_hits),
         egress_hits=tuple(egress_hits),
+        sql_hits=tuple(sql_hits),
     )
 
 
@@ -267,6 +325,17 @@ def main(argv: list[str] | None = None) -> int:
     emit(f"命中（网络出网面）: {len(report.egress_hits)}")
     for hit in report.egress_hits:
         emit(hit.render())
+    emit(f"命中（动态 SQL，需人工确认参数化）: {len(report.sql_hits)}")
+    for hit in report.sql_hits:
+        emit(hit.render())
+
+    # 离线脚手架：这些系统命令不在在线 Agent 的调用链上，但必须列出来而不是藏起来
+    scripts_dir = repo_root / "scripts"
+    if scripts_dir.is_dir():
+        scripts_report = scan_tree(scripts_dir)
+        emit(f"离线/测试脚本系统命令（不在在线 Agent 路径）: {len(scripts_report.exec_hits)}")
+        for hit in scripts_report.exec_hits:
+            emit(hit.render())
     emit(f"扫描器自检: {len(PLANTED) - len(missed)}/{len(PLANTED)} 段植入样本被报出")
     for item in missed:
         emit(f"    漏报: {item}")

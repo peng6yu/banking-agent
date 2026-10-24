@@ -315,9 +315,16 @@ def reset_daily_limit(account_id: str = "a_3d7e60c2") -> None:
 
     不清空的话，500 元黄灯之后任何超过剩余额度的操作都会被 R07 拦下——那是正确行为，
     但会让后面的注入与跨场景步骤无法演示，所以这里把「跨日」这件事显式做出来，不偷偷绕。
+
+    两本账都清：判级读的是用户维度（daily_user_limits），只清账户维度等于没清。
     """
     with contextlib.closing(db.connect()) as conn, db.tx(conn):
         conn.execute("DELETE FROM daily_limits WHERE account_id = ?", (account_id,))
+        conn.execute(
+            "DELETE FROM daily_user_limits WHERE user_id ="
+            " (SELECT user_id FROM accounts WHERE id = ?)",
+            (account_id,),
+        )
 
 
 def direct_tool(name: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -464,20 +471,25 @@ def step_transfer_yellow(client: httpx.Client, seen: set[str]) -> Step:
 
 
 def step_transfer_red(client: httpx.Client, before: int, seen: set[str]) -> Step:
+    """日累计超阈值 = 红色强验证，不是硬拒绝（赛题：日累计 >1000 元走人脸/短信/盾）。"""
     chat = turn(client, "转 2000 给李静", seen)
     trace, prompt, tool = chat.last("trace"), chat.last("factor"), chat.last("tool")
     after = account_balance_fen()
     required = [str(x) for x in (prompt.get("required") or [])]
+    # tool 事件只带 node_id（不带 tool 名），所以先从 trace 里找出转账节点的 id；
     # 只读节点（resolve_payee/query_balance）的 tool 事件同样是 ok=True，不能拿来当「钱动了」的证据
-    executed = any(bool(t.get("ok")) for t in chat.of("tool") if t.get("tool") == "transfer")
+    transfer_nodes = {str(t.get("node_id")) for t in chat.of("trace") if t.get("tool") == "transfer"}
+    executed = any(bool(t.get("ok")) and str(t.get("node_id")) in transfer_nodes
+                   for t in chat.of("tool"))
     actual = (f"裁决 {trace.get('level')}/{trace.get('rule_id')}；因子 {required or '未下发'}；"
               f"工具执行={executed}；余额 {before} → {after} 分（多花 {before - after}）")
     ok = (chat.error is None and trace.get("level") == "red"
           and trace.get("rule_id") == "R07_transfer_red_daily"
-          and required == [] and not executed and after == before)
-    return Step("7", "转账 2000 元（日累计硬线：直接拦截，不给多因子）",
-                "red/R07_transfer_red_daily；不下发因子；不执行；余额不变", actual, ok,
-                "当日已花 500 元，再加 2000 元越过 1000 元日累计；额度是规则常量，多因子不能创造额度")
+          and required == ["face", "sms"] and executed and before - after == 200000)
+    return Step("7", "转账 2000 元（越过日累计阈值：红色强验证后执行）",
+                "red/R07_transfer_red_daily；下发 face+sms；验证通过后执行；余额 -200000 分", actual, ok,
+                "当日已花 500 元，再加 2000 元越过 1000 元风险阈值 → 升级红色强验证；"
+                "强验证通过后照常出账（阈值是风控分级线，不是拒绝线）")
 
 
 def step_injection(client: httpx.Client, before: int, seen: set[str]) -> Step:
@@ -604,8 +616,9 @@ def run_demo(client: httpx.Client) -> list[Step]:
     steps.append(yellow)
     balance = int(yellow.data["balance_fen"])
     steps.append(step_transfer_red(client, balance, seen))
-    # 第 7 步已经证明「500 + 2000 越过 1000 元日累计就硬拦」。后面两步还要演示注入与跨场景，
-    # 额度不重置会被同一条 R07 全部拦住；这里显式清空当日累计（等价于跨日）并打印说明。
+    # 第 7 步已经证明「500 + 2000 越过 1000 元风险阈值 → 红色强验证后才出账」。后面两步还要演示
+    # 注入与跨场景，额度不重置会继续被判为红色强验证（不是拦死，但会打断演示节奏）；
+    # 这里显式清空当日累计（等价于跨日）并打印说明。
     reset_daily_limit()
     print("[额度] 已显式清空当日累计（模拟跨日），让注入与跨场景步骤能在 1000 元额度内继续演示")
     # 第 8、9 步的基准取实时余额：第 8 步的注入可能被拦在追问上（安全行为），

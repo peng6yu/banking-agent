@@ -8,7 +8,8 @@
 3. hold 超时（300 秒）→ 自动释放，钱回到可用余额；超时后再 commit 必须失败；
 4. commit 阶段炸了 → hold 不释放也不误扣（失败方向安全：钱宁可留 hold 等释放，
    也不能凭空扣掉）；
-5. 日累计限额并发 → 两笔各 900 元同时提交，第二笔必须被拦下（不能两笔都放行）。
+5. 日累计分级 → 两笔各 900 元同时提交，第二笔必须升级强验证（不能两笔都放行）；
+   红牌（真验过）可以越线，绝对上限（显式配置）才硬拒。
 
 测的是真实资金函数（app/funds.py、app/tools/transfers.py），不 mock 钱的路径；
 并发用例用 threading + 真实 sqlite 文件库（不是 :memory:），让锁竞争真实发生。
@@ -31,6 +32,7 @@ from app.policy.rules import DAILY_LIMIT_FEN
 from app.tools import transfers
 from app.tools.base import ToolContext
 from tests.tool_fixtures import (
+    CREDIT_ID,
     DEBIT_BALANCE,
     DEBIT_ID,
     FROZEN_MS,
@@ -299,16 +301,30 @@ def test_tool_keeps_money_in_hold_when_commit_fails(bank, ctx, monkeypatch) -> N
     assert hold.status == "held"
 
 
-# ---------- 5. 日累计限额并发：第二笔必须被拦下 ----------
+# ---------- 5. 日累计分级：越线重新强验证，不是无依据硬拒 ----------
+# 2026-10 整改：赛题把日累计 1000 元定义成**黄红分级线**（≤1000 黄、>1000 红），
+# 不是「今天到此为止」的硬限额。资金层因此分成两道语义不同的闸：
+#   · 风险阈值：越线的黄卡一律回滚并抛 DAILY_RISK_UPGRADE_REQUIRED，让上层重新走强验证；
+#     用户真的验过人脸+短信（hold.risk_level='red'）才放行——「验过就能继续」。
+#   · 绝对上限：只有部署显式配置才存在（默认 None），越线硬拒，因子不能加码。
 
-def test_daily_limit_guard_rejects_commit_over_the_line(bank) -> None:
-    """日累计硬线要在钱动之前拦住：超线的 commit 必须失败且一分不扣。"""
+def _red_token(tool: str, params: dict[str, object]) -> str:
+    """签一张**已经强验证过**的红牌令牌：hold 落库时 risk_level='red'。"""
+    from app.security import token as token_mod
+
+    action = Action(tool=tool, params=params, account_id=DEBIT_ID,
+                    amount_fen=int(params["amount_fen"]))
+    return token_mod.issue(action, level="red", secret=SECRET)
+
+
+def test_daily_risk_threshold_upgrades_a_yellow_hold(bank) -> None:
+    """今日已出账 900 元，第二笔 900 元的黄卡不能直接过：整笔回滚、要求重新强验证。"""
     action, params = _transfer_action(90_000)
     first = funds.initiate(
         bank, action, session_id="s_daily1", node_id="n1",
         token=_token("transfer", params), secret=SECRET,
     )
-    funds.commit(bank, first.hold_id, daily_limit_fen=DAILY_LIMIT_FEN)
+    funds.commit(bank, first.hold_id, daily_risk_threshold_fen=DAILY_LIMIT_FEN)
     assert funds.spent_today_fen(bank, DEBIT_ID) == 90_000
 
     second = funds.initiate(
@@ -316,37 +332,86 @@ def test_daily_limit_guard_rejects_commit_over_the_line(bank) -> None:
         token=_token("transfer", params), secret=SECRET,
     )
     with pytest.raises(PolicyDenied) as excinfo:
-        funds.commit(bank, second.hold_id, daily_limit_fen=DAILY_LIMIT_FEN)
-    assert excinfo.value.code == "DAILY_LIMIT_EXCEEDED"
+        funds.commit(bank, second.hold_id, daily_risk_threshold_fen=DAILY_LIMIT_FEN)
+    assert excinfo.value.code == "DAILY_RISK_UPGRADE_REQUIRED"
 
-    # 超线被拦下：一分没扣，hold 还锁着，日累计没被这笔污染
+    # 整笔回滚：一分没扣，hold 还锁着等上层重新验证或释放，日累计没被这笔污染
     assert _balance(bank) == DEBIT_BALANCE - 90_000
     assert funds.fetch_hold(bank, second.hold_id).status == "held"
     assert funds.spent_today_fen(bank, DEBIT_ID) == 90_000
 
-    # 拒绝也要留痕：审计里有一条 reason=DAILY_LIMIT_EXCEEDED
     rejected = _rejected_audits(bank)
     assert len(rejected) == 1
-    assert rejected[0]["reason"] == "DAILY_LIMIT_EXCEEDED"
+    assert rejected[0]["reason"] == "DAILY_RISK_UPGRADE_REQUIRED"
     assert rejected[0]["amount_fen"] == 90_000
 
 
-def test_daily_limit_guard_rejects_single_amount_over_the_line(bank) -> None:
-    """一笔就超过硬线的，也不许动钱。"""
-    action, params = _transfer_action(DAILY_LIMIT_FEN + 1)
-    hold = funds.initiate(
-        bank, action, session_id="s_over", node_id="n1",
+def test_red_hold_after_verification_may_cross_the_threshold(bank) -> None:
+    """用户真验过人脸+短信（红牌 hold），累计 1800 元也应当放行——这是赛题的红档定义。"""
+    action, params = _transfer_action(90_000)
+    first = funds.initiate(
+        bank, action, session_id="s_red1", node_id="n1",
         token=_token("transfer", params), secret=SECRET,
     )
+    funds.commit(bank, first.hold_id, daily_risk_threshold_fen=DAILY_LIMIT_FEN)
+
+    second = funds.initiate(
+        bank, action, session_id="s_red2", node_id="n1",
+        token=_red_token("transfer", params), secret=SECRET,
+    )
+    assert funds.fetch_hold(bank, second.hold_id).risk_level == "red"
+    funds.commit(bank, second.hold_id, daily_risk_threshold_fen=DAILY_LIMIT_FEN)
+
+    assert _balance(bank) == DEBIT_BALANCE - 180_000
+    assert funds.spent_today_fen(bank, DEBIT_ID) == 180_000
+    assert _rejected_audits(bank) == []
+
+
+def test_absolute_daily_cap_rejects_even_a_red_hold(bank) -> None:
+    """显式配置的绝对上限与验证等级无关：红牌也不能越线，因子不能给监管额度加码。"""
+    action, params = _transfer_action(90_000)
+    hold = funds.initiate(
+        bank, action, session_id="s_cap", node_id="n1",
+        token=_red_token("transfer", params), secret=SECRET,
+    )
     with pytest.raises(PolicyDenied) as excinfo:
-        funds.commit(bank, hold.hold_id, daily_limit_fen=DAILY_LIMIT_FEN)
-    assert excinfo.value.code == "DAILY_LIMIT_EXCEEDED"
+        funds.commit(bank, hold.hold_id, daily_risk_threshold_fen=None,
+                     absolute_daily_cap_fen=50_000)
+    assert excinfo.value.code == "DAILY_ABSOLUTE_CAP_EXCEEDED"
     assert _balance(bank) == DEBIT_BALANCE
-    assert funds.fetch_hold(bank, hold.hold_id).status == "held"
+    assert funds.spent_today_fen(bank, DEBIT_ID) == 0
 
 
-def test_concurrent_daily_limit_blocks_the_second_transfer(bank) -> None:
-    """日累计限额并发：两笔各 900 元并发提交，第二笔必须被拦下（不能两笔都放行）。"""
+def test_daily_spend_is_user_scoped_across_accounts(bank) -> None:
+    """日累计是**用户维度**：同一人名下换一张卡花，也要算进同一个当日累计。
+
+    赛题原文的「日累计」按人算；若按账户各算各的，用户换卡就能绕过红档，
+    这正是本轮要修的口径不一致（daily_user_limits 与 daily_limits 两本账）。
+    """
+    action, params = _transfer_action(90_000)
+    first = funds.initiate(
+        bank, action, session_id="s_u1", node_id="n1",
+        token=_token("transfer", params), secret=SECRET,
+    )
+    funds.commit(bank, first.hold_id, daily_risk_threshold_fen=DAILY_LIMIT_FEN)
+
+    # 同一个人的另一个账户 a_credit 再发起 200 元：用户维度已 900，合计 1100 越线
+    bank.execute("UPDATE accounts SET balance_fen = 200_000 WHERE id = ?", (CREDIT_ID,))
+    params2 = {"payee_id": PAYEE_LIJING, "amount_fen": 20_000}
+    action2 = Action(tool="transfer", params=params2, account_id=CREDIT_ID, amount_fen=20_000)
+    from app.security import token as token_mod
+
+    tok = token_mod.issue(action2, secret=SECRET)
+    hold = funds.initiate(bank, action2, session_id="s_u2", node_id="n1", token=tok, secret=SECRET)
+    with pytest.raises(PolicyDenied) as excinfo:
+        funds.commit(bank, hold.hold_id, daily_risk_threshold_fen=DAILY_LIMIT_FEN)
+    assert excinfo.value.code == "DAILY_RISK_UPGRADE_REQUIRED"
+    # 账本口径仍是各账户一本，但策略口径已经是同一个人的合计
+    assert funds.spent_today_fen(bank, CREDIT_ID) == 90_000
+
+
+def test_concurrent_daily_risk_upgrade_blocks_the_second_transfer(bank) -> None:
+    """两笔各 900 元并发提交：只有一笔能过，另一笔必须升级强验证（不能两笔都放行）。"""
     db_path = _db_path(bank)
     params = {"payee_id": PAYEE_LIJING, "amount_fen": 90_000}
 
@@ -375,22 +440,19 @@ def test_concurrent_daily_limit_blocks_the_second_transfer(bank) -> None:
     # 竞态前提成立：两个会话都以为今天还没花
     assert spent_before == [0, 0]
     committed = [r for r in results if r.ok and r.data.get("status") == "committed"]
-    assert len(committed) == 1, "两笔 900 元都放行了，日累计硬线形同虚设"
+    assert len(committed) == 1, "两笔 900 元都放行了，日累计分级形同虚设"
 
-    # 被拦下的那笔要明确失败，不能悄悄装作成功
     blocked = [r for r in results if r is not committed[0]]
     assert len(blocked) == 1
     assert blocked[0].ok is False
-    assert blocked[0].error_code == "DAILY_LIMIT_EXCEEDED"
-    assert blocked[0].data.get("settle_error") == "DAILY_LIMIT_EXCEEDED"
+    assert blocked[0].error_code == "DAILY_RISK_UPGRADE_REQUIRED"
+    assert blocked[0].data.get("settle_error") == "DAILY_RISK_UPGRADE_REQUIRED"
 
-    # 账上只有一笔出账，日累计只记了一笔，余额只被扣了一次
     assert len([row for row in _txn_rows(bank) if row["direction"] == "out"]) == 1
     assert funds.spent_today_fen(bank, DEBIT_ID) == 90_000
     assert _balance(bank) == DEBIT_BALANCE - 90_000
     assert _balance(bank) >= 0
 
-    # 拒绝也要留痕
     rejected = _rejected_audits(bank)
     assert len(rejected) == 1
-    assert rejected[0]["reason"] == "DAILY_LIMIT_EXCEEDED"
+    assert rejected[0]["reason"] == "DAILY_RISK_UPGRADE_REQUIRED"

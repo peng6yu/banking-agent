@@ -96,6 +96,25 @@ async def _settle(state: RunState, node: Any, rec: NodeRec, result: ToolResult, 
         state.question = question
         rec.summary = question
         persist_node(state, rec, "done")
+        # 收款人不明确 = 这一轮必须停下来等人：落一张接管单，让「转人工」在库里有实体，
+        # 而不是只活在内存的 state.question 里（重启后那条线索就断了）。
+        # 建单失败绝不能打断对话：用户要的是一句追问，不是 500，所以整段旁路 try/except。
+        try:
+            from app import handoffs as handoffs_mod
+
+            reason = "PAYEE_AMBIGUOUS" if (data.get("candidates") or []) else "PAYEE_NOT_FOUND"
+            handoffs_mod.create(
+                state.conn,
+                run_id=state.run_id,
+                session_id=state.session_id,
+                reason=reason,
+                error_code=reason,
+                request_text=state.user_text,
+                account_id=state.account_id,
+                note=question,
+            )
+        except Exception:  # pragma: no cover - 接管单只是旁路记录，失败不影响本轮回答
+            log.warning("创建人工接管单失败 run=%s", state.run_id, exc_info=True)
         await emit_event(emit, "tool", {"node_id": node.id, "ok": True, "summary": question})
         await emit_event(
             emit,

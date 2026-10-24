@@ -1,5 +1,10 @@
 #!/usr/bin/env python3.12
-"""五条高风险浏览器旅程：用真浏览器跑，同时核对 DOM 与服务端状态。
+"""七条高风险浏览器旅程：用真浏览器跑，同时核对 DOM 与服务端状态。
+
+七条分两批：j1 小额转账、j2 红灯 MFA、j4 生日计划、j5 储蓄提醒、j6 候选点击、j7 明确拒绝
+共用一个 MOCK_MODE=script 的后端，在同一浏览器进程里顺序跑完；j3（转账歧义拦截）必须
+真模型才谈得上「歧义」，脚本会停掉前者、重播沙箱、以 MOCK_MODE=false 重启后单独跑，
+所以报告里的 j3 与其余六条不是同一个后端进程，但属于同一次运行（同一 started_at/finished_at）。
 
 为什么单独一个脚本：截图脚本只证明「页面长什么样」，browser_smoke 只跑两条主链路。
 这份旅程脚本要回答的是「用户真的点下去之后，服务端状态是不是也跟着对了」——
@@ -560,11 +565,11 @@ def journey_aa_ambiguous(page: Any, base_url: str, token: str, out: Path) -> dic
             continue
         page.wait_for_timeout(800)
         text = page.inner_text("#chat-log")
-        sid = None
-        try:
-            sid = session_id_of(page)
-        except JourneyFail:
-            sid = None
+        # 服务端核验是 J3 的唯一硬证据：没有 session_id 就没有办法证明「拦住」，
+        # 也就不能把这一轮算成通过（以前这里是 sid=None 静默降级成只看页面文字）。
+        sid = session_id_of(page)
+        if not sid:
+            raise JourneyFail("[J3] 拿不到 session_id，无法核验服务端状态")
         balance_after = balance_fen(base_url, token)
         blocked = "候选不唯一" in text or "不能继续" in text
         moved = balance_after != before or "已转出" in text or "已按 AA" in text
@@ -753,7 +758,7 @@ def restart_if_needed(proc: Any, base_url: str, name: str) -> tuple[Any, str, st
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="五条高风险浏览器旅程（DOM + 服务端状态双证）")
+    parser = argparse.ArgumentParser(description="七条高风险浏览器旅程（DOM + 服务端状态双证；j3 单独走真模型后端）")
     parser.add_argument("--base-url", default="http://127.0.0.1:8127")
     parser.add_argument("--out-dir", default=str(SHOT_DIR))
     parser.add_argument("--only", default="", help="只跑某几条，如 j1,j2")

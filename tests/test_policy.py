@@ -122,17 +122,20 @@ def test_r06_yellow_has_no_extra_factor() -> None:
     assert decision.required_factors == []
 
 
-def test_r07_daily_red_is_a_hard_line_without_factors() -> None:
-    """日累计是监管口径的额度，不是「验个脸就能多花」的门槛。
+def test_r07_daily_red_is_strong_verification_not_a_hard_line() -> None:
+    """日累计 > 1000 是赛题的「大额转账」：红色 + 强验证，验过可以继续。
 
-    多因子只能证明「是你」，不能凭空造出额度；所以 R07 是红牌且不带因子，
-    执行器按 POLICY_BLOCKED 直接拒。单笔超限的 R08 才带 face+sms。
+    2026-10 整改：R07 此前被写成「红牌 + 无因子 = 硬拒绝」，与赛题
+    「大额转账（日累计 >1000 元）→ 人脸/短信多因子」不一致。现在是可验证的红；
+    真正的硬拒只来自显式配置的 R13 绝对上限（默认不设）。
     """
     decision = decide(transfer_action(20_000), PolicyContext(spent_today_fen=90_000))
     assert decision.level == "red"
-    assert decision.required_factors == []
+    assert decision.required_factors == ["face", "sms"]
     assert decision.reason_code == "TRANSFER_DAILY_RED"
     assert decision.spent_today_fen == 90_000
+    assert "人脸" in decision.reason_text and "短信" in decision.reason_text
+    assert "不能转" not in decision.reason_text
 
 
 def test_r09_sensitive_red_has_three_factors() -> None:
@@ -199,7 +202,7 @@ def test_r12_is_not_a_dead_rule() -> None:
     ).rule_id == "R01_readonly"
 
 
-def test_twelve_rules_in_table_order() -> None:
+def test_thirteen_rules_in_table_order() -> None:
     assert [rule.rule_id for rule in RULES] == [
         "R12_other_account",
         "R01_readonly",
@@ -207,6 +210,7 @@ def test_twelve_rules_in_table_order() -> None:
         "R03_unknown_tool",
         "R04_untrusted_amount",
         "R05_confirm_only",
+        "R13_absolute_cap",
         "R06_transfer_yellow",
         "R07_transfer_red_daily",
         "R08_transfer_red_single",
@@ -214,6 +218,30 @@ def test_twelve_rules_in_table_order() -> None:
         "R10_invest_red",
         "R11_default_deny",
     ]
+
+
+def test_absolute_daily_cap_is_opt_in() -> None:
+    """默认部署没有「绝对每日上限」：1000 元只是黄红分级线，不是拒绝线。
+
+    R13 只有在部署显式配置 absolute_cap_fen 时才存在；没配时规则表里等于没有这条。
+    这条钉住「不得把 1000 同时当风险阈值和绝对拒绝限额」。
+    """
+    assert rules_mod.ABSOLUTE_DAILY_CAP_FEN is None
+    decision = decide(transfer_action(20_000), PolicyContext(spent_today_fen=90_000))
+    assert decision.rule_id == "R07_transfer_red_daily"
+
+
+def test_r13_absolute_cap_rejects_without_factors() -> None:
+    """显式配置的绝对上限才是硬拒绝：因子不能给监管额度加码，所以不带 required_factors。"""
+    # 绝对上限设得比风险阈值低：这样本笔仍算黄档累计（90k+10k=100k 不越线），
+    # 只有 R13 这道硬闸能命中，才能证明它是独立的一条规则。
+    ctx = PolicyContext(spent_today_fen=90_000, absolute_cap_fen=95_000)
+    decision = decide(transfer_action(10_000), ctx)
+    assert decision.level == "red"
+    assert decision.rule_id == "R13_absolute_cap"
+    assert decision.reason_code == "ABSOLUTE_DAILY_CAP"
+    assert decision.required_factors == []
+    assert "绝对" in decision.reason_text
 
 
 def test_rules_stop_at_first_hit() -> None:
@@ -370,14 +398,17 @@ def test_red_single_text_asks_for_verification_not_refusal() -> None:
     assert "不能直接做" not in decision.reason_text
 
 
-def test_red_daily_text_explains_the_quota_instead_of_asking_for_biometrics() -> None:
-    """R07 的文案要说清「今天到顶了、明天会重置」，而不是叫用户去验人脸。"""
+def test_red_daily_text_asks_for_multi_factor_verification() -> None:
+    """R07 的文案要说清「这是大额转账、验过人脸+短信可以继续」，不能停在「今天不能转」。
+
+    用户看到确认卡时必须知道下一步是验证，而不是被系统无声拒绝。
+    """
     decision = decide(transfer_action(20_000), PolicyContext(spent_today_fen=90_000))
     assert decision.rule_id == "R07_transfer_red_daily"
-    assert "上限" in decision.reason_text
-    assert "明天" in decision.reason_text
-    assert "人脸" not in decision.reason_text
-    assert "短信" not in decision.reason_text
+    assert "大额转账" in decision.reason_text
+    assert "人脸" in decision.reason_text
+    assert "短信" in decision.reason_text
+    assert "不能转" not in decision.reason_text
 
 
 # ---------- 预约转账不吃日线：规则空隙的回归（评审 F1 / t18） ----------
@@ -427,5 +458,5 @@ def test_daily_exemption_is_scoped_to_scheduled_transfer_only() -> None:
     decision = decide(transfer_action(50_000), PolicyContext(spent_today_fen=90_000))
     assert decision.level == "red"
     assert decision.rule_id == "R07_transfer_red_daily"
-    # 硬线：不带因子，执行器直接拒；带因子会让人误以为「验过就能超」
-    assert decision.required_factors == []
+    # 可验证的红：与单笔超限一样走 face+sms，而不是被静默硬拒
+    assert decision.required_factors == ["face", "sms"]

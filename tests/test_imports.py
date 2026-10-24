@@ -103,6 +103,10 @@ LAYERS: dict[str, int] = {
     "app.api.routes": 5,
     # 只读业务视图（2026-10-23 六区信息架构）：与路由同层，可复用路由的鉴权依赖
     "app.api.business": 5,
+    # 人工接管队列：搬运行级事实并驱动 recover，属于编排层之上
+    "app.handoffs": 5,
+    # 接管队列的 HTTP 面：复用 routes 的鉴权依赖，不自己做鉴权
+    "app.api.handoffs_api": 5,
     "app.api.schemas": 5,
     "app.main": 5,
     # 包本身没有逻辑，聚合再导出不算越层
@@ -138,6 +142,7 @@ ALLOWED: dict[str, frozenset[str]] = {
         "app.security",
         "app.suitability",
         "app.tools.registry",
+        "app.tools.scheduled",
     }),
     "app.api.business": frozenset({
         "app.api.routes",
@@ -150,6 +155,8 @@ ALLOWED: dict[str, frozenset[str]] = {
     }),
     # 入参模型里 FactorProof 复用公共契约（多因子凭证与 /api/confirm 同构）
     "app.api.schemas": frozenset({"app.models"}),
+    # 接管队列的 HTTP 面只依赖数据层与路由里的鉴权依赖
+    "app.api.handoffs_api": frozenset({"app.api.routes"}),
     "app.audit": frozenset({
         "app.clock",
         "app.log",
@@ -374,7 +381,18 @@ ALLOWED: dict[str, frozenset[str]] = {
         "app.money",
         "app.planner",
         "app.planner.dag",
+        # 到期执行要按当下重新裁决、并复用工具的 action 构造
+        "app.policy.engine",
+        "app.policy.rules",
+        "app.tools.base",
         "app.tools.transfers",
+    }),
+    # 人工接管：状态机只搬库里的事实；恢复交给 planner.recover（延迟导入）
+    "app.handoffs": frozenset({
+        "app.clock",
+        "app.ids",
+        "app.planner",
+        "app.planner.runner",
     }),
     "app.subscriptions": frozenset({
         "app.money",
@@ -452,6 +470,9 @@ ALLOWED: dict[str, frozenset[str]] = {
         "app.ids",
         "app.models",
         "app.money",
+        # 到点执行前按用户维度重新裁决：预约不许绕过当天的分级
+        "app.policy",
+        "app.policy.rules",
         "app.security",
         "app.tools.base",
     }),

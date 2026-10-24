@@ -293,3 +293,55 @@
 - 主动财务仍是**手动监测**，没有后台调度器；答辩不得说成全天候服务。
 - `scripts/e2e.py` 曾出现 12/13 步解析为空，根因是脚本未带 HTTP 令牌导致请求被 401（健康检查免鉴权）；修复后 `--offline` 与在线默认端口均 **13/13 PASS**。
 - 知识引用率按规则/工作流层已覆盖，术语层因原话不含标准词而漏，属标注粒度差异，已在评估报告中分层说明，不靠改答案抬分。
+
+## v2.0.0 审计整改轮：日累计分级 / 人工接管 / 预算预留 / 一次性授权 / 沙箱与评测  2026-10-24
+
+> 起因：外部深度审计指出七处「文档写了≠代码实现」或「口径与赛题不符」的缺口。本轮只改有真实缺陷的地方，不推倒既有知识层、确定性资金执行、后台调度与持久化计划。
+
+### 一、任务一：日累计 1000 元的权限分级（P0）
+- [x] `app/policy/rules.py`：删除「日累计越线 = 硬拒绝、不给因子」；新增 `DAILY_RISK_THRESHOLD_FEN=100_000`（黄红分级阈值，用户维度）与可选 `ABSOLUTE_DAILY_CAP_FEN`（默认 `None`）；R07 现在要求 `face+sms`；新增 R13_absolute_cap（在 R06 之前，仅当显式配置绝对上限时命中）；`SYSTEM_SPEND_TOOLS={'scheduled_transfer'}` 让到点执行参与判级但不进对外工具表。
+- [x] `app/funds.py`：判级读**用户维度** `daily_user_limits`（`spent_today_fen`），`daily_limits` 降为账户账单视图（`account_spent_today_fen`）；提交事务内 `_assert_daily_tier` 先查绝对上限（`DAILY_ABSOLUTE_CAP_EXCEEDED`），再查风险阈值——只有 `hold.risk_level=='red'` 才放行，否则抛 `DAILY_RISK_UPGRADE_REQUIRED`；`_bump_daily_counters` 同一事务更新两本账。
+- [x] `app/planner/executor.py`：`_retry_after_upgrade` 在资金层报告升级时用最新累计重裁并重新走确认/强验证；`_existing_confirmation` 校验 `level`，**黄色确认不能授权红色决定**；升级后换 nonce 幂等键并释放旧黄 hold（`app/tools/transfers.py:153`）。
+- [x] `app/tools/scheduled.py`：创建时的判级只作参考，到点 `_fresh_decision` 用当日最新累计重裁；红且无有效因子 → `needs_verification=1` 暂停（审计 `scheduled.needs_verification`），新增 `challenge_scheduled` / `verify_and_execute`（`POST /api/scheduled/{id}/challenge|verify`），成功后烧掉一次性授权。
+- [x] 双口径一致：`daily_user_limits` 由 `scripts/e2e.py`、`scripts/redteam_setup.py`、`routes._rewind_demo` 同步清理/播种，避免「判级看用户账、复位只清账户账」。
+- [x] 验收：`tests/test_daily_risk_tiers.py` 14 条（500+400 黄、500+500 黄=边界、500+800 红强验证、单笔 2000 红、无验证/错验证/过期验证、两笔并发各未越线合计越线、预约创建与执行不同等级、回滚/资金不足不计累计）；`tests/test_daily_upgrade_flow.py` 1 条 planner 级端到端；`tests/test_policy.py` 45 条重写为分级语义；`tests/test_funds_invariants.py` 11 条含并发升级与跨账户用户维度。
+
+### 二、任务二：最小人工接管（P0）
+- [x] 新增 `handoffs` 表（30 张表之一，`UNIQUE` 部分索引保证同一 run 只有一条活跃接管）与 `app/handoffs.py`：`pending/claimed/need_info/rejected/cancelled/resumed/failed` 七态；保存原始请求、run_id、DAG、已完成/失败节点、失败原因、裁决结果与授权状态。
+- [x] `app/api/handoffs_api.py`：受保护的列表/领取/拒绝/要求补充/取消/恢复六类端点；领取用条件 UPDATE，同一任务只能一个操作员；恢复前重查新轮次、确认卡有效期、计划授权、账户可用性、余额，**不重跑已完成资金节点**，失败落 `failed` 不静默成功。
+- [x] `app/planner/runner.py` 在 `PAYEE_AMBIGUOUS` / `PAYEE_NOT_FOUND` 时自动建 pending handoff；`app/planner/conflict.py` 在用户回答澄清后关闭陈旧 handoff（`close_for_run`，审计 `closed_by=run.superseded`）。
+- [x] 审计：`handoff.created/claimed/rejected/need_info/cancelled/resumed/resume_failed` 全部进闭集（总数 49 → 61）。
+- [x] 验收：`tests/test_handoff.py` 14 条覆盖任务书全部最低验收项（转人工、重启保留、并发领取、拒绝、补充信息、过期授权不能恢复、恢复不重复转账、审计齐全）。
+- 剩余风险：`operator` 只是审计字符串，无 RBAC；不对接真实坐席系统。
+
+### 三、任务三：生日预算真正影响可支配金额（P0）
+- [x] `plan_budgets` 增 `account_id` / `hold_id`（`_ADDED_COLUMNS` 迁移兼容旧库；新增 `tests/test_db_migration.py` 3 条）；`app/birthday.py` 创建计划时用 `funds.available_fen` 校验并写账户-预算关联。
+- [x] `app/funds.py`：`held_fen` + `reserved_budget_fen` + `available_fen = balance − holds − 有效预算预留`；即时转账、预约、AA、商户付款、理财申购统一走可支配金额校验；`app/api/business.py` 总览输出 `available_fen / held_fen / reserved_budget_fen`。
+- [x] 闭环：到期项目转正常确认 + 资金 hold（不重复占用预算）；付款成功预算与流水对接、不重复扣减；用户拒绝/计划取消/付款失败/服务重启由 `release_reserved` + `reconcile` 恢复；并发领取同一预算项目条件 UPDATE 防重复扣费。
+- [x] 验收：`tests/test_birthday_budget.py`、`tests/test_birthday_plan.py`、`tests/test_birthday_api_authorization.py`。
+
+### 四、任务四：生日计划一次性预约授权（P1）
+- [x] 新增 `plan_authorizations` 表：绑定 `plan_version` + 账户 + 项目 + 金额；创建计划时 `save_authorization=true` 才保存；`authorize_plan / revoke_authorization / expire_authorizations / run_due_authorized`。
+- [x] 到点执行前重判：仅仍合法的黄色可用预授权自动执行；升级为红或参数变化必须暂停并要求强验证/用户确认；取消计划即撤销授权，后台不再启动付款（`app/planner/ticker.py` 先 `birthday.run_due_authorized` 再 `plans.run_due`）。
+- [x] 验收：`tests/test_birthday_authorization.py`、`tests/test_birthday_api_authorization.py`（4 条：预留改 available 不改 balance、授权绑定版本、到期窗口前后、红日不自动扣）。
+
+### 五、任务五：沙箱合规说明与安全验证（P1）
+- [x] `docs/security_sandbox.md`：明确架构选择「主 Agent 不执行任意模型生成代码」，给出逐跳调用链 file:line、13 处动态 SQL 逐条复核、9 处离线 `subprocess` 归属、6 条剩余风险；不宣称已部署容器沙箱。
+- [x] `scripts/prove_no_exec_surface.py` 实测 75 文件 / 25,383 行：代码执行面 0 命中，出网 3 处（`app/llm.py:7/:297/:303`）；`tests/test_no_exec_surface.py` 14 条把结论钉住。
+
+### 六、任务六：A/B 配对统计与浏览器回归（P1）
+- [x] 8 轮完整真实 80 例（mock=false）配对统计：逐轮 intent B−A 为 −1.25 / +2.50 / 0 / +2.50 / +5.00（MiniMax）与 +5.00 / −2.50 / +8.75（DeepSeek），**符号翻转**；同配置 A 组复跑极差 6.25pp / 11.25pp；仅 `20261024T160805` 的 +8.75pp 配对 bootstrap CI[+2.50,+16.25] 不含 0，属单轮单次采样；**不宣称知识层稳定提升**。
+- [x] 稳定成立的是知识引用：B 41–42/51 vs A=0。`scripts/ab_stats.py`、`docs/benchmark/ab_paired_stats.md` 记录方法与限制（配对 bootstrap 只估计样本层面差值，不替代重复采样方差）。
+- [x] 浏览器：7 条旅程由同一份 `scripts/ui_journeys.py` 实际执行、失败 0；j3 单独以真模型后端跑并硬断言服务端状态，j1/j2/j4/j5/j6/j7 用 `MOCK_MODE=script`；J4/J5 为 API 驱动流程级，文档已如实标注；`docs/benchmark/browser_journey_audit.md` 记录差异。
+
+### 七、任务七：交付材料统一
+- [x] 重新生成 `docs/benchmark/release_manifest.json`；README / 验收报告 / 优先级 / 差距矩阵 / 提交物对照表 / PPT 大纲 / 演示方案 / 本文件全部引用同一份事实，旧数字标「历史基线」。
+- [x] 最终复验（2026-10-24，全部 exit 0）：pytest **1415 passed / 4 skipped**（196.86s）；红队 **43/43**；e2e `--offline` **13/13**；浏览器旅程 **7/7**。
+- [x] 规模变化（历史基线 → 本轮）：测试文件 81 → 88（`tests/test_*.py`；`tests/` 下 `.py` 共 93，含 5 个夹具/辅助）；数据库表 27 → 30；审计事件 49 → 61；权限规则 12 → 13；API 路径 30 → 39；工具 35 不变。
+
+### 遗留（照实说）
+- 真实短信/人脸渠道仍未接：未声明 `FACTOR_PROVIDER` 时 `issue()` 抛 `SystemBusy` 并 503，不落挑战；演示环境仍用可回显的本地桩。
+- 人工接管是本地操作员队列，无 RBAC、无坐席系统、无 SLA；`operator` 字段可伪造，只能靠 HTTP 入口令牌挡在门外。
+- 沙箱是「消除执行面」的架构选择，不是 OS/容器级隔离；评审若要求实际沙箱，需另建无网络、无文件、无密钥的受限计算环境。
+- A/B 每轮单次采样，配对统计只能说明这批样本上的差异方向，不能外推为稳定提升；补跑需真实配额，未使用 MOCK_MODE 伪造结果。
+- 未推送远程仓库：本轮改动仅在本工作区与本地提交中。

@@ -15,7 +15,7 @@ from typing import Any
 from app.clock import BankError, MissingCapability, ValidationError
 from app.funds import SYSTEM_PAYEE_ID
 from app.models import Action, ToolResult
-from app.policy.rules import DAILY_LIMIT_FEN
+from app.policy.rules import ABSOLUTE_DAILY_CAP_FEN, DAILY_RISK_THRESHOLD_FEN
 from app.security import token as token_mod
 
 
@@ -54,26 +54,30 @@ def require_token(tool: str, params: dict[str, Any], token: str | None) -> str:
     raise MissingCapability(reason="TOKEN_MISSING", tool=tool, params_keys=sorted(params))
 
 
-def daily_cap_fen(token: str | None, secret: str | None) -> int | None:
-    """这次出账要守的日累计硬线（分）；None = 这笔不占用日消费额度。
+def commit_limits(
+    token: str | None, secret: str | None
+) -> tuple[int | None, int | None]:
+    """这次出账要带下去的两条日累计线：(风险阈值, 绝对上限)。
 
-    工具层不自己判断「能不能超线」——那是 policy 的活（docs/06 6.7）。
-    policy 的结论已经写在令牌的等级里（token.level 就是当次决策的等级）：
-    - 黄牌：策略判的是「今天还没超线」，把硬线带下去，让钱这一层在扣款那一刻
-      再原子地核一次——防的就是两个会话同时读到旧余额的竞态；
-    - 红牌：只有 R08（单笔金额超过单笔限额）会让用户过 face/sms 双因子后仍然
-      放行，这时不重复拦；R07 的日累计是硬线，策略层已直接拒掉，走不到这里；
-    - 令牌解不开：按最严处理（守住硬线），宁可少花也不超支。
+    工具层不自己判断「能不能过线」——那是 policy 的活（docs/06 6.7），
+    policy 的结论已经写在令牌的等级里（token.level 就是当次决策的等级）。
+    这里只负责把两条线原样交给资金层，让钱在扣款那一刻、同一个事务里再核一次：
+    - 黄牌：带上风险阈值。资金层若发现这笔会让当日累计越线（说明这期间别的
+      交易已经把它推过线了），就整笔拒绝并抛 DAILY_RISK_UPGRADE_REQUIRED，
+      上层重新走强验证——旧黄卡不能替红操作签字。
+    - 红牌：这笔本就已经在红灯下验过人脸+短信，风险阈值不再拦它（传 None）；
+      但绝对上限（若部署配置了）依然生效，因子不能给监管额度加码。
+    - 令牌解不开：按最严处理（守住风险阈值），宁可多验一次也不越级。
     """
-    if not token:
-        return DAILY_LIMIT_FEN
+    if not token or token_mod is None:
+        return (DAILY_RISK_THRESHOLD_FEN, ABSOLUTE_DAILY_CAP_FEN)
     try:
         payload = token_mod.decode(token, secret=secret)
     except (BankError, ValueError, KeyError, TypeError):
-        return DAILY_LIMIT_FEN
+        return (DAILY_RISK_THRESHOLD_FEN, ABSOLUTE_DAILY_CAP_FEN)
     if payload.level == "red":
-        return None
-    return DAILY_LIMIT_FEN
+        return (None, ABSOLUTE_DAILY_CAP_FEN)
+    return (DAILY_RISK_THRESHOLD_FEN, ABSOLUTE_DAILY_CAP_FEN)
 
 
 def ok_result(data: dict[str, Any] | None = None) -> ToolResult:
@@ -191,7 +195,7 @@ __all__ = [
     "ToolContext",
     "account_rows",
     "build_action",
-    "daily_cap_fen",
+    "commit_limits",
     "ensure_system_payee",
     "fail_result",
     "find_account_by_tail",

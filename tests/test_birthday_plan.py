@@ -115,8 +115,15 @@ def test_create_plan_reserves_budget_without_touching_money(bank) -> None:
     # 审计：建计划 + 预算占用
     assert _events("plan.created")
     reserved = _events("plan.budget_reserved")
-    assert reserved and reserved[0]["scope"] == "bookkeeping_reservation"
+    # 语义升级：从"账本占用"变成"真实占用可支配金额"，审计 scope 跟着换名字，
+    # 老数据保留旧 scope，对账时能分出两种口径。
+    assert reserved and reserved[0]["scope"] == "available_ledger_reservation"
     assert reserved[0]["reserved_fen"] == 100_000
+    assert reserved[0]["account_id"] == DEBIT
+    # 余额没动，但可支配金额少了 1000 元——这才是"预留"该有的样子
+    assert plan["budget"]["balance_fen"] == before
+    assert plan["budget"]["reserved_budget_fen"] == 100_000
+    assert plan["budget"]["available_fen"] == before - 100_000
 
 
 def test_items_over_budget_are_refused(bank) -> None:
@@ -260,25 +267,32 @@ def test_user_refusal_is_recorded_and_moves_no_money(bank) -> None:
     assert _events("plan.item_declined")[-1]["item_key"] == "cake"
 
 
-def test_insufficient_balance_fails_with_audit(bank) -> None:
+def test_insufficient_available_balance_blocks_payment_and_keeps_reservation(bank) -> None:
+    """余额 10 元、预算却占着 1000 元：领取前就拦住，报可支配金额不够。
+
+    和「执行到一半失败」不同：这是可恢复的资金不足，预算必须保持 reserved——
+    用户补足余额后可以直接重试，不用回滚重建计划。
+    """
     plan = _create(bank, days=20)
     bank.execute("UPDATE accounts SET balance_fen = 1000 WHERE id = ?", (DEBIT,))
     bank.commit()
     import asyncio
 
-    result = asyncio.run(
-        birthday.pay_item(plan_id=plan["plan_id"], item_key="flowers", session_id="s_bday_poor")
-    )
-    assert result["status"] == "failed", result
-    assert result["error_code"]
+    from app.clock import InsufficientFunds
+
+    with pytest.raises(InsufficientFunds) as exc:
+        asyncio.run(
+            birthday.pay_item(
+                plan_id=plan["plan_id"], item_key="flowers", session_id="s_bday_poor"
+            )
+        )
+    assert exc.value.code == "INSUFFICIENT_FUNDS"
     assert _balance() == 1000
+    assert _holds() == 0
     view = birthday.plan_with_budgets(bank, plan["plan_id"])
     flowers = [item for item in view["items"] if item["item_key"] == "flowers"][0]
-    assert flowers["status"] == "failed"
-    assert flowers["reason"]
-    failed = _events("plan.item_failed")[-1]
-    assert failed["item_key"] == "flowers"
-    assert failed["error_code"]
+    assert flowers["status"] == "reserved"
+    assert not _events("plan.item_failed")
 
 
 def test_large_item_needs_server_verified_factor_before_any_money_moves(bank) -> None:

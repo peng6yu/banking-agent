@@ -17,7 +17,7 @@ from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app import db
-from app.api import business, routes
+from app.api import business, handoffs_api, routes
 from app.clock import BankError
 from app.llm import LLMError
 from app.planner import ticker
@@ -98,6 +98,9 @@ app.include_router(routes.router)
 # 只读业务视图（财务总览/账单分析/业务管理/计划与提醒/执行记录）与聊天流并列注册：
 # 前者描述"账户现在什么状态"，后者描述"某次会话执行到了哪里"，不是同一种数据。
 app.include_router(business.router)
+# 人工接管队列：每张单都带 run/DAG/失败原因，属于「运维视角」的敏感数据，
+# 和业务视图一样挂在 require_api_token 后面（router 内部已声明依赖）。
+app.include_router(handoffs_api.router)
 
 
 @app.exception_handler(BankError)

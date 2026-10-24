@@ -850,9 +850,16 @@ def test_daily_cap_is_also_decided_before_the_payee_question(bank: Path) -> None
     """超日累计同样先落裁决：R07 跟收款人是谁没关系。"""
     conn = db.connect()
     day = datetime.fromtimestamp(clock.now_ms() // 1000).strftime("%Y-%m-%d")
+    # 两本账都要种子：daily_limits 是账户账单口径，daily_user_limits 才是策略判级口径。
+    # 只种账户账会让 spent_today_fen（用户维度）读到 0，用例就测不到 R07。
     conn.execute(
         "INSERT INTO daily_limits (account_id, day, spent_fen, tx_count) VALUES (?, ?, ?, ?)",
         ("a_3d7e60c2", day, 90_000, 3),
+    )
+    conn.execute(
+        "INSERT INTO daily_user_limits (user_id, day, spent_fen, tx_count)"
+        " SELECT user_id, ?, ?, ? FROM accounts WHERE id = ?",
+        (day, 90_000, 3, "a_3d7e60c2"),
     )
     conn.commit()
     conn.close()

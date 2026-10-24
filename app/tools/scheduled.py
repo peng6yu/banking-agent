@@ -34,13 +34,15 @@ import app.funds as funds  # noqa: PLR0402
 import app.ids as ids  # noqa: PLR0402
 from app.clock import PolicyDenied, ValidationError, now_ms
 from app.ids import idempotency_key
-from app.models import ToolResult
+from app.models import Action, ToolResult
 from app.money import fen_to_yuan_str
+from app.policy import PolicyContext, decide
+from app.policy.rules import ABSOLUTE_DAILY_CAP_FEN, DAILY_RISK_THRESHOLD_FEN
+from app.security import factors as factors_mod
 from app.security import token as token_mod
 from app.tools.base import (
     ToolContext,
     build_action,
-    daily_cap_fen,
     fail_result,
     ok_result,
     payee_exists,
@@ -154,7 +156,8 @@ def list_scheduled(
     # 会把别人名下的预约转账也列出来（越权读）。现在从当前账户反查 user_id。
     acct = primary_account(ctx.conn, ctx.account_id)
     rows = ctx.conn.execute(
-        "SELECT s.id, s.amount_fen, s.due_ms, s.recurrence, s.status, p.name AS payee"
+        "SELECT s.id, s.amount_fen, s.due_ms, s.recurrence, s.status,"
+        "       s.needs_verification, p.name AS payee"
         " FROM scheduled_transfers s JOIN payees p ON p.id = s.payee_id"
         " JOIN accounts a ON a.id = s.account_id"
         " WHERE s.status = 'scheduled' AND a.user_id = ? ORDER BY s.due_ms",
@@ -169,6 +172,9 @@ def list_scheduled(
             "due_ms": int(row["due_ms"]),
             "due_text": _time_text(int(row["due_ms"])),
             "recurrence": str(row["recurrence"]),
+            # 到点复判升级成红灯但还没强验证：前端要明确提示「需要再验一次」，
+            # 别让用户以为它只是「还没到点」。
+            "needs_verification": bool(row["needs_verification"]),
         }
         for row in rows
     ]
@@ -221,7 +227,7 @@ def execute_due(
     db.ensure_columns(conn)
     rows = conn.execute(
         "SELECT * FROM scheduled_transfers WHERE status = 'scheduled' AND due_ms <= ?"
-        " ORDER BY due_ms",
+        " AND needs_verification = 0 ORDER BY due_ms",
         (stamp,),
     ).fetchall()
     done: list[dict[str, Any]] = []
@@ -253,12 +259,15 @@ def _claim(conn: sqlite3.Connection, sched_id: str, stamp: int) -> str | None:
     期间别的进程可能已经把这行顺延到明天（额度不够）。只按 ID+status 抢，会把
     「明天才该执行的行」当今天执行，然后用上一轮的幂等键重放到一份已释放的 hold 上，
     把一条本来只是顺延的预约误判成失败。这个条件让抢行重新读一次库里的真实到期时间。
+    同理要排除 needs_verification=1：进入循环的快照可能早于「到点复判为红、已挂起待验证」，
+    不排除的话旧 worker 会绕过挂起状态直接再执行一次。
     """
     token = uuid.uuid4().hex[:12]
     with _tx(conn):
         cur = conn.execute(
             "UPDATE scheduled_transfers SET claim_token = ?, claimed_ms = ?"
             " WHERE id = ? AND status = 'scheduled' AND due_ms <= ?"
+            " AND needs_verification = 0"
             " AND (claim_token = '' OR claimed_ms <= ?)",
             (token, stamp, sched_id, stamp, stamp - CLAIM_LEASE_MS),
         )
@@ -280,14 +289,20 @@ def _release_claim(conn: sqlite3.Connection, sched_id: str, token: str) -> None:
 def _execute_one(
     conn: sqlite3.Connection, row: sqlite3.Row, stamp: int, secret: str | None = None
 ) -> dict[str, Any]:
-    """执行单条预约：签系统令牌、建 hold、commit、写审计。
+    """执行单条预约：到点复判、签系统令牌、建 hold、commit、写审计。
 
-    三条边界：
+    四条边界：
     1. 到点执行是系统受信组件，不经模型，令牌只能在这里自签。写工具的令牌本该由
        planner 签，但到点执行时没有 planner 在场——这是全仓唯一的自签例外。
-    2. 创建期验过因子的预约（factor_verified_ms）发红牌令牌：当日额度线不再拦它。
-       否则「预约一笔 2000 元」会在到点那天被额度线拦死，用户以为产品坏了。
-    3. 撞了当日额度不是失败：让出今天、顺延到明天，status 仍是 scheduled，
+    2. **创建时的判档不算数**：到点那天按用户维度的当前日累计重新裁决（R06/R07/R08）。
+       预约机制不能成为绕过日累计的旁路——用户三周前验过一次人脸，不代表他今天
+       累计转了几万还可以继续。复判是红的、而创建期的因子验证又缺失或过期，
+       这笔就停在 needs_verification 等用户补一次强验证：不自动执行、也不静默顺延，
+       因为「默默等一天」会让用户以为排上了，实际上永远排不上。
+    3. 创建期验过因子且仍在保质期（AUTH_TTL_MS）内 → 发红牌令牌，red 档允许越过
+       日累计分级线（这正是强验证换来的额度），但仍受绝对每日限额（如有）约束。
+       授权用一次就作废：执行成功即清 factor_verified_ms，下个月想再越线得再验。
+    4. 撞了分级线不是失败：让出今天、顺延到明天，status 仍是 scheduled，
        审计写 scheduled.deferred；顺延有上限，超过上限才明确失败。
     """
     sched_id = str(row["id"])
@@ -315,9 +330,16 @@ def _execute_one(
         amount_fen,
     )
     session_id = f"sched:{sched_id}"
+    # 到点复判：只读、不改钱，真正的原子性仍由 funds.commit 保证。
+    decision = _fresh_decision(conn, action, stamp)
+    if decision.level == "red" and not verified:
+        return _need_verification(conn, row, stamp, session_id=session_id, decision=decision)
+    # 红牌（且已验证）→ 不设分级线，允许越过；黄牌 → 仍按分级线保护。
+    risk_fen = None if decision.level == "red" else DAILY_RISK_THRESHOLD_FEN
     try:
         tok = token_mod.issue_audited(
-            conn, action, session_id=session_id, level="red" if verified else "yellow", secret=secret
+            conn, action, session_id=session_id,
+            level="red" if decision.level == "red" else "yellow", secret=secret
         )
         hold = funds.initiate(
             conn, action, session_id=session_id, node_id="due", token=tok, payee_id=payee_id, secret=secret
@@ -331,17 +353,28 @@ def _execute_one(
             return {"scheduled_id": sched_id, "status": "skipped", "reason": "ALREADY_HANDLED"}
         try:
             outcome = funds.commit(
-                conn, hold.hold_id, daily_limit_fen=daily_cap_fen(tok, secret)
+                conn, hold.hold_id,
+                daily_risk_threshold_fen=risk_fen,
+                absolute_daily_cap_fen=ABSOLUTE_DAILY_CAP_FEN,
             )
         except PolicyDenied as exc:
-            if exc.code != "DAILY_LIMIT_EXCEEDED":
-                raise
-            # 当日额度不够：这笔让出来，明天再来。hold 也放掉，别让它白占 300 秒。
-            funds.release(conn, hold.hold_id, reason="DAILY_LIMIT_EXCEEDED", session_id=session_id)
-            return _defer(conn, row, stamp, session_id=session_id)
+            funds.release(conn, hold.hold_id, reason=exc.code, session_id=session_id)
+            if exc.code == "DAILY_RISK_UPGRADE_REQUIRED":
+                # 复判之后、提交之前，别的交易把日累计推过了线（并发时序）。
+                # 这里不能沿用创建期的黄牌，也不能悄悄顺延：转人工/强验证。
+                return _need_verification(
+                    conn, row, stamp, session_id=session_id, decision=decision,
+                    error_code=exc.code,
+                )
+            if exc.code == "DAILY_ABSOLUTE_CAP_EXCEEDED":
+                # 绝对限额是硬线：因子也突破不了，明天额度重算。
+                return _defer(conn, row, stamp, session_id=session_id,
+                              reason=exc.code)
+            raise
         with _tx(conn):
             conn.execute(
-                "UPDATE scheduled_transfers SET status = ?, executed_ms = ? WHERE id = ?",
+                "UPDATE scheduled_transfers SET status = ?, executed_ms = ?,"
+                " needs_verification = 0, factor_verified_ms = 0 WHERE id = ?",
                 ("executed" if str(row["recurrence"]) == "once" else "scheduled", stamp, sched_id),
             )
             if str(row["recurrence"]) == "monthly":
@@ -349,11 +382,14 @@ def _execute_one(
                     "UPDATE scheduled_transfers SET due_ms = ? WHERE id = ?",
                     (_next_month_ms(int(row["due_ms"])), sched_id),
                 )
+            # 一次性授权用完即焚：这一笔的强验证不复制给下一期、也不复制给别的交易。
             audit.append(
                 conn,
                 "scheduled.executed",
                 {"scheduled_id": sched_id, "hold_id": hold.hold_id,
-                 "amount_fen": amount_fen, "balance_after_fen": int(outcome.balance_after_fen)},
+                 "amount_fen": amount_fen, "balance_after_fen": int(outcome.balance_after_fen),
+                 "level": decision.level, "rule_id": decision.rule_id,
+                 "verified_factor_used": bool(verified)},
                 session_id=session_id,
             )
         return {"scheduled_id": sched_id, "status": "executed", "amount_fen": amount_fen}
@@ -374,6 +410,198 @@ def _execute_one(
                 session_id=session_id,
             )
         return {"scheduled_id": sched_id, "status": "failed", "error": str(exc)}
+
+
+def _fresh_decision(
+    conn: sqlite3.Connection, action: Action, stamp: int
+) -> Any:
+    """按当前用户维度的日累计重新裁决这笔预约，不碰钱。
+
+    口径必须和 planner 一致：spent 走 funds.spent_today_fen（同一用户所有账户），
+    否则预约这条旁路会和在线转账用两把尺子量同一天。
+    """
+    spent = funds.spent_today_fen(conn, action.account_id, at_ms=stamp)
+    return decide(action, PolicyContext(spent_today_fen=spent, now_ms=stamp))
+
+
+def _need_verification(
+    conn: sqlite3.Connection,
+    row: sqlite3.Row,
+    stamp: int,
+    *,
+    session_id: str,
+    decision: Any,
+    error_code: str = "",
+) -> dict[str, Any]:
+    """把预约挂到「等待强验证」：不动钱、不顺延、不判失败。
+
+    这是人工/用户介入点：用户补一次人脸+短信，走到 verify_and_execute 才继续。
+    needs_verification 是持久列，进程重启后仍然待验证，不会被 ticker 悄悄重跑。
+    """
+    sched_id = str(row["id"])
+    with _tx(conn):
+        conn.execute(
+            "UPDATE scheduled_transfers SET needs_verification = 1 WHERE id = ?",
+            (sched_id,),
+        )
+        audit.append(
+            conn,
+            "scheduled.needs_verification",
+            {
+                "scheduled_id": sched_id,
+                "amount_fen": int(row["amount_fen"]),
+                "level": decision.level,
+                "rule_id": decision.rule_id,
+                "reason_code": decision.reason_code,
+                "required_factors": list(decision.required_factors),
+                "trigger_error_code": error_code,
+            },
+            session_id=session_id,
+        )
+    log.info("scheduled.needs_verification id=%s rule=%s", sched_id, decision.rule_id)
+    return {
+        "scheduled_id": sched_id,
+        "status": "needs_verification",
+        "level": decision.level,
+        "rule_id": decision.rule_id,
+        "reason_code": decision.reason_code,
+        "required_factors": list(decision.required_factors),
+        "amount_fen": int(row["amount_fen"]),
+    }
+
+
+def challenge_scheduled(
+    conn: sqlite3.Connection,
+    scheduled_id: str,
+    factor: str,
+    *,
+    secret: str | None = None,
+    now: int | None = None,
+) -> dict[str, Any]:
+    """给一笔「到点复判变红」的预约签发强验证挑战。
+
+    挑战绑定 sched:<id>，所以它只能用来验这一笔预约，不能被拿去当别的交易的证明。
+    """
+    stamp = int(now if now is not None else now_ms())
+    db.ensure_columns(conn)
+    row = conn.execute(
+        "SELECT * FROM scheduled_transfers WHERE id = ?", (scheduled_id,)
+    ).fetchone()
+    if row is None:
+        raise ValidationError("没找到这条预约", scheduled_id=scheduled_id)
+    if str(row["status"]) != "scheduled":
+        raise ValidationError("这条预约已经不在待执行状态", status=str(row["status"]))
+    action = build_action(
+        "scheduled_transfer",
+        {"payee_id": str(row["payee_id"]), "amount_fen": int(row["amount_fen"]),
+         "due_ms": int(row["due_ms"])},
+        str(row["account_id"]),
+        int(row["amount_fen"]),
+    )
+    decision = _fresh_decision(conn, action, stamp)
+    kind = str(factor or "").strip().lower()
+    if kind not in decision.required_factors:
+        raise ValidationError(
+            "当前这笔预约不需要这个验证因子", factor=kind,
+            required=list(decision.required_factors),
+        )
+    session_id = f"sched:{scheduled_id}"
+    return factors_mod.issue(
+        conn,
+        session_id=session_id,
+        confirmation_id=session_id,
+        factor=kind,
+        secret=secret,
+        now=stamp,
+    )
+
+
+def verify_and_execute(
+    conn: sqlite3.Connection,
+    scheduled_id: str,
+    *,
+    proofs: Any,
+    secret: str | None = None,
+    now: int | None = None,
+) -> dict[str, Any]:
+    """用户/操作员补一次强验证，然后立刻尝试执行这笔预约。
+
+    只有验过了才写 factor_verified_ms；失败保持 needs_verification，并留审计。
+    恢复执行时会**重新裁决**（execute_due 内部再算一次），不会拿旧判档直接放行。
+    """
+    stamp = int(now if now is not None else now_ms())
+    db.ensure_columns(conn)
+    row = conn.execute(
+        "SELECT * FROM scheduled_transfers WHERE id = ?", (scheduled_id,)
+    ).fetchone()
+    if row is None:
+        raise ValidationError("没找到这条预约", scheduled_id=scheduled_id)
+    if str(row["status"]) != "scheduled":
+        return {"ok": False, "scheduled_id": scheduled_id,
+                "status": str(row["status"]), "reason": "SCHEDULED_NOT_ACTIVE"}
+    action = build_action(
+        "scheduled_transfer",
+        {"payee_id": str(row["payee_id"]), "amount_fen": int(row["amount_fen"]),
+         "due_ms": int(row["due_ms"])},
+        str(row["account_id"]),
+        int(row["amount_fen"]),
+    )
+    decision = _fresh_decision(conn, action, stamp)
+    session_id = f"sched:{scheduled_id}"
+    if decision.level == "red":
+        result = factors_mod.verify(
+            conn,
+            session_id=session_id,
+            confirmation_id=session_id,
+            required=list(decision.required_factors),
+            proofs=proofs,
+            secret=secret,
+            now=stamp,
+        )
+        if not result.get("ok"):
+            with _tx(conn):
+                audit.append(
+                    conn,
+                    "scheduled.verification_failed",
+                    {"scheduled_id": scheduled_id,
+                     "missing": list(result.get("missing") or []),
+                     "invalid": list(result.get("invalid") or [])},
+                    session_id=session_id,
+                )
+            return {"ok": False, "scheduled_id": scheduled_id,
+                    "status": "needs_verification", "reason": "FACTOR_NOT_VERIFIED",
+                    "missing": list(result.get("missing") or []),
+                    "invalid": list(result.get("invalid") or [])}
+        with _tx(conn):
+            conn.execute(
+                "UPDATE scheduled_transfers SET factor_verified_ms = ?, needs_verification = 0"
+                " WHERE id = ?",
+                (stamp, scheduled_id),
+            )
+            audit.append(
+                conn,
+                "scheduled.verified",
+                {"scheduled_id": scheduled_id, "factors": list(decision.required_factors),
+                 "rule_id": decision.rule_id},
+                session_id=session_id,
+            )
+    elif int(row["needs_verification"] or 0):
+        with _tx(conn):
+            conn.execute(
+                "UPDATE scheduled_transfers SET needs_verification = 0 WHERE id = ?",
+                (scheduled_id,),
+            )
+            audit.append(
+                conn,
+                "scheduled.verification_waived",
+                {"scheduled_id": scheduled_id, "rule_id": decision.rule_id},
+                session_id=session_id,
+            )
+    results = execute_due(conn, now=stamp, secret=secret)
+    mine = [r for r in results if r.get("scheduled_id") == scheduled_id]
+    return {"ok": True, "scheduled_id": scheduled_id,
+            "status": (mine[0]["status"] if mine else "not_due"),
+            "result": mine[0] if mine else None}
 
 
 def _next_month_ms(due_ms: int) -> int:
@@ -403,7 +631,12 @@ def _next_day_ms(due_ms: int) -> int:
 
 
 def _defer(
-    conn: sqlite3.Connection, row: sqlite3.Row, stamp: int, *, session_id: str
+    conn: sqlite3.Connection,
+    row: sqlite3.Row,
+    stamp: int,
+    *,
+    session_id: str,
+    reason: str = "DAILY_RISK_THRESHOLD",
 ) -> dict[str, Any]:
     """当日额度不够：这笔顺延到下一个自然日，status 仍是 scheduled。
 
@@ -424,7 +657,7 @@ def _defer(
                 conn,
                 "scheduled.deferred",
                 {"scheduled_id": sched_id, "amount_fen": amount_fen,
-                 "reason": "DAILY_LIMIT_EXCEEDED", "original_due_ms": old_due,
+                 "reason": reason, "original_due_ms": old_due,
                  "defer_count": count, "gave_up": True},
                 session_id=session_id,
             )
@@ -441,7 +674,7 @@ def _defer(
             conn,
             "scheduled.deferred",
             {"scheduled_id": sched_id, "amount_fen": amount_fen,
-             "reason": "DAILY_LIMIT_EXCEEDED", "original_due_ms": old_due,
+             "reason": reason, "original_due_ms": old_due,
              "due_ms": new_due, "defer_count": count},
             session_id=session_id,
         )
@@ -457,4 +690,3 @@ def _time_text(ms: int) -> str:
 
 def _tx(conn: sqlite3.Connection) -> Any:
     return db.tx(conn)
-

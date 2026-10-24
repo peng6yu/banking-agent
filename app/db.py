@@ -26,7 +26,8 @@ PRAGMAS: Final[tuple[str, ...]] = (
     "PRAGMA busy_timeout=5000;",
 )
 
-# 28 张表（改造前 18 + 主动财务 4 + 本轮 6：因子挑战、投资者画像、计划、计划步骤、订阅推断字段在 subs、运行元数据在 dag_runs）
+# 30 张表（改造前 27 + 本轮 3：用户维度日累计 daily_user_limits、计划一次性授权
+# plan_authorizations、人工接管队列 handoffs；订阅推断字段在 subs、运行元数据在 dag_runs）
 TABLE_NAMES: Final[tuple[str, ...]] = (
     "users",
     "accounts",
@@ -42,6 +43,7 @@ TABLE_NAMES: Final[tuple[str, ...]] = (
     "token_nonces",
     "subs",
     "daily_limits",
+    "daily_user_limits",
     "denials",
     "fund_products",
     "fund_holdings",
@@ -55,6 +57,8 @@ TABLE_NAMES: Final[tuple[str, ...]] = (
     "plans",
     "plan_steps",
     "plan_budgets",
+    "plan_authorizations",
+    "handoffs",
 )
 
 SCHEMA_SQL: Final[str] = """
@@ -107,6 +111,9 @@ CREATE TABLE IF NOT EXISTS holds (
   amount_fen      INTEGER NOT NULL CHECK (amount_fen > 0),
   note            TEXT NOT NULL DEFAULT '',
   status          TEXT NOT NULL CHECK (status IN ('held','committed','released','expired')),
+  -- 建 hold 时那次令牌裁决的等级。commit 只认这一列，不认调用方现传的参数：
+  -- 否则「黄色确认卡先建好、另一笔并发把日累计推过阈值」时，旧黄卡还能把红操作放过去。
+  risk_level      TEXT NOT NULL DEFAULT 'yellow' CHECK (risk_level IN ('green','yellow','red')),
   idempotency_key TEXT NOT NULL UNIQUE,
   session_id      TEXT NOT NULL,
   created_ms      INTEGER NOT NULL,
@@ -210,12 +217,25 @@ CREATE TABLE IF NOT EXISTS subs (
 );
 CREATE INDEX IF NOT EXISTS idx_subs_account ON subs(account_id);
 
+-- 账户维度的日累计：账务口径，按账户记（谁家的哪张卡花了多少）。
+-- 它**不再**直接喂给策略：赛题的「日累计」是用户维度（同一自然人的所有账户合起来算），
+-- 那个口径在下面那张表里。保留这张表是为了账户级账单与历史兼容。
 CREATE TABLE IF NOT EXISTS daily_limits (
   account_id TEXT NOT NULL REFERENCES accounts(id),
   day        TEXT NOT NULL,
   spent_fen  INTEGER NOT NULL DEFAULT 0,
   tx_count   INTEGER NOT NULL DEFAULT 0,
   PRIMARY KEY (account_id, day)
+);
+
+-- 用户维度的日累计：策略判级的唯一口径（赛题：日累计 ≤1000 元为黄，>1000 元为红）。
+-- 与 daily_limits 在同一个事务里一起更新，两者永远同源。
+CREATE TABLE IF NOT EXISTS daily_user_limits (
+  user_id   TEXT NOT NULL REFERENCES users(id),
+  day       TEXT NOT NULL,
+  spent_fen INTEGER NOT NULL DEFAULT 0,
+  tx_count  INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (user_id, day)
 );
 
 CREATE TABLE IF NOT EXISTS denials (
@@ -269,6 +289,9 @@ CREATE TABLE IF NOT EXISTS scheduled_transfers (
   factor_verified_ms INTEGER NOT NULL DEFAULT 0,
   -- 撞了当日额度被顺延的次数：顺延有上限，超过上限就明确失败，不无限期挂着。
   defer_count        INTEGER NOT NULL DEFAULT 0,
+  -- 到点复判后升级成红灯、但这次预约没有有效强验证记录：停在这里等用户再验一次，
+  -- 不进执行、也不假装执行过。0 = 正常排队。
+  needs_verification INTEGER NOT NULL DEFAULT 0 CHECK (needs_verification IN (0,1)),
   idempotency_key TEXT NOT NULL UNIQUE
 );
 CREATE INDEX IF NOT EXISTS idx_sched_due ON scheduled_transfers(status, due_ms);
@@ -395,6 +418,11 @@ CREATE TABLE IF NOT EXISTS plan_budgets (
   label       TEXT NOT NULL,
   merchant    TEXT NOT NULL,
   amount_fen  INTEGER NOT NULL CHECK (amount_fen > 0),
+  -- 这笔预留占的是哪个账户的可支配金额。历史数据为 NULL（当时只是记账），
+  -- 新数据必须带上，否则「预留」和「账户」对不上，别的写操作不可能被它拦住。
+  account_id  TEXT REFERENCES accounts(id),
+  -- 转成付款 hold 后指向那份 hold：一笔钱只能有一个占用者，避免预算与 hold 重复扣。
+  hold_id     TEXT,
   extra_json  TEXT NOT NULL DEFAULT '{}',
   status      TEXT NOT NULL CHECK (status IN ('reserved','paying','committed','declined','failed','released')),
   reason      TEXT NOT NULL DEFAULT '',
@@ -403,6 +431,58 @@ CREATE TABLE IF NOT EXISTS plan_budgets (
   UNIQUE (plan_id, item_key)
 );
 CREATE INDEX IF NOT EXISTS idx_plan_budgets_plan ON plan_budgets(plan_id, status);
+CREATE INDEX IF NOT EXISTS idx_plan_budgets_account ON plan_budgets(account_id, status);
+
+-- 生日计划的一次性预约授权（任务四）：绑定**具体计划版本 + 逐项商户/金额/账户/执行时间**。
+-- 「用户批准了生日计划」只对这一个版本、这几项、这个金额上限有效；
+-- 计划被改、被取消、金额变了、风险升级成红灯，这条授权就不再成立。
+CREATE TABLE IF NOT EXISTS plan_authorizations (
+  id            TEXT PRIMARY KEY,
+  plan_id       TEXT NOT NULL REFERENCES plans(id),
+  plan_version  TEXT NOT NULL,
+  account_id    TEXT NOT NULL DEFAULT '',
+  scope_json    TEXT NOT NULL DEFAULT '{}',
+  decision_json TEXT NOT NULL DEFAULT '{}',
+  status        TEXT NOT NULL CHECK (status IN ('active','used','revoked','expired')),
+  session_id    TEXT NOT NULL DEFAULT '',
+  created_ms    INTEGER NOT NULL,
+  used_ms       INTEGER,
+  revoked_ms    INTEGER,
+  expires_ms    INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_plan_auth_plan ON plan_authorizations(plan_id, status);
+
+-- 人工接管队列（任务二）：任务卡在需要人判断的地方，把「原始请求 + DAG + 已完成节点 +
+-- 失败节点 + 裁决结果 + 授权状态」整包交给操作员，而不是把会话交给运气。
+-- 同一次 run 同时只允许一条活着的接管单（下面那个部分唯一索引），
+-- 避免两个入口各开一张、操作员各处理一半。
+CREATE TABLE IF NOT EXISTS handoffs (
+  id             TEXT PRIMARY KEY,
+  run_id         TEXT NOT NULL,
+  session_id     TEXT NOT NULL,
+  user_id        TEXT NOT NULL DEFAULT '',
+  account_id     TEXT NOT NULL DEFAULT '',
+  status         TEXT NOT NULL CHECK (
+                   status IN ('pending','claimed','need_info','rejected','cancelled','resumed','failed')
+                 ),
+  reason         TEXT NOT NULL DEFAULT '',
+  error_code     TEXT NOT NULL DEFAULT '',
+  request_text   TEXT NOT NULL DEFAULT '',
+  dag_json       TEXT NOT NULL DEFAULT '{}',
+  done_nodes_json TEXT NOT NULL DEFAULT '[]',
+  failed_node_json TEXT NOT NULL DEFAULT '{}',
+  failure_json   TEXT NOT NULL DEFAULT '{}',
+  decision_json  TEXT NOT NULL DEFAULT '{}',
+  auth_json      TEXT NOT NULL DEFAULT '{}',
+  operator       TEXT NOT NULL DEFAULT '',
+  note           TEXT NOT NULL DEFAULT '',
+  claimed_ms     INTEGER NOT NULL DEFAULT 0,
+  created_ms     INTEGER NOT NULL,
+  updated_ms     INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_handoffs_status ON handoffs(status, created_ms);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_handoffs_active_run
+  ON handoffs(run_id) WHERE status IN ('pending','claimed','need_info');
 
 -- 审计只增不改：UPDATE/DELETE 一律由 SQLite 层拦掉（docs/03 3.2 第 7 张表）
 CREATE TRIGGER IF NOT EXISTS audit_no_update BEFORE UPDATE ON audit_log
@@ -472,7 +552,7 @@ def tx(conn: sqlite3.Connection) -> Iterator[sqlite3.Connection]:
     conn.execute("COMMIT")
 
 
-# 后加的列：CREATE TABLE IF NOT EXISTS 不会改已存在的表，老库要单独补（docs/03 3.4）
+# 后加的列：CREATE TABLE IF NOT EXISTS 不会改已存在的表，老库要单独补（docs/03 3.2「老库升级顺序」）
 _ADDED_COLUMNS: Final[tuple[tuple[str, str, str], ...]] = (
     ("cards", "pin_hash", "TEXT"),
     ("payees", "phone", "TEXT"),
@@ -483,8 +563,13 @@ _ADDED_COLUMNS: Final[tuple[tuple[str, str, str], ...]] = (
     # 领取租约：多进程同时 tick 时，只有抢到租约的那一个执行（不是靠「谁先读到」）
     ("scheduled_transfers", "claim_token", "TEXT NOT NULL DEFAULT ''"),
     ("scheduled_transfers", "claimed_ms", "INTEGER NOT NULL DEFAULT 0"),
+    ("scheduled_transfers", "needs_verification", "INTEGER NOT NULL DEFAULT 0"),
+    ("plan_budgets", "account_id", "TEXT"),
+    ("plan_budgets", "hold_id", "TEXT"),
     # 账户状态：money path 真的要看它（冻结/销户后不能再出账）
     ("accounts", "status", "TEXT NOT NULL DEFAULT 'active'"),
+    # hold 建卡时的裁决等级：commit 据此决定能不能跨过日累计风险阈值（见 SCHEMA_SQL 注释）
+    ("holds", "risk_level", "TEXT NOT NULL DEFAULT 'yellow'"),
     # 订阅来源：recorded=银行代扣记录，inferred=从流水推断（必须带证据与置信度）
     ("subs", "source", "TEXT NOT NULL DEFAULT 'recorded'"),
     ("subs", "confidence", "REAL NOT NULL DEFAULT 1.0"),
@@ -521,7 +606,19 @@ def ensure_columns(conn: sqlite3.Connection) -> None:
 
 
 def init_db(conn: sqlite3.Connection) -> None:
-    """执行 DDL 建全部表与触发器，幂等（IF NOT EXISTS），老库顺带补列。"""
+    """执行 DDL 建全部表与触发器，幂等（IF NOT EXISTS），老库顺带补列。
+
+    顺序不能反过来：SCHEMA_SQL 里的索引（如 idx_plan_budgets_account）引用
+    后加的列，老库还没有这些列时先 executescript 会直接 no such column。
+    先补列、再建表和索引，新库与老库走同一条路径。
+    """
+    # 两次补列，方向不同：
+    # - 之前一次：老库的索引（如 idx_plan_budgets_account）引用后加的列，
+    #   必须先把列补出来，否则 executescript 直接 no such column；
+    # - 之后一次：全新库的表由 SCHEMA_SQL 建出来，少数历史表（accounts.status、
+    #   dag_runs.meta_json 等）的 DDL 仍只靠 _ADDED_COLUMNS 补，所以建表后还要再补一遍。
+    # 两次都是幂等的：列已存在就什么都不做。
+    _ensure_columns(conn)
     conn.executescript(SCHEMA_SQL)
     _ensure_columns(conn)
 

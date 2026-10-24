@@ -200,7 +200,7 @@ def test_funds_commit_rechecks_the_card(bank: sqlite3.Connection) -> None:
     hold = _initiate(bank, 10_000)
     _set_card_status(bank, "frozen")
     with pytest.raises(PolicyDenied):
-        funds.commit(bank, hold.hold_id, daily_limit_fen=None)
+        funds.commit(bank, hold.hold_id, daily_risk_threshold_fen=None)
     assert _balance(bank) == START_FEN
     row = bank.execute("SELECT status FROM holds WHERE id = ?", (hold.hold_id,)).fetchone()
     assert str(row["status"]) == "held"
@@ -209,6 +209,6 @@ def test_funds_commit_rechecks_the_card(bank: sqlite3.Connection) -> None:
 def test_funds_commit_succeeds_on_the_normal_path(bank: sqlite3.Connection) -> None:
     """对照组：卡正常时同一串调用必须真的出账，否则上面的拒绝说明不了任何事。"""
     hold = _initiate(bank, 10_000)
-    outcome = funds.commit(bank, hold.hold_id, daily_limit_fen=None)
+    outcome = funds.commit(bank, hold.hold_id, daily_risk_threshold_fen=None)
     assert outcome.amount_fen == 10_000
     assert _balance(bank) == START_FEN - 10_000

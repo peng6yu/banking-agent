@@ -15,9 +15,23 @@ from typing import Callable, Final
 from app.models import Action, Decision, RiskLevel
 from app.money import fen_to_yuan_str
 
-# docs/05 5.1：单笔与日累计同一条 1000 元线；> 1000 元转红，含等于仍为黄
+# 单笔限额：一笔超过 1000 元即红（R08，可验证的红）。
 SINGLE_LIMIT_FEN: Final[int] = 100_000
-DAILY_LIMIT_FEN: Final[int] = 100_000
+
+# 日累计**风险分级阈值**：当日累计（含本笔）≤ 1000 元是黄灯，> 1000 元是红灯。
+# 赛题原文：小额转账 日累计 ≤1000 元（用户确认）；大额转账 日累计 >1000 元（人脸/短信/盾多因子）。
+# 它是「分级线」，不是「拒绝线」：越线要的是强验证（R07），不是「今天不能转」。
+DAILY_RISK_THRESHOLD_FEN: Final[int] = 100_000
+
+# 独立的**绝对每日上限**：可选、默认不设。
+# 只有存在明确业务依据时（例如行内对某类账户规定了硬性日限额）才设置它；
+# 不设就等于「没有这条硬限额」，日累计只按风险分级走，不存在无依据的硬拒绝。
+# 设置后由 R13 以「红色且不挂因子」的方式硬拒绝——因子不能给一个监管意义上的额度加码。
+ABSOLUTE_DAILY_CAP_FEN: Final[int | None] = None
+
+# 兼容旧引用：日累计的这个数字现在只是风险阈值。
+# 名字保留是为了让历史代码/文档不必同时改；语义请用 DAILY_RISK_THRESHOLD_FEN。
+DAILY_LIMIT_FEN: Final[int] = DAILY_RISK_THRESHOLD_FEN
 
 # 权威工具表（docs/06 6.1 + 阶段 5/6）：只读 13 个 + 写 22 个（已实现），共 35 个。
 # 只读：基础六件套 + 理财只读两件套 + 定时查询 + 阶段 5 目标/计划/提醒三件套
@@ -36,6 +50,11 @@ READONLY_TOOLS: Final[frozenset[str]] = frozenset(
 SPEND_TOOLS: Final[frozenset[str]] = frozenset(
     {"transfer", "reserve_funds", "pay_merchant", "split_transfer", "schedule_transfer"}
 )
+# 系统受信组件自签的内部动账工具：到点执行的预约用的是 scheduled_transfer（不是用户能点的
+# schedule_transfer）。它同样要过裁决——否则「预约到点后」就成了一条不受日累计约束的旁路。
+# 单独成集合而不是塞进 SPEND_TOOLS：SPEND_TOOLS 是「用户可见的资金工具」清单，
+# 工具注册表 / 评测脚本都按它枚举，混进内部名字会让那些清单失真。
+SYSTEM_SPEND_TOOLS: Final[frozenset[str]] = frozenset({"scheduled_transfer"})
 # 只确认不验因子：赛题把「订阅取消」和「虚拟卡申请」都写在黄灯（docs/05 5.2）
 # 阶段 5 的四个主动财务写工具同样走黄灯：建/调目标、处理提醒、手动监测都只写
 # 目标、规则与提醒，钱一分不动，也不进 SPEND_TOOLS / SENSITIVE_TOOLS / INVEST_TOOLS。
@@ -67,7 +86,13 @@ SELF_OWNER: Final[str] = "self"
 OTHER_OWNER: Final[str] = "other"
 
 KNOWN_TOOLS: Final[frozenset[str]] = (
-    READONLY_TOOLS | SPEND_TOOLS | CONFIRM_ONLY_TOOLS | SENSITIVE_TOOLS | INVEST_TOOLS | PENDING_TOOLS
+    READONLY_TOOLS
+    | SPEND_TOOLS
+    | SYSTEM_SPEND_TOOLS
+    | CONFIRM_ONLY_TOOLS
+    | SENSITIVE_TOOLS
+    | INVEST_TOOLS
+    | PENDING_TOOLS
 )
 
 
@@ -76,8 +101,11 @@ class PolicyContext:
     """裁决所需的外部事实；由调用方查好塞进来，保证 decide 可重放。"""
 
     spent_today_fen: int = 0
-    limit_fen: int = DAILY_LIMIT_FEN
+    # 黄/红分级的阈值（不是拒绝线）
+    limit_fen: int = DAILY_RISK_THRESHOLD_FEN
     single_limit_fen: int = SINGLE_LIMIT_FEN
+    # 可选绝对上限；None = 本部署没有这条硬限额
+    absolute_cap_fen: int | None = ABSOLUTE_DAILY_CAP_FEN
     # 演示与审计用；引擎自己不取时间（docs/05 5.2 要求纯函数）
     now_ms: int = 0
 
@@ -108,7 +136,8 @@ def _payee_label(action: Action) -> str:
 
 
 def _is_spend(action: Action) -> bool:
-    return action.tool in SPEND_TOOLS
+    """是否动钱：用户工具与系统内部的到点执行工具都算。"""
+    return action.tool in SPEND_TOOLS or action.tool in SYSTEM_SPEND_TOOLS
 
 
 def _is_foreign_owner(action: Action) -> bool:
@@ -123,8 +152,16 @@ def _amount(action: Action) -> int:
     return action.amount_fen or 0
 
 
-def _over_daily(action: Action, ctx: PolicyContext) -> bool:
+def _crosses_risk_threshold(action: Action, ctx: PolicyContext) -> bool:
+    """当日累计（含本笔）是否越过黄/红分级线——越线是红灯，不是禁止。"""
     return ctx.spent_today_fen + _amount(action) > ctx.limit_fen
+
+
+def _over_absolute_cap(action: Action, ctx: PolicyContext) -> bool:
+    """是否越过**有明确依据**的绝对日限额；没配置这条线就永远为 False。"""
+    if ctx.absolute_cap_fen is None:
+        return False
+    return ctx.spent_today_fen + _amount(action) > int(ctx.absolute_cap_fen)
 
 
 def _decision(
@@ -182,7 +219,7 @@ def _emit_confirm_only(action: Action, ctx: PolicyContext) -> Decision:
 
 
 def _emit_yellow_transfer(action: Action, ctx: PolicyContext) -> Decision:
-    if action.tool == "schedule_transfer":
+    if action.tool in {"schedule_transfer", "scheduled_transfer"}:
         # 预约的钱今天不走，文案要说清是「排期」，别让用户以为当场就转出去了。
         text = (
             f"预约一笔向 {_payee_label(action)} 转出 {_yuan(_amount(action))} 的转账，需要你确认"
@@ -199,21 +236,30 @@ def _emit_yellow_transfer(action: Action, ctx: PolicyContext) -> Decision:
 
 
 def _emit_red_daily(action: Action, ctx: PolicyContext) -> Decision:
-    # R07 是「硬线」，不是「可验证的红」：日累计是监管意义上的额度，
-    # 验过脸也不能凭空多出额度来。所以这里不挂因子——执行器看到 red 且无因子
-    # 就会直接 POLICY_BLOCKED，用户今天不能再从这个账户转这笔。
-    # 与 R08 的区别：R08 是单笔越线，可以靠双因子做例外放行；R07 不行。
+    # R07 = 赛题的「大额转账」：当日累计（含本笔）> 1000 元。
+    # 它是**可验证的红**，不是硬拒绝：验过 face+sms 就能继续——
+    # 「验过就能多花」正是赛题对红档的定义（强验证），与「无依据的硬限额」是两回事。
+    # 真正的硬拒绝只在显式配置了绝对上限（R13）时出现。
     text = (
         f"今天已经转出 {_yuan(ctx.spent_today_fen)}，再转 {_yuan(_amount(action))} "
-        f"会超过日累计 {_yuan(ctx.limit_fen)} 的上限，今天这笔不能转了；明天的额度会重新计算。"
+        f"会让当日累计超过 {_yuan(ctx.limit_fen)}，属于大额转账：需要人脸和短信验证后才能继续。"
     )
-    return _decision("red", "R07_transfer_red_daily", "TRANSFER_DAILY_RED", text, ctx)
+    return _decision("red", "R07_transfer_red_daily", "TRANSFER_DAILY_RED", text, ctx, ("face", "sms"))
+
+
+def _emit_absolute_cap(action: Action, ctx: PolicyContext) -> Decision:
+    cap = int(ctx.absolute_cap_fen or 0)
+    text = (
+        f"今天已经转出 {_yuan(ctx.spent_today_fen)}，再转 {_yuan(_amount(action))} "
+        f"会超过账户的绝对每日限额 {_yuan(cap)}，今天这笔不能转了；明天的额度会重新计算。"
+    )
+    return _decision("red", "R13_absolute_cap", "ABSOLUTE_DAILY_CAP", text, ctx)
 
 
 def _emit_red_single(action: Action, ctx: PolicyContext) -> Decision:
     # 单笔越线同样是可验证的红：face + sms 验过就放行（2026-10-21 起），
     # 文案要说清「验证后继续」，不能还停在「我不能直接做」。
-    if action.tool == "schedule_transfer":
+    if action.tool in {"schedule_transfer", "scheduled_transfer"}:
         text = (
             f"预约金额 {_yuan(_amount(action))} 超过 {_yuan(ctx.single_limit_fen)}上限，"
             "这笔预约需要人脸和短信验证后才能确认"
@@ -313,6 +359,17 @@ RULES: Final[tuple[Rule, ...]] = (
         _emit_confirm_only,
     ),
     _rule(
+        "R13_absolute_cap",
+        "red",
+        "ABSOLUTE_DAILY_CAP",
+        # 只有显式配置了绝对上限才生效；没配 → when 恒 False，规则表里等于不存在。
+        # 必须排在 R06/R07/R08 前面：绝对上限是「部署显式规定的硬额度」，
+        # 越线就不该再问用户确认、也不该给强验证机会——因子不能给监管额度加码。
+        # 放在黄/红分级规则后面会导致它永远走不到（分级先短路），成为死代码。
+        lambda action, ctx: _is_spend(action) and _over_absolute_cap(action, ctx),
+        _emit_absolute_cap,
+    ),
+    _rule(
         "R06_transfer_yellow",
         "yellow",
         "TRANSFER_YELLOW",
@@ -322,23 +379,23 @@ RULES: Final[tuple[Rule, ...]] = (
         # 出真实原因（评审 F1）。豁免的只是日线，单笔上限仍由上面的条件与 R08 管。
         lambda action, ctx: _is_spend(action)
         and 0 < _amount(action) <= ctx.single_limit_fen
-        and (action.tool in _DAILY_RULE_EXEMPT_TOOLS or not _over_daily(action, ctx)),
+        and (action.tool in _DAILY_RULE_EXEMPT_TOOLS or not _crosses_risk_threshold(action, ctx)),
         _emit_yellow_transfer,
     ),
     _rule(
         "R07_transfer_red_daily",
         "red",
         "TRANSFER_DAILY_RED",
-        # 语义：日累计是硬线（no factors => 直接拦），单笔越线（R08）才是可验证的红。
-        # spent_today_fen > 0 是守卫：否则「单笔刚过线」的请求会被误判成日累计超限，
-        # 与 docs/05 5.1 边界表里 1000.01 -> R08 的要求冲突
-        # schedule_transfer 不吃这条：日线归出账那天判（创建期只看今天花了多少，
-        # 那不是这笔钱要走的那个额度），否则「今天花过 900 再排一笔 500」会被误伤成红灯。
+        # 语义：当日累计（含本笔）> 阈值 = 大额转账 = 红色强验证（face+sms），不是硬拒绝。
+        # spent_today_fen > 0 是守卫：单笔刚过单笔线的请求该走 R08，而不是被这里
+        # 误判成「日累计超限」——两档的文案与因子虽然相同，规则号必须可区分。
+        # schedule_transfer 不吃这条：预约的钱到出账那天才动，创建期只判单笔；
+        # 出账日由 app/tools/scheduled.py 用「当天最新的用户维度累计」重新裁决。
         lambda action, ctx: (
             _is_spend(action)
             and action.tool not in _DAILY_RULE_EXEMPT_TOOLS
             and ctx.spent_today_fen > 0
-            and _over_daily(action, ctx)
+            and _crosses_risk_threshold(action, ctx)
         ),
         _emit_red_daily,
     ),
@@ -375,8 +432,10 @@ RULES: Final[tuple[Rule, ...]] = (
 RULES_BY_ID: Final[dict[str, Rule]] = {rule.rule_id: rule for rule in RULES}
 
 __all__ = [
+    "ABSOLUTE_DAILY_CAP_FEN",
     "CONFIRM_ONLY_TOOLS",
     "DAILY_LIMIT_FEN",
+    "DAILY_RISK_THRESHOLD_FEN",
     "INVEST_TOOLS",
     "KNOWN_TOOLS",
     "OTHER_OWNER",

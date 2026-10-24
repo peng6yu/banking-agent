@@ -190,7 +190,13 @@ class BirthdayItemIn(BaseModel):
 
 
 class BirthdayPlanCreate(BaseModel):
-    """POST /api/plans/birthday 的入参：生日、预算、项目。"""
+    """POST /api/plans/birthday 的入参：生日、预算、项目、账户与一次性授权。
+
+    预算预留会真实占用所选账户的可支配金额，所以账户要能显式指定；不指定时
+    用用户名下第一张储蓄卡（与旧行为一致）。save_authorization=True 表示用户
+    在创建时明确同意「到点按这份清单自动付款」，服务端保存与计划版本绑定的一次性
+    授权；它仍然要过最新日累计裁决，参数变了/红灯/取消都不再自动扣款。
+    """
 
     model_config = ConfigDict(extra="forbid", title="新建生日计划")
 
@@ -198,6 +204,12 @@ class BirthdayPlanCreate(BaseModel):
     budget_fen: int = Field(default=100_000, ge=1, le=MAX_TARGET_FEN)
     items: list[BirthdayItemIn] = Field(default_factory=list, max_length=4)
     title: str | None = Field(default=None, min_length=1, max_length=60)
+    account_id: str | None = Field(
+        default=None, min_length=1, max_length=40, description="扣款账户；默认第一张储蓄卡"
+    )
+    save_authorization: bool = Field(
+        default=False, description="是否保存一次性预约授权（到点自动付款）"
+    )
 
 
 class BirthdayPayRequest(BaseModel):
@@ -211,6 +223,22 @@ class BirthdayPayRequest(BaseModel):
     approve: bool = True
     proofs: list[FactorProof] | None = None
     session_id: str | None = Field(default=None, min_length=1, max_length=80)
+
+
+class ScheduledChallengeRequest(BaseModel):
+    """POST /api/scheduled/{id}/challenge 的入参：给到点复判变红的预约补签强验证挑战。"""
+
+    model_config = ConfigDict(extra="forbid", title="预约强验证挑战")
+
+    factor: Literal["face", "sms"] = "face"
+
+
+class ScheduledVerifyRequest(BaseModel):
+    """POST /api/scheduled/{id}/verify 的入参：证明与 /api/confirm 同构。"""
+
+    model_config = ConfigDict(extra="forbid", title="预约强验证")
+
+    proofs: list[FactorProof] | None = None
 
 
 __all__ = [
@@ -227,6 +255,8 @@ __all__ = [
     "PlanUpdate",
     "ResetRequest",
     "SIMULATED_EXPENSE_CATEGORIES",
+    "ScheduledChallengeRequest",
+    "ScheduledVerifyRequest",
     "SavingsGoalCreate",
     "SavingsGoalUpdate",
     "SimulatedExpenseRequest",

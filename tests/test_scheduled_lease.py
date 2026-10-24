@@ -1,3 +1,4 @@
+
 """预约转账的两种「时间维度」缺陷：多进程重复执行、以及因子授权永不过期。
 
 1) 租约（claim_token + claimed_ms）：到点执行先原子抢行，抢不到就跳过。
@@ -167,20 +168,26 @@ def test_fresh_factor_authorization_still_bypasses_the_daily_line(bank: Path) ->
 
 
 def test_expired_factor_authorization_loses_the_quota_bypass(bank: Path) -> None:
-    """31 天前验过的人脸：预约仍有效，但不再越额度放行，回到排队（顺延）。"""
+    """31 天前验过的人脸：预约仍有效，但不再越额度放行，回到普通口径排队。
+
+    该笔金额 2000 元本来就超过单笔上限（R08 红），所以「回到普通口径」= 重新需要
+    强验证：挂起 needs_verification，等用户再验一次，而不是拿一张过期的人脸硬闯。
+    """
     conn = _conn()
     try:
         old = clock.now_ms() - 31 * 24 * 3600 * 1000
         _insert(conn, sched_id="sch_old", amount_fen=BIG_AMOUNT_FEN, verified_ms=old)
         results = scheduled.execute_due(conn, secret=SECRET)
-        assert results[0]["status"] == "scheduled", "过期授权应该顺延，而不是硬闯额度线"
-        assert results[0]["defer_count"] == 1
-        assert _balance(conn) == START_BALANCE_FEN, "过期授权不能真的把钱转出去"
+        assert results[0]["status"] == "needs_verification", "过期授权必须重新验证，而不是硬闯额度线"
         row = _row(conn, "sch_old")
         assert str(row["status"]) == "scheduled"
-        assert str(row["claim_token"]) == ""
-        assert "scheduled.auth_expired" in _audit_kinds(conn, "sch_old")
-        assert "scheduled.deferred" in _audit_kinds(conn, "sch_old")
+        assert int(row["needs_verification"]) == 1
+        assert int(row["factor_verified_ms"]) == old, "过期时间戳保留，审计还能看出是哪次验证失效的"
+        assert _balance(conn) == START_BALANCE_FEN, "钱一分不能动"
+        kinds = _audit_kinds(conn, "sch_old")
+        assert "scheduled.auth_expired" in kinds
+        assert "scheduled.needs_verification" in kinds
+        assert "scheduled.executed" not in kinds
     finally:
         conn.close()
 
@@ -194,13 +201,13 @@ def test_ttl_constant_is_stated_in_days_not_magic(bank: Path) -> None:
 # --------------------------------------------------- 顺延之后的两条并发回归
 
 
-def test_a_deferred_row_cannot_be_claimed_from_a_stale_snapshot(bank: Path) -> None:
-    """顺延到明天之后，拿着旧快照的 worker 不能再抢这一行。
+def test_a_paused_row_cannot_be_claimed_from_a_stale_snapshot(bank: Path) -> None:
+    """到点复判为红、已挂起待验证的行，拿着旧快照的 worker 不能再抢。
 
-    现场：两个进程几乎同时读到「这行今天到期」，A 撞当日额度把它顺延到明天、
-    放掉 hold；B 手里的 rows 还是旧的，只按 ID+status 去抢会抢成功，然后用同一个
-    幂等键重放到 A 放掉的那份 hold 上，把一条只是顺延的预约误记成失败。
-    修法是在 claim 的 WHERE 里再确认一次 due_ms <= stamp。
+    现场：两个进程几乎同时读到「这行今天到期」，A 复判为红把它标成
+    needs_verification 并放掉 hold；B 手里的 rows 还是旧的，只按 ID+status 去抢
+    会抢成功，然后绕过挂起状态直接再执行一次。修法是在 claim 的 WHERE 里
+    同时确认 due_ms <= stamp **且** needs_verification = 0。
     """
     conn = _conn()
     try:
@@ -210,10 +217,15 @@ def test_a_deferred_row_cannot_be_claimed_from_a_stale_snapshot(bank: Path) -> N
             "INSERT INTO daily_limits (account_id, day, spent_fen, tx_count) VALUES (?,?,?,0)",
             (DEBIT_ACCOUNT_ID, _day_key(stamp), 100_000),
         )
+        conn.execute(
+            "INSERT INTO daily_user_limits (user_id, day, spent_fen, tx_count)"
+            " SELECT user_id, ?, ?, 0 FROM accounts WHERE id = ?",
+            (_day_key(stamp), 100_000, DEBIT_ACCOUNT_ID),
+        )
         results = scheduled.execute_due(conn, now=stamp, secret=SECRET)
-        assert results[0]["status"] == "scheduled", "额度不够应该顺延"
+        assert results[0]["status"] == "needs_verification", "越线应当挂起等强验证"
         row = _row(conn, "sch_stale")
-        assert int(row["due_ms"]) > stamp
+        assert int(row["needs_verification"]) == 1
 
         # 旧快照的 worker 用同一天的时间戳来抢：必须抢不到。
         assert scheduled._claim(conn, "sch_stale", stamp) is None
@@ -222,12 +234,13 @@ def test_a_deferred_row_cannot_be_claimed_from_a_stale_snapshot(bank: Path) -> N
         conn.close()
 
 
-def test_a_replayed_released_hold_does_not_fail_the_scheduled_row(bank: Path) -> None:
-    """幂等键撞上一份已释放的 hold：这一轮跳过，不能把预约标成失败。
+def test_a_replayed_released_hold_is_paid_exactly_once(bank: Path) -> None:
+    """幂等键撞上一份已释放的 hold：钱既然没动过，这一轮就该正常出账一次。
 
-    这是上一条的后果层：就算抢行条件被绕过（或历史数据已经在那种状态），
-    执行器也不能把「钱没动」误报成「这笔预约失败了」——用户会以为预约丢了。
-    正确结局是保持 scheduled、余额不动、审计里没有 scheduled.failed。
+    历史行为是直接跳过（ALREADY_HANDLED），但那样「上一轮撞额度线释放了 hold、
+    这一轮额度够了」的预约会永远轮不到执行。整改后 funds.initiate 只在 hold
+    仍有效时复用（防重复扣款），已 released/expired 的会用新 nonce 派生新键重建。
+    关键不变量：**钱只扣一次**，且已 committed 的 hold 绝不会被重建。
     """
     conn = _conn()
     try:
@@ -250,11 +263,21 @@ def test_a_replayed_released_hold_does_not_fail_the_scheduled_row(bank: Path) ->
         funds.release(conn, hold.hold_id, reason="TEST_RELEASED", session_id="sched:sch_replay")
 
         results = scheduled.execute_due(conn, now=stamp, secret=SECRET)
-        assert results[0]["status"] == "skipped"
-        assert results[0]["reason"] == "ALREADY_HANDLED"
-        assert str(_row(conn, "sch_replay")["status"]) == "scheduled"
-        assert _balance(conn) == START_BALANCE_FEN
-        assert "scheduled.failed" not in _audit_kinds(conn, "sch_replay")
+        assert results[0]["status"] == "executed", "已释放的 hold 没有动过钱，应当正常补执行"
+        assert str(_row(conn, "sch_replay")["status"]) == "executed"
+        # 只有一笔出账：旧 hold 仍然 released，新 hold committed
+        out_rows = conn.execute(
+            "SELECT t.amount_fen FROM transactions t JOIN holds h ON h.id = t.hold_id"
+            " WHERE t.direction = 'out' AND h.session_id = ?",
+            ("sched:sch_replay",),
+        ).fetchall()
+        assert len(out_rows) == 1, "释放过的 hold 不能被当成已扣款，也不能扣两次"
+        assert _balance(conn) == START_BALANCE_FEN - AMOUNT_FEN
+        old = conn.execute("SELECT status FROM holds WHERE id = ?", (hold.hold_id,)).fetchone()
+        assert str(old["status"]) == "released"
+        kinds = _audit_kinds(conn, "sch_replay")
+        assert "scheduled.executed" in kinds
+        assert "scheduled.failed" not in kinds
     finally:
         conn.close()
 

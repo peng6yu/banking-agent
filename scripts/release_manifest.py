@@ -181,9 +181,12 @@ def gather_ab() -> dict[str, Any]:
         rounds.append(row)
     latest = rounds[-1] if rounds else None
     conclusion = (
-        "跨轮方向不一致：同一份 80 例、同一模型，B 组相对 A 组的 intent 差值在三轮之间反复变号，"
-        "不能宣称知识层带来 x pp 的稳定提升。稳定成立的只有两项：B 组知识引用正确率（41/51、41/51、42/51）"
-        "与未授权写操作在 r2/r3 归零（r1 两组各 1）。"
+        "跨轮方向不一致：8 轮完整 80 例真实 A/B（5 轮 MiniMax + 3 轮 DeepSeek）中，"
+        "逐轮 intent 的 B−A 为 −1.25/+2.50/0/+2.50/+5.00 与 +5.00/−2.50/+8.75pp，符号反复；"
+        "同配置 A 组复跑极差 6.25pp（MiniMax）/11.25pp（DeepSeek），与差值同量级。"
+        "只有 20261024T160805 的 +8.75pp CI[+2.50,+16.25] 不含 0，但它是单轮单次采样、"
+        "不能替代重复采样的方差。稳定成立的是行为面：B 组知识引用正确率 41–42/51，A 组为 0。"
+        "结论：不宣称知识层稳定提升准确率；逐轮配对与 bootstrap 明细见 docs/benchmark/ab_paired_stats.md。"
     )
     return {"rounds": rounds, "latest": latest, "conclusion": conclusion, "dataset": "tests/eval/intent_cases.yaml"}
 
@@ -235,8 +238,35 @@ def gather_limits() -> list[dict[str, str]]:
         },
         {
             "item": "知识层 A/B",
-            "status": "方向不稳定",
-            "detail": "三轮 DeepSeek 结果方向反复，只认知识引用正确率与未授权写归零两项。",
+            "status": "方向不稳定（8 轮配对统计）",
+            "detail": "5 轮 MiniMax + 3 轮 DeepSeek 的逐轮 B−A 符号反复；只有单轮单次采样的 +8.75pp CI 不含 0，"
+                      "不能宣称稳定提升。稳定成立的是知识引用（B 41–42/51 vs A 0）。详见 docs/benchmark/ab_paired_stats.md。",
+        },
+        {
+            "item": "人工接管",
+            "status": "本地操作员队列",
+            "detail": "app/handoffs.py + /api/handoffs：pending/claimed/need_info/rejected/cancelled/resumed/failed 状态机，"
+                      "领取用条件 UPDATE 保证同单只被一人领走；恢复前重查确认卡有效期、计划授权、账户状态与余额。"
+                      "没有真实客服系统、没有 RBAC，operator 只是审计里的一个字符串。",
+        },
+        {
+            "item": "沙箱",
+            "status": "消除执行面（非容器沙箱）",
+            "detail": "主 Agent 不执行模型生成的代码：模型输出只落 intent/slots/tool+params，经 registry 校验后调用静态 handler。"
+                      "没有 Python/shell/SQL 动态执行面（scripts/prove_no_exec_surface.py 实测 0 命中），"
+                      "因此未部署容器沙箱；与赛题沙箱条款的对应与剩余风险见 docs/security_sandbox.md。",
+        },
+        {
+            "item": "生日预算",
+            "status": "真实预留（影响可支配金额）",
+            "detail": "plan_budgets 记 account_id/hold_id，创建时校验可用余额；funds.available_fen = 余额 − 在途 hold − 有效预算预留，"
+                      "所有资金写操作都经过 _create_hold 的余额检查与 commit 的条件扣款。",
+        },
+        {
+            "item": "生日一次性授权",
+            "status": "版本绑定 + 到期重判",
+            "detail": "plan_authorizations 绑定计划版本、账户与金额范围；到点执行前按用户维度日累计重新裁决，"
+                      "升级红色或参数变化则暂停要求新的强验证。",
         },
         {
             "item": "跨会话幂等",
@@ -245,8 +275,10 @@ def gather_limits() -> list[dict[str, str]]:
         },
         {
             "item": "浏览器旅程",
-            "status": "5 条流程级",
-            "detail": "Playwright 真浏览器 + 服务端状态双证；不是点击级 DOM 单测覆盖。",
+            "status": "7 条（j1/j2/j4/j5/j6/j7 + j3）",
+            "detail": "Playwright 真浏览器 + 服务端状态双证。j3 用真模型后端单独跑（其余六条为 "
+                      "MOCK_MODE=script 确定性桩），J4/J5 的步骤是 API 驱动的流程级断言，不是纯点击级；"
+                      "J6/J7 是点击级。详见 docs/benchmark/browser_journey_audit.md。",
         },
     ]
 

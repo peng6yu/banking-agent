@@ -182,6 +182,16 @@ def supersede_answered_clarifications(
                     },
                     session_id=session_id,
                 )
+                # 问题答完了，这一轮就不再需要人接手：把挂在它上面的活跃接管单一起收掉，
+                # 免得队列里留一张 run 已经关闭、操作员领了也没法恢复的旧单。
+                # 延迟导入：handoffs → runner，放在模块顶部会绕进 executor 的导入环。
+                from app import handoffs as handoffs_mod
+
+                handoffs_mod.close_for_run(
+                    target,
+                    run["run_id"],
+                    reason=f"用户已回答澄清（{SUPERSEDE_REASON}），这一轮按被取代关闭",
+                )
             closed.append(run["run_id"])
     finally:
         if own:

@@ -6,10 +6,20 @@
 from __future__ import annotations
 
 from app.policy.engine import decide, explain
-from app.policy.rules import DAILY_LIMIT_FEN, PolicyContext, Rule, RULES, SINGLE_LIMIT_FEN
+from app.policy.rules import (
+    ABSOLUTE_DAILY_CAP_FEN,
+    DAILY_LIMIT_FEN,
+    DAILY_RISK_THRESHOLD_FEN,
+    PolicyContext,
+    Rule,
+    RULES,
+    SINGLE_LIMIT_FEN,
+)
 
 __all__ = [
+    "ABSOLUTE_DAILY_CAP_FEN",
     "DAILY_LIMIT_FEN",
+    "DAILY_RISK_THRESHOLD_FEN",
     "PolicyContext",
     "RULES",
     "Rule",

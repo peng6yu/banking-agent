@@ -31,7 +31,7 @@ from app.security import token as token_mod
 from app.tools.base import (
     ToolContext,
     build_action,
-    daily_cap_fen,
+    commit_limits,
     ensure_system_payee,
     fail_result,
     ok_result,
@@ -63,7 +63,11 @@ REVERSAL_SCOPE_TEXT: Final[str] = (
     "这是本地的账务冲正（反向记账），不是把已经到对方账上的钱追回来；"
     "真实跨行退汇要走争议流程，本演示环境不具备该能力。"
 )
-DAILY_LIMIT_TEXT: Final[str] = "今天已经花过日限额了，这笔没转出去。"
+DAILY_UPGRADE_TEXT: Final[str] = (
+    "这笔加上今天的累计会超过 1000 元，属于大额转账：需要人脸和短信验证后才能继续，"
+    "不是不能转。"
+)
+DAILY_LIMIT_TEXT: Final[str] = "这笔超过了本账户的绝对每日限额，今天不能转；明天额度会重新计算。"
 NOT_OWNED_TEXT: Final[str] = "通讯录里没有属于你的这个收款人。"
 
 
@@ -134,16 +138,25 @@ def _settle_transfer(
     commit 失败不往上抛，把 settle_error 塞进 data，钱仍锁在 hold 里等释放。
     """
     hold_id = str(data["hold_id"])
+    risk_fen, cap_fen = commit_limits(token, ctx.secret)
     try:
         outcome = funds.commit(
-            ctx.conn, hold_id, daily_limit_fen=daily_cap_fen(token, ctx.secret)
+            ctx.conn, hold_id,
+            daily_risk_threshold_fen=risk_fen,
+            absolute_daily_cap_fen=cap_fen,
         )
     except PolicyDenied as exc:
-        # 日累计硬线：这笔是**被拒**了（钱没扣、hold 还在），要说清楚为什么。
-        log.warning("transfer.daily_limit_exceeded hold=%s code=%s", hold_id, exc.code)
+        # 日累计分级：这笔是**被拒**了（钱没扣、hold 还在）。
+        # 越线要求的是升级强验证，不是「今天不能转」——文案必须这么说，
+        # 否则用户会以为额度已经用完，其实只是需要多验一次。
+        log.warning("transfer.daily_tier_denied hold=%s code=%s", hold_id, exc.code)
+        funds.release(ctx.conn, hold_id, reason=exc.code, session_id=ctx.session_id)
+        text = (
+            DAILY_UPGRADE_TEXT if exc.code == "DAILY_RISK_UPGRADE_REQUIRED" else DAILY_LIMIT_TEXT
+        )
         data["settle_error"] = exc.code
-        data["message"] = DAILY_LIMIT_TEXT
-        return fail_result(exc.code, DAILY_LIMIT_TEXT, data)
+        data["message"] = text
+        return fail_result(exc.code, text, data)
     except BankError as exc:
         log.warning("transfer.commit_failed hold=%s code=%s", hold_id, exc.code)
         data["settle_error"] = exc.code
@@ -322,14 +335,26 @@ def _commit(
     params: dict[str, Any],
     token: str | None = None,
 ) -> ToolResult:
+    risk_fen, cap_fen = commit_limits(token, ctx.secret)
     try:
         outcome = funds.commit(
-            ctx.conn, hold_id, daily_limit_fen=daily_cap_fen(token, ctx.secret)
+            ctx.conn, hold_id,
+            daily_risk_threshold_fen=risk_fen,
+            absolute_daily_cap_fen=cap_fen,
         )
     except HoldExpired as exc:
         return fail_result("HOLD_EXPIRED", exc.user_text, {"hold_id": hold_id})
     except BankError as exc:
-        # 别的拒绝（例如日累计硬线）：钱没扣、hold 还在，如实报错，别让异常逃出去。
+        # 别的拒绝（例如越线要升级验证）：钱没扣。分级拒绝要释放 hold，
+        # 否则这笔钱被锁到过期，用户连重新验证都没法立刻再做一次。
+        if exc.code in ("DAILY_RISK_UPGRADE_REQUIRED", "DAILY_ABSOLUTE_CAP_EXCEEDED"):
+            funds.release(ctx.conn, hold_id, reason=exc.code, session_id=ctx.session_id)
+            text = (
+                DAILY_UPGRADE_TEXT
+                if exc.code == "DAILY_RISK_UPGRADE_REQUIRED"
+                else DAILY_LIMIT_TEXT
+            )
+            return fail_result(exc.code, text, {"hold_id": hold_id})
         return fail_result(exc.code, exc.user_text, {"hold_id": hold_id})
     amount_fen = int(outcome.amount_fen)
     return ok_result(

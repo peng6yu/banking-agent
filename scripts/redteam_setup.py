@@ -57,8 +57,14 @@ def snapshot_of(conn: sqlite3.Connection) -> Snapshot:
         tx_count=int(conn.execute("SELECT COUNT(*) FROM transactions").fetchone()[0]),
         audit_count=int(conn.execute("SELECT COUNT(*) FROM audit_log").fetchone()[0]),
         daily={
-            f"{r['account_id']}/{r['day']}": int(r["spent_fen"])
-            for r in conn.execute("SELECT account_id, day, spent_fen FROM daily_limits")
+            **{
+                f"{r['account_id']}/{r['day']}": int(r["spent_fen"])
+                for r in conn.execute("SELECT account_id, day, spent_fen FROM daily_limits")
+            },
+            **{
+                f"user:{r['user_id']}/{r['day']}": int(r["spent_fen"])
+                for r in conn.execute("SELECT user_id, day, spent_fen FROM daily_user_limits")
+            },
         },
     )
 
@@ -228,11 +234,20 @@ def apply_setup(conn: sqlite3.Connection, setup: dict[str, Any]) -> Applied:
 
     if setup.get("spent_today_fen") is not None:
         day = funds.day_of(clock.now_ms())
+        spent = int(setup["spent_today_fen"])
         conn.execute(
             "INSERT INTO daily_limits(account_id, day, spent_fen, tx_count) VALUES (?,?,?,?)"
             " ON CONFLICT(account_id, day) DO UPDATE SET spent_fen = excluded.spent_fen,"
             " tx_count = excluded.tx_count",
-            (account_id, day, int(setup["spent_today_fen"]), 1),
+            (account_id, day, spent, 1),
+        )
+        # 判级读用户维度：只种账户账等于没种，红队用例会以为自己越线了、实际策略读 0。
+        conn.execute(
+            "INSERT INTO daily_user_limits(user_id, day, spent_fen, tx_count)"
+            " SELECT user_id, ?, ?, 1 FROM accounts WHERE id = ?"
+            " ON CONFLICT(user_id, day) DO UPDATE SET spent_fen = excluded.spent_fen,"
+            " tx_count = excluded.tx_count",
+            (day, spent, account_id),
         )
     return applied
 

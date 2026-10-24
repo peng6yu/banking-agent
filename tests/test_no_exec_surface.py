@@ -18,11 +18,22 @@
 同时把出网面照实列出来并钉死：零代码执行面不等于零 I/O 面，app/llm.py 的模型
 API 出网是赛题要求的模型调用，不是用户代码执行面，但它必须被显式允许而不是被
 口径藏起来。
+
+「零命中」还可以用两种更弱的方式骗过去，本文件因此补了三类结构化断言：
+1. 工具注册表——handler 必须是静态的「模块名.函数名」，不能是 Call/Lambda/名字
+   拼接出来的可调用对象；否则模型只要能让注册表多出一条，就等于拿到任意函数；
+2. API schema——请求体里不允许出现 code/script/command/shell/sql/exec 这类
+   代码字符串字段，接口层不接受「一段代码」这种入参；
+3. 动态 SQL——拼接串逐条进人工复核清单，并要求 docs/security_sandbox.md 里
+   对每个出现的文件写出复核结论；新增拼接而没复核，测试就红。
 """
 
 from __future__ import annotations
 
+import ast
+import re
 from pathlib import Path
+from types import FunctionType
 
 import pytest
 
@@ -140,3 +151,100 @@ def test_both_docs_state_the_same_sandbox_guarantee() -> None:
             and ("⛔" in line or "未实现" in line)
         ]
         assert stale == [], f"{doc.name} 仍把沙箱环境标成未实现: {stale}"
+
+
+TOOL_SPECS = REPO / "app" / "tools" / "tool_specs.py"
+SCHEMAS = REPO / "app" / "api" / "schemas.py"
+SECURITY_DOC = REPO / "docs" / "security_sandbox.md"
+
+
+def _tool_spec_handler_nodes() -> list[ast.AST]:
+    """取出 tool_specs.py 里每个 ToolSpec(handler=…) 的 handler 表达式节点。"""
+    tree = ast.parse(TOOL_SPECS.read_text(encoding="utf-8"))
+    nodes: list[ast.AST] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        func = node.func
+        name = func.id if isinstance(func, ast.Name) else getattr(func, "attr", "")
+        if name != "ToolSpec":
+            continue
+        for keyword in node.keywords:
+            if keyword.arg == "handler":
+                nodes.append(keyword.value)
+    return nodes
+
+
+def test_tool_handlers_are_static_module_functions() -> None:
+    """注册表的 handler 只能是静态引用；动态构造等于把「调用哪个函数」交给数据。"""
+    nodes = _tool_spec_handler_nodes()
+    assert len(nodes) >= 30, f"只找到 {len(nodes)} 个 handler= 关键字，注册表结构变了？"
+    dynamic = [ast.dump(node) for node in nodes if not isinstance(node, ast.Attribute)]
+    assert dynamic == [], f"handler 出现非静态写法: {dynamic}"
+    for node in nodes:
+        assert isinstance(node.value, ast.Name), ast.dump(node)
+
+
+def test_registry_contains_only_static_whitelisted_tools() -> None:
+    """运行时复核：每个工具都来自 app.tools 下的普通函数，没有 lambda / partial 混入。"""
+    from app.tools import registry
+
+    assert set(registry.TOOLS) == set(registry.TOOL_NAMES)
+    assert len(registry.TOOL_NAMES) == len(set(registry.TOOL_NAMES))
+    for name in registry.TOOL_NAMES:
+        handler = registry.TOOLS[name].handler
+        assert isinstance(handler, FunctionType), f"{name} 的 handler 不是普通函数: {handler!r}"
+        assert handler.__module__.startswith("app.tools"), f"{name} 来自 {handler.__module__}"
+        assert "<" not in handler.__qualname__, f"{name} 是动态拼出来的函数: {handler.__qualname__}"
+
+
+def test_api_schemas_have_no_code_string_fields() -> None:
+    """接口层不接受代码字符串入参：schema 字段名里不许出现 code/script/command 之类。"""
+    tree = ast.parse(SCHEMAS.read_text(encoding="utf-8"))
+    fields = [
+        node.target.id
+        for node in ast.walk(tree)
+        if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name)
+    ]
+    assert fields, "schemas.py 里一个字段都没解析到，检查器写错了？"
+    codeish = [name for name in fields if re.search(r"(code|script|command|shell|sql|exec)", name, re.I)]
+    assert codeish == [], f"API schema 出现代码字符串字段: {codeish}"
+
+
+def test_dynamic_sql_is_reported_and_documented(report: Report) -> None:
+    """动态 SQL 不进执行面判定，但必须被报出来，且每个文件都在安全文档里有复核结论。"""
+    assert report.sql_hits, "动态 SQL 一处都没报：检查器坏了，或 app/ 的 SQL 写法整体变了"
+    doc = SECURITY_DOC.read_text(encoding="utf-8")
+    undocumented = sorted({hit.path for hit in report.sql_hits if hit.path not in doc})
+    assert undocumented == [], (
+        "这些文件里有动态 SQL 但 docs/security_sandbox.md 没写复核结论，"
+        f"新增拼接必须重新人工确认参数化: {undocumented}"
+    )
+    for hit in report.sql_hits:
+        assert hit.path.startswith("app/"), hit.render()
+        assert ":" in hit.render(), hit.render()
+
+
+def test_proof_script_lists_offline_script_commands(capsys: pytest.CaptureFixture[str]) -> None:
+    """离线脚手架的系统命令要照实列出来，不能因为「不在 app/ 里」就当它不存在。"""
+    assert main([]) == 0
+    out = capsys.readouterr().out
+    assert "命中（动态 SQL，需人工确认参数化）" in out
+    assert "离线/测试脚本系统命令（不在在线 Agent 路径）" in out
+    assert "scripts/ui_journeys.py" in out
+    assert "subprocess.Popen" in out
+
+
+def test_security_sandbox_doc_covers_clause_3_2() -> None:
+    """安全文档必须能独立支撑 3.2 条：条款号、结论、两类证据、离线命令边界。"""
+    assert SECURITY_DOC.is_file(), SECURITY_DOC
+    doc = SECURITY_DOC.read_text(encoding="utf-8")
+    for needle in (
+        "3.2",
+        PHRASE,
+        "subprocess",
+        EVIDENCE_TEST,
+        EVIDENCE_SCRIPT,
+        "不执行模型生成的代码",
+    ):
+        assert needle in doc, f"docs/security_sandbox.md 缺 {needle!r}"
