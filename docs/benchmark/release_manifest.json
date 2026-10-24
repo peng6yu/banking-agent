@@ -1,10 +1,10 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-10-24T20:57:00+08:00",
+  "generated_at": "2026-10-24T21:32:10+08:00",
   "git": {
-    "head": "61c5cf3ea1ada40e9a59444c712bb98d3f16b75e",
-    "head_short": "61c5cf3",
-    "subject": "feat(audit-round): 七项审计整改落地——日累计分级 / 人工接管 / 预算占用 / 一次性授权 / 沙箱说明 / A-B 与旅程 / 交付材料统一",
+    "head": "803e78ef5ec51239154ef5c45f386aef2c4e4315",
+    "head_short": "803e78e",
+    "subject": "feat(packaging): 答辩包装轮——PPT 12 页 / 6 图、README 首屏、效率表与演示加演",
     "branch": "main",
     "dirty": false,
     "changed_paths": 0
