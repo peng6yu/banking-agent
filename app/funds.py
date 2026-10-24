@@ -83,9 +83,22 @@ class ReleaseOutcome:
     idempotent: bool = False
 
 
-def idempotency_key_for(session_id: str, node_id: str, params_hash: str) -> str:
-    """幂等键：同一个会话同一个节点同一份参数，永远算出同一个键。"""
+def idempotency_key_for(
+    session_id: str, node_id: str, params_hash: str, *, run_id: str = ""
+) -> str:
+    """幂等键：同一轮（run）同一节点同一份参数，永远算出同一个键。
+
+    为什么要带上 run_id：节点号是模板固定的（转账永远是 n3）。只按
+    「会话+节点+参数」算键，用户在同一个会话里第二次说「再给李静转 500」时
+    会命中上一轮那条 hold，工具回报「已转出 500」但钱根本没动——这是**假成功**，
+    比重复扣款更难发现。带上本轮 run_id 后：
+    - 同一轮里点两次确认 / 刷新后重放（run 不变）→ 仍然幂等；
+    - 用户明确再说一次（新的一轮）→ 当成新的一笔，如实扣款。
+    跨会话/跨标签页的重复提交仍未覆盖，那是客户端 request_id 的契约，写在风险清单里。
+    """
     material = f"{session_id}|{node_id}|{params_hash}"
+    if run_id:
+        material += f"|{run_id}"
     return hashlib.sha256(material.encode("utf-8")).hexdigest()[:IDEMPOTENCY_KEY_LEN]
 
 
@@ -121,6 +134,7 @@ def initiate(
     secret: str | None = None,
     payee_id: str | None = None,
     check_balance: bool = True,
+    run_id: str = "",
 ) -> HoldOutcome:
     """第 1 阶段：校验令牌 → 幂等去重 → 余额校验 → 建 hold。
 
@@ -134,7 +148,9 @@ def initiate(
 
     amount_fen = _require_amount(action)
     payee = payee_id or str(action.params.get("payee_id") or SYSTEM_PAYEE_ID)
-    key = idempotency_key_for(session_id, node_id, token_mod.params_hash(action.params))
+    key = idempotency_key_for(
+        session_id, node_id, token_mod.params_hash(action.params), run_id=run_id
+    )
     row = conn.execute("SELECT * FROM holds WHERE idempotency_key = ?", (key,)).fetchone()
     if row is not None:
         replayed = Hold(**dict(row))
@@ -154,6 +170,7 @@ def initiate_split(
     shares: list[tuple[str, int]],
     token: str | None = None,
     secret: str | None = None,
+    run_id: str = "",
 ) -> list[HoldOutcome]:
     """AA 拆分：一次授权、N 条台账。
 
@@ -183,7 +200,7 @@ def initiate_split(
             amount_fen=amount,
         )
         key = idempotency_key_for(
-            session_id, f"{node_id}#{index}", token_mod.params_hash(sub.params)
+            session_id, f"{node_id}#{index}", token_mod.params_hash(sub.params), run_id=run_id
         )
         hold_id = _create_hold(conn, sub, amount, payee_id, key, session_id, True)
         outcomes.append(_to_outcome(fetch_hold(conn, hold_id), reused=False))

@@ -495,8 +495,9 @@ TOOL_SPECS: Final[tuple[ToolSpec, ...]] = (
         params={
             "type": "object",
             "properties": {
-                "payee_ids": {"type": "array", "items": {"type": "string"}, "minItems": 2, "maxItems": 10, "description": "分摊对象的收款人 id 列表"},
+                "payee_ids": {"type": "array", "items": {"type": "string"}, "minItems": 2, "maxItems": 10, "description": "分摊对象的收款人 id 列表（必须已经由 resolve_payee 唯一确定，不能有重复）"},
                 "amount_fen": _AMOUNT_FEN,
+                "per_person_amount_fen": {"type": "integer", "minimum": 1, "description": "可选的校验字段：每人应付。除不尽时不要传；传了就必须与总额整除结果一致，否则整笔拒绝"},
                 "note": {"type": "string", "minLength": 1, "maxLength": 60, "description": "备注"}
             },
             "required": ['payee_ids', 'amount_fen'],

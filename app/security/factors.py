@@ -14,6 +14,10 @@
 服务，演示模式（FACTOR_DEMO_ECHO=1，默认开）会把验证码原样回给前端，方便评审
 现场演示。它真正防住的是「客户端自己宣称已经通过验证」这一类绕过，不防
 「拿到演示验证码的人」。短信/人脸的真实投递与比对不在本仓库范围内。
+
+生产模式的边界：把 FACTOR_DEMO_ECHO 关掉就等价于「按生产模式跑」，这时必须在
+FACTOR_PROVIDER 里声明真实渠道（sms_gateway / face_sdk），否则 issue() 直接
+fail closed——不发码、不落挑战、回调 503，绝不出现「看起来验过了其实没人验」。
 """
 
 from __future__ import annotations
@@ -26,7 +30,7 @@ import sqlite3
 from typing import Any, Final
 
 from app import audit, clock
-from app.clock import ValidationError
+from app.clock import SystemBusy, ValidationError
 from app.ids import new_id
 
 #: 认可的因子种类；和 policy 层的 required_factors 是同一套名字。
@@ -41,6 +45,10 @@ MAX_ATTEMPTS: Final[int] = 5
 #: 演示回显开关：只有显式设成 0/false 才关掉，默认开（现场没短信网关）。
 ECHO_ENV: Final[str] = "FACTOR_DEMO_ECHO"
 SECRET_ENV: Final[str] = "FACTOR_SECRET"
+#: 真实渠道声明。关掉回显等价于「按生产模式跑」，这时必须声明可用渠道，
+#: 否则敏感操作一律 fail closed（见 issue()），不假装已经发过短信。
+PROVIDER_ENV: Final[str] = "FACTOR_PROVIDER"
+REAL_PROVIDERS: Final[frozenset[str]] = frozenset({"sms_gateway", "face_sdk"})
 _ECHO_OFF: Final[frozenset[str]] = frozenset({"0", "false", "no", "off"})
 
 
@@ -48,6 +56,11 @@ def echo_enabled() -> bool:
     """演示模式是否回显验证码（默认开）。"""
     raw = os.getenv(ECHO_ENV, "").strip().lower()
     return raw not in _ECHO_OFF
+
+
+def provider() -> str:
+    """当前声明的验证渠道；没声明就是 demo_stub（只在本进程里回显）。"""
+    return os.getenv(PROVIDER_ENV, "").strip().lower() or "demo_stub"
 
 
 def _secret(explicit: str | None) -> str:
@@ -81,6 +94,17 @@ def issue(
     kind = str(factor).strip().lower()
     if kind not in FACTOR_KINDS:
         raise ValidationError("不认识的验证因子", factor=factor)
+    echo = echo_enabled()
+    provider_name = provider()
+    if not echo and provider_name not in REAL_PROVIDERS:
+        # 生产模式却没配渠道：不发码、不落挑战、不放行。宁可这一步失败，
+        # 也不能让「关掉演示回显」变成一个谁也验不了却看似成功的状态。
+        raise SystemBusy(
+            "当前没有配置真实的短信/人脸渠道（FACTOR_PROVIDER），"
+            "非演示模式不会发放验证码；这一步按失败处理，不会放行。",
+            factor=kind,
+            provider=provider_name,
+        )
     current = int(now if now is not None else clock.now_ms())
     challenge_id = new_id("fc")
     code = _new_code()
@@ -112,7 +136,6 @@ def issue(
         },
         session_id=session_id,
     )
-    echo = echo_enabled()
     return {
         "challenge_id": challenge_id,
         "factor": kind,
@@ -125,9 +148,9 @@ def issue(
         "note": (
             "演示模式：验证码由本进程生成并原样回显，校验仍在服务端完成。"
             if echo
-            else "验证码已通过外部渠道发送；本服务不接收明文，只校验摘要。"
+            else f"验证码已通过声明的外部渠道（{provider_name}）发送；本服务不接收明文，只校验摘要。"
         ),
-        "provider": "demo_stub",
+        "provider": provider_name,
         "limitation": "没有接真实短信网关/人脸活体服务；这里证明的是「客户端不能自己宣布验证通过」。",
     }
 
@@ -234,7 +257,10 @@ __all__ = [
     "ECHO_ENV",
     "FACTOR_KINDS",
     "MAX_ATTEMPTS",
+    "PROVIDER_ENV",
+    "REAL_PROVIDERS",
     "echo_enabled",
+    "provider",
     "issue",
     "verify",
 ]

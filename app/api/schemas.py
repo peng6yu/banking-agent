@@ -10,6 +10,8 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.models import FactorProof
+
 #: 目标金额上限与工具层同一条线：1 亿元。超出就不是储蓄目标是资产迁移了。
 MAX_TARGET_FEN: int = 100_000_000_00
 TARGET_DATE_PATTERN = r"^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
@@ -176,8 +178,46 @@ class PlanRunRequest(BaseModel):
     plan_id: str | None = Field(default=None, min_length=1)
 
 
+class BirthdayItemIn(BaseModel):
+    """生日计划里的一个项目（鲜花、蛋糕……）。"""
+
+    model_config = ConfigDict(extra="forbid", title="生日项目")
+
+    key: str = Field(min_length=1, max_length=20)
+    label: str = Field(min_length=1, max_length=20)
+    merchant: str = Field(min_length=1, max_length=40)
+    amount_fen: int = Field(ge=1, le=MAX_TARGET_FEN)
+
+
+class BirthdayPlanCreate(BaseModel):
+    """POST /api/plans/birthday 的入参：生日、预算、项目。"""
+
+    model_config = ConfigDict(extra="forbid", title="新建生日计划")
+
+    birthday: str = Field(min_length=10, max_length=10, description="YYYY-MM-DD")
+    budget_fen: int = Field(default=100_000, ge=1, le=MAX_TARGET_FEN)
+    items: list[BirthdayItemIn] = Field(default_factory=list, max_length=4)
+    title: str | None = Field(default=None, min_length=1, max_length=60)
+
+
+class BirthdayPayRequest(BaseModel):
+    """POST /api/plans/{plan_id}/items/{item_key}/pay 的入参。
+
+    approve=False 表示用户明确拒绝付款；proofs 与 /api/confirm 同构（服务端挑战 + 校验）。
+    """
+
+    model_config = ConfigDict(extra="forbid", title="生日项目付款")
+
+    approve: bool = True
+    proofs: list[FactorProof] | None = None
+    session_id: str | None = Field(default=None, min_length=1, max_length=80)
+
+
 __all__ = [
     "AlertResolveRequest",
+    "BirthdayItemIn",
+    "BirthdayPayRequest",
+    "BirthdayPlanCreate",
     "CancelRequest",
     "MonitorRunRequest",
     "PlanCreate",

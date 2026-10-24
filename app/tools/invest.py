@@ -102,6 +102,7 @@ def buy_fund(ctx: ToolContext, params: dict[str, Any], token: str | None = None)
     try:
         hold = funds.initiate(
             ctx.conn, action, session_id=ctx.session_key(), node_id=ctx.node_key(),
+            run_id=ctx.task_id or "",
             token=token, secret=ctx.secret, payee_id=funds.SYSTEM_PAYEE_ID,
         )
     except InsufficientFunds as exc:
@@ -150,6 +151,7 @@ def redeem_fund(ctx: ToolContext, params: dict[str, Any], token: str | None = No
     try:
         hold = funds.initiate(
             ctx.conn, action, session_id=ctx.session_key(), node_id=ctx.node_key(),
+            run_id=ctx.task_id or "",
             token=token, secret=ctx.secret, payee_id=funds.SYSTEM_PAYEE_ID, check_balance=False,
         )
     except BankError as exc:

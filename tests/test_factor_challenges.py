@@ -14,6 +14,7 @@ from typing import Any
 import pytest
 
 from app import db
+from app.clock import SystemBusy
 from app.planner import dag as planner_dag
 from app.planner import executor
 from app.security import factors
@@ -134,11 +135,33 @@ def test_missing_factor_is_reported_not_silently_passed(conn: Any) -> None:
     assert result["missing"] == ["face"]
 
 
-def test_echo_can_be_turned_off(conn: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_echo_off_without_a_real_channel_fails_closed(
+    conn: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """关掉回显又没配真实渠道：必须直接失败，不能假装「已通过外部渠道发出」。
+
+    这条是 2026-10-24 加的真实渠道闸门：非演示模式下没有 FACTOR_PROVIDER，
+    发码这一步就该 fail closed，而且不该落一条挑战（否则用户永远收不到码却以为发出去了）。
+    """
     monkeypatch.setenv(factors.ECHO_ENV, "0")
+    monkeypatch.delenv(factors.PROVIDER_ENV, raising=False)
+    before = conn.execute("SELECT COUNT(*) FROM factor_challenges").fetchone()[0]
+    with pytest.raises(SystemBusy):
+        _challenge(conn)
+    after = conn.execute("SELECT COUNT(*) FROM factor_challenges").fetchone()[0]
+    assert after == before
+
+
+def test_echo_off_with_a_declared_channel_is_out_of_band(
+    conn: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """配了真实渠道（这里是声明式 sms_gateway）才允许 out_of_band，且不返回明文码。"""
+    monkeypatch.setenv(factors.ECHO_ENV, "0")
+    monkeypatch.setenv(factors.PROVIDER_ENV, "sms_gateway")
     challenge = _challenge(conn)
     assert challenge["delivery"] == "out_of_band"
     assert challenge["code"] is None
+    assert challenge["provider"] == "sms_gateway"
 
 
 # ------------------------------------------------------------ 红灯转账端到端

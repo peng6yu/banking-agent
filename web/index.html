@@ -1252,7 +1252,13 @@
       case 'factor': renderConfirm(data); renderFactor(data); renderAudit(fromEvent('factor.required', data)); break;
       case 'tool': renderToolResult(data); renderAudit(fromEvent('tool.done', data)); break;
       case 'done': renderDone(data); renderAudit(fromEvent('plan.done', data)); break;
-      case 'error': renderError(data); renderAudit(fromEvent('request.failed', data)); break;
+      case 'error':
+        renderError(data);
+        renderAudit(fromEvent('request.failed', data));
+        /* 上一轮还没走完：不自动替用户选，只把那张卡重新拉出来给人看。
+           服务端已经把 run_id 与两条出口回过来了，这里只负责让卡重新可见。 */
+        if (fieldVal(data, ['code']) === 'SESSION_RUN_CONFLICT') { bxRestoreSession(); }
+        break;
       default: renderAudit(fromEvent('unknown.' + textOf(name), data)); break;
     }
   }
@@ -1662,8 +1668,16 @@
     const code = fieldVal(data, ['code']);
     const userText = fieldVal(data, ['user_text', 'message']) || '系统开小差了，已经记录。';
     appendBubble('sys', userText, code ? 'code=' + code : '');
-    setPanelLevel('panel-policy', 'red');
-    panelBadge('panel-policy', '已拦截');
+    if (code === 'SESSION_RUN_CONFLICT') {
+      /* 这不是「策略拦下了这笔」，而是「上一轮还没走完，这一轮没开始」。
+         画成红灯 + 已拦截会让人以为钱被规则挡了。 */
+      setPanelLevel('panel-policy', 'yellow');
+      panelBadge('panel-policy', '等待上一轮');
+      appendBubble('sys', '没有替你选其中一轮继续：先把上面的卡确认或拒绝，或者点「中断」取消上一轮，再发新的写操作。', 'conflict');
+    } else {
+      setPanelLevel('panel-policy', 'red');
+      panelBadge('panel-policy', '已拦截');
+    }
     setBusy(false);
   }
 

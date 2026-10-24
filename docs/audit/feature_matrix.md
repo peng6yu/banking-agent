@@ -165,11 +165,30 @@
 | 5.12 审计 trigger 硬编码 manual | 已修 | trigger 区分 manual / scheduler 并落 payload（app/proactive.py），测试覆盖；历史事件无法追溯 |
 | 5.13 单会话串行 DAG ≠ 长期计划 | 已修（有边界） | 2026-10-24：app/plans.py + plans/plan_steps（跨天、跨会话、可暂停取消、重启继续，POST /api/plans 等）；tests/test_plans.py 12 条。边界：计划的资金动作永不后台执行，到期只生成待确认提醒并把计划转 paused |
 
+## 十一·二、第四轮（任务书 8 项整改）状态变化，2026-10-24
+
+| 能力 | 之前 → 现在 | 证据 |
+|---|---|---|
+| AA 拆分收款人消歧 | 只有后端接口（默认取第一候选）→ **已实现且有测试证明** | `tests/test_split_safety.py` 14 条 + `tests/test_split.py` 8 条：唯一候选才解析、多候选必须消歧、任一人有歧义整笔不进资金写、工具层再校验 |
+| 生日跨场景长期计划 | 尚未实现 → **已实现且有测试证明（有边界）** | `app/birthday.py` + `plan_budgets`（账本预留，不是 5 分钟 hold）；`tests/test_birthday_plan.py` 11 条；边界：到点只提醒，付款必须重新确认 |
+| 调度器一致性 | 部分实现（只有一台节拍器）→ **已实现且有测试证明（单进程）** | `tests/test_ticker_consistency.py` 7 条：三类任务、异常隔离、重复 start 幂等、stop 冻结；多进程未验证，模块说明里写明 |
+| 同一会话多轮未完成资金写 | 尚未实现（后一轮静默覆盖 RUNS）→ **已实现且有测试证明** | `app/planner/conflict.py` + `run.conflict` 事件；`tests/test_run_conflict.py` 8 条（冲突带 run_id、只读不拦、重启仍检测、取消后解锁） |
+| 真实短信/人脸渠道 | 仅有文档声明 → **部分实现**：没配 `FACTOR_PROVIDER` 且关掉回显时 `SystemBusy` 失败关闭（不落挑战、不写审计） | `tests/test_real_channels.py` 6 条（含 HTTP 503 与 0 挑战断言）；渠道本身仍是桩 |
+| 理财产品期限/流动性/费率 | 仅有文档声明 → **已实现（诚实标注）** | 三项显式 `null` + `fee_text` + `data_source: contest_simulation` + `comparison.supported: false`；`tests/test_real_channels.py` |
+| 浏览器高风险旅程 | 部分实现（只有六区截图）→ **已实现且有测试证明** | `scripts/ui_journeys.py` 5/5（小额确认 / 高额双因子 / AA 同名被阻止 / 生日计划建+刷新恢复 / 储蓄提醒处理），`docs/交付/browser_journeys.json` 的 `demo_db_unchanged: true` |
+| 版本数字口径 | 多份文档各写一套 → **已实现** | `scripts/release_manifest.py` → `docs/benchmark/release_manifest.json`；README / 验收报告 / 提交物对照表 / 比赛演示方案 / PPT 全部引用 |
+| A/B 与最终代码一致 | 受环境限制未复跑 → **已实现（三轮）** | r1 `20261024T134524` / r2 `20261024T135754` / r3 `20261024T160805`；仍单次采样，不宣称显著（final_acceptance_report §6） |
+
+**这一轮新增的明确未验证**：多进程并发下 ticker 的重复执行（租约只做了单机测试）、真实短信/人脸链路、点击级 DOM 断言（旅程是流程级）、生日计划长期运行一个真实生日周期。
+
 ## 十二、证据强度自评
 
+> 本节及全表涉及的计数（工具 / 表 / 审计事件 / API 路径 / 测试通过数 / A/B 轮次）以
+> `docs/benchmark/release_manifest.json` 为准；该文件由 `scripts/release_manifest.py` 从代码与运行日志生成。
+
 **本机实际跑过、可复现的强证据**
-- 全量 pytest：**1279 passed / 4 skipped / 1 warning（39.56s，.venv/bin/python -m pytest -q，2026-10-24 终测）**。4 skipped 仍是浏览器冒烟（.venv 无 playwright）。
-- 与上一版差异：1131（10-23 基线）→ 1152（信息架构轮）→ 1258（安全补强）→ 1264（策略拦截事件 + 月末钳制）→ 1275（租约/授权保质期/恢复多轮/刷新重建，+11）→ **1279（2026-10-24 末：单姓收款人 2 条 + 兜底赎回链 2 条，+4）**。中间新增批次：test_factor_challenges 12、test_suitability 17、test_channels 14、test_recover 8、test_plans 12、test_session_cards 3、test_scheduled_calendar 6、test_scheduled_lease 7、test_business_api 14。
+- 全量 pytest：**1330 passed / 4 skipped / 1 warning（46.61s，.venv/bin/python -m pytest -q，2026-10-24 终测）**。4 skipped 仍是浏览器冒烟（.venv 无 playwright）。
+- 与上一版差异：1131（10-23 基线）→ 1152（信息架构轮）→ 1258（安全补强）→ 1264（策略拦截事件 + 月末钳制）→ 1275（租约/授权保质期/恢复多轮/刷新重建，+11）→ 1279（单姓收款人 + 兜底赎回链，+4）→ **1330（本轮任务书整改：AA 拆分、生日计划、ticker 一致性、真实渠道闸门等，+51）**。中间新增批次：test_factor_challenges 12、test_suitability 17、test_channels 14、test_recover 8、test_plans 12、test_session_cards 3、test_scheduled_calendar 6、test_scheduled_lease 7、test_business_api 14。
 - 本轮新增的运行时证据：多因子服务端挑战（签发/通过/拒绝三条审计 + 无证明不执行）、卡与账户闸门（含 hold 后冻结卡）、R07 硬线、confirm.expired 与 rejected 可区分、断流恢复后真出账、适当性拒买、订阅推断、持久计划跨重启、34 条原话防护、浏览器六区 + 主线 7 张（含刷新后重建的卡片）。
 - 预约转账的并发与时效证据：租约（`claim_token`/`claimed_ms`）让第二个 worker 抢不到就跳过，`scheduled.auth_expired` 让 31 天前的人脸验证不再被当成永久通行证——两条都在 tests/test_scheduled_lease.py 里用「余额不动 / 只少一次」反证。
 - 刷新恢复证据：`/api/session` 重建整张卡（tests/test_session_cards.py 3 条）+ 浏览器 main_07（连点两次只扣一次、F5 后卡片带着 200.00 与收款人回来）。

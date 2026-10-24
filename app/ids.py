@@ -21,6 +21,8 @@ ID_PREFIXES: Final[frozenset[str]] = frozenset(
         "sg", "mr", "pa", "mnr",
         # 多因子挑战与本轮新增的跨场景计划
         "fc", "pl", "ps",
+        # 生日计划的项目预算占用（不是 hold）
+        "pb",
     }
 )
 

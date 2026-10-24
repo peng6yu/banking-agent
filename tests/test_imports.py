@@ -59,6 +59,8 @@ LAYERS: dict[str, int] = {
     "app.subscriptions": 2,
     # 跨场景计划（P1-9）：状态全在库里，后台节拍推进；action 步只提醒、不代扣
     "app.plans": 2,
+    # 生日计划：建计划（账本级预算预留）+ 到期付款走确认/令牌，依赖规划层与工具白名单
+    "app.birthday": 5,
     "app.policy.engine": 2,
     "app.policy.rules": 2,
     "app.tools.base": 3,
@@ -85,6 +87,8 @@ LAYERS: dict[str, int] = {
     "app.planner.card_actions": 4,
     # 重启恢复：从库里重建 RunState 接着跑，依赖执行器与状态
     "app.planner.recover": 4,
+    # 同一会话只允许一轮没走完的写操作：只读库表 + 允许的写工具清单，不碰执行
+    "app.planner.conflict": 4,
     # 知识层接线（阶段 3）：把领域知识翻译成「问不问/填什么/怎么解释」，不碰策略
     "app.planner.kb_bridge": 4,
     "app.planner.payment_guard": 4,
@@ -120,6 +124,7 @@ ALLOWED: dict[str, frozenset[str]] = {
     "app.api": frozenset(),
     "app.api.routes": frozenset({
         "app.api.schemas",
+        "app.birthday",
         "app.clock",
         "app.config",
         "app.ids",
@@ -143,7 +148,8 @@ ALLOWED: dict[str, frozenset[str]] = {
         "app.tools.base",
         "app.tools.bill",
     }),
-    "app.api.schemas": frozenset(),
+    # 入参模型里 FactorProof 复用公共契约（多因子凭证与 /api/confirm 同构）
+    "app.api.schemas": frozenset({"app.models"}),
     "app.audit": frozenset({
         "app.clock",
         "app.log",
@@ -274,6 +280,11 @@ ALLOWED: dict[str, frozenset[str]] = {
         "app.knowledge.models",
     }),
     "app.planner.payment_guard": frozenset(),
+    # 冲突闸门：查库、写一条 run.conflict 审计、读工具清单，不驱动任何执行
+    "app.planner.conflict": frozenset({
+        "app.models",
+        "app.tools.registry",
+    }),
     # 重启恢复：只重建状态、接着驱动，不重新解析意图也不重新裁决
     "app.planner.recover": frozenset({
         "app.clock",
@@ -356,6 +367,15 @@ ALLOWED: dict[str, frozenset[str]] = {
     }),
     # 订阅推断：只读流水，只用到金额格式化
     "app.plans": frozenset(),
+    # 生日计划：钱走 executor（确认/令牌），商户白名单复用工具层常量
+    "app.birthday": frozenset({
+        "app.clock",
+        "app.ids",
+        "app.money",
+        "app.planner",
+        "app.planner.dag",
+        "app.tools.transfers",
+    }),
     "app.subscriptions": frozenset({
         "app.money",
     }),

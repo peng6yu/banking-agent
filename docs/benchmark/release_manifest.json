@@ -1,0 +1,506 @@
+{
+  "schema_version": 1,
+  "generated_at": "2026-10-24T16:32:33+08:00",
+  "git": {
+    "head": "e81f6d35fdfdb73632f17a68478d46bc3ce2b7c2",
+    "head_short": "e81f6d3",
+    "subject": "fix(guard+eval): 单姓收款人必须追问、兜底不吞赎回链，换 DeepSeek 在两轮 A/B 上把未授权写降到 0",
+    "branch": "main",
+    "dirty": true,
+    "changed_paths": 65
+  },
+  "code": {
+    "tools": {
+      "total": 35,
+      "readonly": 13,
+      "write": 22,
+      "names": [
+        "query_balance",
+        "query_transactions",
+        "analyze_bill",
+        "list_subs",
+        "list_cards",
+        "resolve_payee",
+        "transfer",
+        "cancel_subscription",
+        "reserve_funds",
+        "pay_merchant",
+        "list_products",
+        "estimate_risk",
+        "buy_fund",
+        "redeem_fund",
+        "apply_virtual_card",
+        "set_card_limit",
+        "freeze_card",
+        "unfreeze_card",
+        "report_card_loss",
+        "schedule_transfer",
+        "list_scheduled",
+        "cancel_scheduled",
+        "split_transfer",
+        "close_card",
+        "change_card_pin",
+        "reverse_transfer",
+        "list_savings_goals",
+        "compute_savings_plan",
+        "list_proactive_alerts",
+        "create_savings_goal",
+        "update_savings_goal",
+        "resolve_proactive_alert",
+        "run_proactive_monitor",
+        "get_suitability",
+        "assess_suitability"
+      ]
+    },
+    "db_tables": 27,
+    "db_table_names": [
+      "users",
+      "accounts",
+      "cards",
+      "payees",
+      "holds",
+      "transactions",
+      "audit_log",
+      "sessions",
+      "dag_runs",
+      "dag_nodes",
+      "confirmations",
+      "token_nonces",
+      "subs",
+      "daily_limits",
+      "denials",
+      "fund_products",
+      "fund_holdings",
+      "scheduled_transfers",
+      "savings_goals",
+      "monitor_rules",
+      "proactive_alerts",
+      "monitor_runs",
+      "factor_challenges",
+      "investor_profiles",
+      "plans",
+      "plan_steps",
+      "plan_budgets"
+    ],
+    "audit_event_types": 48,
+    "api_paths": 30,
+    "policy_rules": 12,
+    "intent_templates": 9,
+    "test_files": 80,
+    "knowledge": {
+      "version": "2c4fbe8d4be2906c",
+      "terms": 40,
+      "entities": 25,
+      "relations": 22,
+      "intents": 11,
+      "workflows": 10,
+      "sources": 34,
+      "warnings": 5
+    }
+  },
+  "tests": {
+    "command": ".venv/bin/python -m pytest -q",
+    "passed": 1330,
+    "failed": 0,
+    "skipped": 4,
+    "duration_s": 46.61,
+    "log": "tmp/pytest_final.log",
+    "parsed": true
+  },
+  "redteam": {
+    "command": ".venv/bin/python -m scripts.redteam",
+    "cases_run": 43,
+    "pass": 43,
+    "fail": 0,
+    "log": "tmp/redteam_deepseek.log"
+  },
+  "e2e": {
+    "command": ".venv/bin/python scripts/e2e.py --offline",
+    "pass": 13,
+    "total": 13,
+    "log": "tmp/e2e_final.log"
+  },
+  "ab": {
+    "rounds": [
+      {
+        "dir": "tests/eval/results/20261023T185131",
+        "started_at": "2026-10-23T18:51:31+08:00",
+        "model": "MiniMax-M3.1-Flash-Preview",
+        "adapter": "LLMAdapter",
+        "cases": 2,
+        "knowledge_version": {
+          "a": "59ff01419aac0b29",
+          "b": "59ff01419aac0b29"
+        },
+        "groups": {
+          "a": {
+            "intent_accuracy": 1.0,
+            "slot_accuracy": 1.0,
+            "clarify_accuracy": 1.0,
+            "dag_validity": 1.0,
+            "knowledge_citation": 0,
+            "unauthorized_write_attempts": 0
+          },
+          "b": {
+            "intent_accuracy": 1.0,
+            "slot_accuracy": 1.0,
+            "clarify_accuracy": 1.0,
+            "dag_validity": 1.0,
+            "knowledge_citation": 0.0,
+            "unauthorized_write_attempts": 0
+          }
+        }
+      },
+      {
+        "dir": "tests/eval/results/20261023T185227",
+        "started_at": "2026-10-23T18:52:27+08:00",
+        "model": "MiniMax-M3.1-Flash-Preview",
+        "adapter": "LLMAdapter",
+        "cases": 2,
+        "knowledge_version": {
+          "a": "59ff01419aac0b29",
+          "b": "59ff01419aac0b29"
+        },
+        "groups": {
+          "a": {
+            "intent_accuracy": 1.0,
+            "slot_accuracy": 1.0,
+            "clarify_accuracy": 1.0,
+            "dag_validity": 1.0,
+            "knowledge_citation": 0,
+            "unauthorized_write_attempts": 0
+          },
+          "b": {
+            "intent_accuracy": 1.0,
+            "slot_accuracy": 1.0,
+            "clarify_accuracy": 1.0,
+            "dag_validity": 1.0,
+            "knowledge_citation": 0.0,
+            "unauthorized_write_attempts": 0
+          }
+        }
+      },
+      {
+        "dir": "tests/eval/results/20261023T185338",
+        "started_at": "2026-10-23T18:53:38+08:00",
+        "model": "MiniMax-M3.1-Flash-Preview",
+        "adapter": "LLMAdapter",
+        "cases": 80,
+        "knowledge_version": {
+          "a": "59ff01419aac0b29",
+          "b": "59ff01419aac0b29"
+        },
+        "groups": {
+          "a": {
+            "intent_accuracy": 0.8625,
+            "slot_accuracy": 0.7808219178082192,
+            "clarify_accuracy": 0.8,
+            "dag_validity": 1.0,
+            "knowledge_citation": 0,
+            "unauthorized_write_attempts": 9
+          },
+          "b": {
+            "intent_accuracy": 0.85,
+            "slot_accuracy": 0.7945205479452054,
+            "clarify_accuracy": 0.75,
+            "dag_validity": 0.972972972972973,
+            "knowledge_citation": 0.5098039215686274,
+            "unauthorized_write_attempts": 10
+          }
+        }
+      },
+      {
+        "dir": "tests/eval/results/20261023T191048",
+        "started_at": "2026-10-23T19:10:48+08:00",
+        "model": "MiniMax-M3.1-Flash-Preview",
+        "adapter": "LLMAdapter",
+        "cases": 80,
+        "knowledge_version": {
+          "a": "59ff01419aac0b29",
+          "b": "59ff01419aac0b29"
+        },
+        "groups": {
+          "a": {
+            "intent_accuracy": 0.8625,
+            "slot_accuracy": 0.863013698630137,
+            "clarify_accuracy": 0.8625,
+            "dag_validity": 1.0,
+            "knowledge_citation": 0,
+            "unauthorized_write_attempts": 8
+          },
+          "b": {
+            "intent_accuracy": 0.8875,
+            "slot_accuracy": 0.9041095890410958,
+            "clarify_accuracy": 0.9,
+            "dag_validity": 1.0,
+            "knowledge_citation": 0.8235294117647058,
+            "unauthorized_write_attempts": 3
+          }
+        }
+      },
+      {
+        "dir": "tests/eval/results/20261023T192756",
+        "started_at": "2026-10-23T19:27:56+08:00",
+        "model": "MiniMax-M3.1-Flash-Preview",
+        "adapter": "LLMAdapter",
+        "cases": 80,
+        "knowledge_version": {
+          "a": "59ff01419aac0b29",
+          "b": "59ff01419aac0b29"
+        },
+        "groups": {
+          "a": {
+            "intent_accuracy": 0.85,
+            "slot_accuracy": 0.8082191780821918,
+            "clarify_accuracy": 0.8125,
+            "dag_validity": 1.0,
+            "knowledge_citation": 0,
+            "unauthorized_write_attempts": 5
+          },
+          "b": {
+            "intent_accuracy": 0.85,
+            "slot_accuracy": 0.821917808219178,
+            "clarify_accuracy": 0.8625,
+            "dag_validity": 1.0,
+            "knowledge_citation": 0.8235294117647058,
+            "unauthorized_write_attempts": 0
+          }
+        }
+      },
+      {
+        "dir": "tests/eval/results/20261023T194022",
+        "started_at": "2026-10-23T19:40:22+08:00",
+        "model": "MiniMax-M3.1-Flash-Preview",
+        "adapter": "LLMAdapter",
+        "cases": 80,
+        "knowledge_version": {
+          "a": "59ff01419aac0b29",
+          "b": "59ff01419aac0b29"
+        },
+        "groups": {
+          "a": {
+            "intent_accuracy": 0.825,
+            "slot_accuracy": 0.7671232876712328,
+            "clarify_accuracy": 0.825,
+            "dag_validity": 1.0,
+            "knowledge_citation": 0,
+            "unauthorized_write_attempts": 6
+          },
+          "b": {
+            "intent_accuracy": 0.85,
+            "slot_accuracy": 0.8493150684931506,
+            "clarify_accuracy": 0.8625,
+            "dag_validity": 1.0,
+            "knowledge_citation": 0.8235294117647058,
+            "unauthorized_write_attempts": 2
+          }
+        }
+      },
+      {
+        "dir": "tests/eval/results/20261023T210056",
+        "started_at": "2026-10-23T21:00:56+08:00",
+        "model": "MiniMax-M3.1-Flash-Preview",
+        "adapter": "LLMAdapter",
+        "cases": 80,
+        "knowledge_version": {
+          "a": "59ff01419aac0b29",
+          "b": "59ff01419aac0b29"
+        },
+        "groups": {
+          "a": {
+            "intent_accuracy": 0.8375,
+            "slot_accuracy": 0.821917808219178,
+            "clarify_accuracy": 0.8875,
+            "dag_validity": 1.0,
+            "knowledge_citation": 0,
+            "unauthorized_write_attempts": 4
+          },
+          "b": {
+            "intent_accuracy": 0.8875,
+            "slot_accuracy": 0.8767123287671232,
+            "clarify_accuracy": 0.8625,
+            "dag_validity": 1.0,
+            "knowledge_citation": 0.8235294117647058,
+            "unauthorized_write_attempts": 0
+          }
+        }
+      },
+      {
+        "dir": "tests/eval/results/20261024T134524",
+        "started_at": "2026-10-24T13:45:24+08:00",
+        "model": "deepseek-flash",
+        "adapter": "LLMAdapter",
+        "cases": 80,
+        "knowledge_version": {
+          "a": "2c4fbe8d4be2906c",
+          "b": "2c4fbe8d4be2906c"
+        },
+        "groups": {
+          "a": {
+            "intent_accuracy": 0.85,
+            "slot_accuracy": 0.821917808219178,
+            "clarify_accuracy": 0.8875,
+            "dag_validity": 1.0,
+            "knowledge_citation": 0,
+            "unauthorized_write_attempts": 1
+          },
+          "b": {
+            "intent_accuracy": 0.9,
+            "slot_accuracy": 0.8767123287671232,
+            "clarify_accuracy": 0.9125,
+            "dag_validity": 1.0,
+            "knowledge_citation": 0.803921568627451,
+            "unauthorized_write_attempts": 1
+          }
+        }
+      },
+      {
+        "dir": "tests/eval/results/20261024T135754",
+        "started_at": "2026-10-24T13:57:54+08:00",
+        "model": "deepseek-flash",
+        "adapter": "LLMAdapter",
+        "cases": 80,
+        "knowledge_version": {
+          "a": "2c4fbe8d4be2906c",
+          "b": "2c4fbe8d4be2906c"
+        },
+        "groups": {
+          "a": {
+            "intent_accuracy": 0.875,
+            "slot_accuracy": 0.8356164383561644,
+            "clarify_accuracy": 0.925,
+            "dag_validity": 1.0,
+            "knowledge_citation": 0,
+            "unauthorized_write_attempts": 0
+          },
+          "b": {
+            "intent_accuracy": 0.85,
+            "slot_accuracy": 0.8082191780821918,
+            "clarify_accuracy": 0.9375,
+            "dag_validity": 0.972972972972973,
+            "knowledge_citation": 0.803921568627451,
+            "unauthorized_write_attempts": 0
+          }
+        }
+      },
+      {
+        "dir": "tests/eval/results/20261024T160805",
+        "started_at": "2026-10-24T16:08:05+08:00",
+        "model": "deepseek-flash",
+        "adapter": "LLMAdapter",
+        "cases": 80,
+        "knowledge_version": {
+          "a": "2c4fbe8d4be2906c",
+          "b": "2c4fbe8d4be2906c"
+        },
+        "groups": {
+          "a": {
+            "intent_accuracy": 0.825,
+            "slot_accuracy": 0.8082191780821918,
+            "clarify_accuracy": 0.9375,
+            "dag_validity": 1.0,
+            "knowledge_citation": 0,
+            "unauthorized_write_attempts": 0
+          },
+          "b": {
+            "intent_accuracy": 0.9125,
+            "slot_accuracy": 0.8767123287671232,
+            "clarify_accuracy": 0.9125,
+            "dag_validity": 1.0,
+            "knowledge_citation": 0.8235294117647058,
+            "unauthorized_write_attempts": 0
+          }
+        }
+      }
+    ],
+    "latest": {
+      "dir": "tests/eval/results/20261024T160805",
+      "started_at": "2026-10-24T16:08:05+08:00",
+      "model": "deepseek-flash",
+      "adapter": "LLMAdapter",
+      "cases": 80,
+      "knowledge_version": {
+        "a": "2c4fbe8d4be2906c",
+        "b": "2c4fbe8d4be2906c"
+      },
+      "groups": {
+        "a": {
+          "intent_accuracy": 0.825,
+          "slot_accuracy": 0.8082191780821918,
+          "clarify_accuracy": 0.9375,
+          "dag_validity": 1.0,
+          "knowledge_citation": 0,
+          "unauthorized_write_attempts": 0
+        },
+        "b": {
+          "intent_accuracy": 0.9125,
+          "slot_accuracy": 0.8767123287671232,
+          "clarify_accuracy": 0.9125,
+          "dag_validity": 1.0,
+          "knowledge_citation": 0.8235294117647058,
+          "unauthorized_write_attempts": 0
+        }
+      }
+    },
+    "conclusion": "跨轮方向不一致：同一份 80 例、同一模型，B 组相对 A 组的 intent 差值在三轮之间反复变号，不能宣称知识层带来 x pp 的稳定提升。稳定成立的只有两项：B 组知识引用正确率（41/51、41/51、42/51）与未授权写操作在 r2/r3 归零（r1 两组各 1）。",
+    "dataset": "tests/eval/intent_cases.yaml"
+  },
+  "browser": {
+    "screenshots": {
+      "report": "docs/交付/截图/信息架构/browser_report.json",
+      "views": 12,
+      "checks": 12,
+      "checks_all_ok": true,
+      "js_errors": 0,
+      "payee_flow": true,
+      "red_flow": true,
+      "daily_block": true,
+      "idempotent_refresh": true
+    },
+    "journeys": {
+      "report": "docs/交付/browser_journeys.json",
+      "status": "pass",
+      "items": {
+        "j1": "pass",
+        "j2": "pass",
+        "j4": "pass",
+        "j5": "pass",
+        "j3": "pass"
+      },
+      "demo_db_unchanged": true
+    }
+  },
+  "limits": [
+    {
+      "item": "多因子渠道",
+      "status": "演示桩",
+      "detail": "FACTOR_PROVIDER 未配置时走 demo_stub 回显；非演示模式（FACTOR_DEMO_ECHO=0）没有真实渠道会直接失败，不会放行。"
+    },
+    {
+      "item": "理财产品数据",
+      "status": "contest_simulation",
+      "detail": "fund_products 是本地种子；期限/流动性/费率显式 null，不编造；没做产品对比。"
+    },
+    {
+      "item": "后台节拍",
+      "status": "单进程",
+      "detail": "process 内 asyncio，进程退出即停；多 worker 未验证；只推进显式打开监测的目标。"
+    },
+    {
+      "item": "知识层 A/B",
+      "status": "方向不稳定",
+      "detail": "三轮 DeepSeek 结果方向反复，只认知识引用正确率与未授权写归零两项。"
+    },
+    {
+      "item": "跨会话幂等",
+      "status": "未实现",
+      "detail": "幂等键含 session_id；换会话重新发起视为新的一笔。"
+    },
+    {
+      "item": "浏览器旅程",
+      "status": "5 条流程级",
+      "detail": "Playwright 真浏览器 + 服务端状态双证；不是点击级 DOM 单测覆盖。"
+    }
+  ],
+  "note": "文档里的数字必须与本文件一致；改代码后重新跑本脚本，不要手工改文档里的计数。"
+}

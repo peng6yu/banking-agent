@@ -1,16 +1,22 @@
-"""定时转账的到点执行节拍器。
+"""后台节拍器：同一拍里推进三类到点任务。
 
-为什么需要它：app/tools/scheduled.py 的 execute_due 只负责「把到点的行划出去」，
-它自己不产生时间。没有调用点的话，用户预约成功之后那笔钱永远不会动，
-在演示现场看起来就是「定时转账没做完」——这正是 t26 那次 breaker.record_denial
-「实现了但生产从来走不到」的同一类问题。
+三类任务（各自独立，失败互不牵连）：
+1. **预约转账**（app/tools/scheduled.execute_due）——到点真的出账，走确认/令牌/
+   因子保质期；抢不到租约就跳过，避免多进程重复扣款。
+2. **主动财务监测**（app/proactive.run_due_monitors）——只碰用户显式打开监测开关
+   的目标，按 last_monitored_ms 节流，只写提醒与运行记录，不动钱。
+3. **跨场景计划**（app/plans.run_due）——check/reminder 步自动走，action 步一律
+   交回用户确认，后台不代扣。
 
-两种触发方式，都要在：
-1. 后台节拍：应用启动时起一个 asyncio 任务，每 SCHEDULED_TICK_MS 毫秒跑一次；
-2. 手动端点：POST /api/scheduled/run，评审现场想立刻看到效果时用。
+两种触发方式共用同一批函数：
+- 后台节拍：app/main.py 的 lifespan 启动时 start()，关闭时 stop()；
+- 手动端点：POST /api/scheduled/run、/api/proactive/monitor/run、/api/plans/run。
 
-边界：节拍器只调用 execute_due，不自己判时间、不自己算钱；
-执行失败的预约由 execute_due 自己置 failed 并写审计。
+**边界（别把接入当可靠）**：这是单进程 asyncio 节拍。进程退出就停；多 worker
+部署时每个 worker 都会起一条节拍，靠的是各任务自己的领取语义（预约转账有
+CLAIM_LEASE_MS 租约、计划步骤用条件 UPDATE 领取、监测按 last_monitored_ms 节流），
+而不是节拍器本身做了分布式协调。多进程下的可靠性没有被验证过。
+
 对应文档：docs/06 6.11 的定时转账、docs/07 7.5 的端点表。
 """
 
@@ -107,8 +113,15 @@ _TASK: asyncio.Task[None] | None = None
 
 
 def start() -> asyncio.Task[None] | None:
-    """起后台节拍；SCHEDULED_TICK_MS=0 时不起，返回 None。"""
+    """起后台节拍；SCHEDULED_TICK_MS=0 时不起，返回 None。
+
+    重复调用返回已有任务而不是再起一条：两次 start() 等于同一条流水线每秒跑两遍，
+    预约转账有租约挡着，但监测与计划会白跑，日志也会出现两份"同一拍"。
+    """
     global _TASK
+    if is_started():
+        log.info("ticker.already_running")
+        return _TASK
     interval = tick_interval_ms()
     if interval == TICK_OFF:
         return None

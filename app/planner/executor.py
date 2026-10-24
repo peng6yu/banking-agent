@@ -7,6 +7,7 @@ from typing import Any, Final
 from app import audit, clock, db, funds
 from app.clock import BankError, ValidationError
 from app.models import Action, Dag, Decision
+from app.planner import conflict as run_conflict
 from app.planner import dag as planner_dag
 from app.planner.events import (
     describe_confirmation,
@@ -116,6 +117,31 @@ async def run(
     # 认领后并进每个 Action 的 untrusted_fields，R04 再把它升成双因子。
     taint = injection.claim_turn(session_id)
     try:
+        # 同一会话只允许一轮没走完的写操作：两轮并行时后一轮会覆盖 RUNS[session_id]，
+        # 前一轮的确认卡还在库里却已经没人驱动它——用户点确认「没反应」。
+        # 这里只拦「新请求含写操作且上一轮还没落定」，只读请求照放。
+        blocked = run_conflict.detect(session_id, dag)
+        if blocked is not None:
+            log.info(
+                "executor.run.conflict session=%s run=%s new_tools=%s",
+                session_id,
+                blocked["run_id"],
+                ",".join(blocked["new_tools"]),
+            )
+            await emit_event(
+                emit,
+                "error",
+                {
+                    "code": run_conflict.CONFLICT_CODE,
+                    "user_text": blocked["message"],
+                    "run_id": blocked["run_id"],
+                    "run_ids": blocked["run_ids"],
+                    "options": blocked["options"],
+                    "conflict": blocked,
+                },
+            )
+            await emit_event(emit, "done", {"summary": blocked["message"], "conflict": True})
+            return
         state = open_run(session_id, dag, account_id, secret, user_text)
         RUNS[session_id] = state
         if taint is not None:
@@ -204,8 +230,17 @@ async def resume(
 
 
 async def cancel(session_id: str, reason: str = "用户中途取消") -> dict[str, Any]:
-    """中途取消：释放本会话全部 held 预授权，节点标 skipped，整轮标 cancelled。"""
-    state = require_run(session_id)
+    """中途取消：释放本会话全部 held 预授权，节点标 skipped，整轮标 cancelled。
+
+    进程重启过的话内存里没有这一轮，但库里有——交给恢复层按同一套语义取消，
+    否则刷新之后「中断」按钮会失效，用户只能干等卡片过期。
+    """
+    try:
+        state = require_run(session_id)
+    except ValidationError:
+        from app.planner import recover
+
+        return await recover.cancel(session_id, reason)
     state.cancelled = True
     state.cancel_reason = reason
     released = release_holds(state, reason)

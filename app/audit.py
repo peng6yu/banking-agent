@@ -26,6 +26,9 @@ EVENT_TYPES: Final[frozenset[str]] = frozenset(
         "session.start",
         "intent.parsed",
         "dag.built",
+        # 同一会话里已有没走完的写轮次：这一轮被挡住也必须留痕，
+        # 否则用户问「为什么我这句话没执行」时，库里只有一句 intent.parsed。
+        "run.conflict",
         "policy.decided",
         "confirm.requested",
         "confirm.approved",
@@ -67,6 +70,12 @@ EVENT_TYPES: Final[frozenset[str]] = frozenset(
         "scheduled.failed",
     # 创建期验过的因子过了保质期：这笔不再享受越额度放行，回到普通口径排队
     "scheduled.auth_expired",
+        # 生日计划：预算占用、单项付款成功/失败/被拒都要留痕，
+        # 否则库里只剩一个 plan_budgets.status，查不出「为什么这束花没买成」。
+        "plan.budget_reserved",
+        "plan.item_paid",
+        "plan.item_failed",
+        "plan.item_declined",
         # 模拟支出注入：竞赛演示用的假流水，语义上与真实扣款无关，必须单独一类，
         # 否则审计链里分不清「演示注入」和「工具真的动了钱」。
         "proactive.simulated_expense",

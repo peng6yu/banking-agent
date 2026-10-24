@@ -54,6 +54,7 @@ TABLE_NAMES: Final[tuple[str, ...]] = (
     "investor_profiles",
     "plans",
     "plan_steps",
+    "plan_budgets",
 )
 
 SCHEMA_SQL: Final[str] = """
@@ -383,6 +384,25 @@ CREATE TABLE IF NOT EXISTS plan_steps (
   UNIQUE (plan_id, seq)
 );
 CREATE INDEX IF NOT EXISTS idx_plan_steps_due ON plan_steps(state, due_ms);
+
+-- 生日计划的项目预算：账本上的预算占用，**不是资金冻结**。
+-- 不建 holds 行、不扣余额，所以也不会像 5 分钟临时 hold 那样「过期自动释放」——
+-- 拿短 hold 冒充长期预留，等于把一个月的计划写成 5 分钟的资金占用，语义完全不对。
+CREATE TABLE IF NOT EXISTS plan_budgets (
+  id          TEXT PRIMARY KEY,
+  plan_id     TEXT NOT NULL REFERENCES plans(id),
+  item_key    TEXT NOT NULL,
+  label       TEXT NOT NULL,
+  merchant    TEXT NOT NULL,
+  amount_fen  INTEGER NOT NULL CHECK (amount_fen > 0),
+  extra_json  TEXT NOT NULL DEFAULT '{}',
+  status      TEXT NOT NULL CHECK (status IN ('reserved','paying','committed','declined','failed','released')),
+  reason      TEXT NOT NULL DEFAULT '',
+  created_ms  INTEGER NOT NULL,
+  updated_ms  INTEGER NOT NULL,
+  UNIQUE (plan_id, item_key)
+);
+CREATE INDEX IF NOT EXISTS idx_plan_budgets_plan ON plan_budgets(plan_id, status);
 
 -- 审计只增不改：UPDATE/DELETE 一律由 SQLite 层拦掉（docs/03 3.2 第 7 张表）
 CREATE TRIGGER IF NOT EXISTS audit_no_update BEFORE UPDATE ON audit_log

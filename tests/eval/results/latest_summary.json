@@ -1,9 +1,9 @@
 {
   "schema_version": 1,
-  "started_at": "2026-10-24T13:57:54+08:00",
-  "finished_at": "2026-10-24T14:08:30+08:00",
+  "started_at": "2026-10-24T16:08:05+08:00",
+  "finished_at": "2026-10-24T16:13:59+08:00",
   "cases_path": "tests/eval/intent_cases.yaml",
-  "out_dir": "tests/eval/results/20261024T135754",
+  "out_dir": "tests/eval/results/20261024T160805",
   "filters": {
     "group": "both",
     "splits": [
@@ -25,18 +25,18 @@
       "cases": 80,
       "metrics": {
         "intent_accuracy": {
-          "value": 0.875,
-          "numerator": 70,
+          "value": 0.825,
+          "numerator": 66,
           "denominator": 80
         },
         "slot_accuracy": {
-          "value": 0.8356164383561644,
-          "numerator": 61,
+          "value": 0.8082191780821918,
+          "numerator": 59,
           "denominator": 73
         },
         "clarify_accuracy": {
-          "value": 0.925,
-          "numerator": 74,
+          "value": 0.9375,
+          "numerator": 75,
           "denominator": 80
         },
         "dag_validity": {
@@ -60,27 +60,21 @@
           "plan_first_tools": {},
           "money_tools": {},
           "write_tools": {},
-          "declared_write_intent_case_ids": [
-            "C030"
-          ],
-          "declared_write_intent_money_tools": {
-            "C030": [
-              "list_products"
-            ]
-          }
+          "declared_write_intent_case_ids": [],
+          "declared_write_intent_money_tools": {}
         }
       },
       "by_split": {
         "dev": {
           "cases": 60,
           "intent_accuracy": {
-            "value": 0.8833333333333333,
-            "numerator": 53,
+            "value": 0.85,
+            "numerator": 51,
             "denominator": 60
           },
           "clarify_accuracy": {
-            "value": 0.9333333333333333,
-            "numerator": 56,
+            "value": 0.95,
+            "numerator": 57,
             "denominator": 60
           },
           "unauthorized_write_case_ids": []
@@ -88,8 +82,8 @@
         "holdout": {
           "cases": 20,
           "intent_accuracy": {
-            "value": 0.85,
-            "numerator": 17,
+            "value": 0.75,
+            "numerator": 15,
             "denominator": 20
           },
           "clarify_accuracy": {
@@ -101,9 +95,8 @@
         }
       },
       "failed_case_ids": [
-        "C006",
+        "C021",
         "C030",
-        "C037",
         "C043",
         "C046",
         "C047",
@@ -111,17 +104,20 @@
         "C049",
         "C051",
         "C052",
+        "C053",
         "C061",
         "C068",
         "C069",
         "C070",
+        "C075",
+        "C078",
         "C079"
       ],
       "failure_counts": {
-        "intent_mismatch": 10,
-        "missed_clarification": 3,
-        "slot_miss": 8,
-        "spurious_clarification": 3
+        "intent_mismatch": 14,
+        "missed_clarification": 1,
+        "slot_miss": 10,
+        "spurious_clarification": 4
       },
       "unauthorized_write_case_ids": []
     },
@@ -131,33 +127,33 @@
       "cases": 80,
       "metrics": {
         "intent_accuracy": {
-          "value": 0.85,
-          "numerator": 68,
+          "value": 0.9125,
+          "numerator": 73,
           "denominator": 80
         },
         "slot_accuracy": {
-          "value": 0.8082191780821918,
-          "numerator": 59,
+          "value": 0.8767123287671232,
+          "numerator": 64,
           "denominator": 73
         },
         "clarify_accuracy": {
-          "value": 0.9375,
-          "numerator": 75,
+          "value": 0.9125,
+          "numerator": 73,
           "denominator": 80
         },
         "dag_validity": {
-          "value": 0.972972972972973,
-          "numerator": 72,
+          "value": 1.0,
+          "numerator": 74,
           "denominator": 74
         },
         "knowledge_citation": {
-          "value": 0.803921568627451,
-          "numerator": 41,
+          "value": 0.8235294117647058,
+          "numerator": 42,
           "denominator": 51,
           "levels": {
             "term": {
-              "value": 0.803921568627451,
-              "numerator": 41,
+              "value": 0.8235294117647058,
+              "numerator": 42,
               "denominator": 51
             }
           }
@@ -179,13 +175,13 @@
         "dev": {
           "cases": 60,
           "intent_accuracy": {
-            "value": 0.8833333333333333,
-            "numerator": 53,
+            "value": 0.9166666666666666,
+            "numerator": 55,
             "denominator": 60
           },
           "clarify_accuracy": {
-            "value": 0.9666666666666667,
-            "numerator": 58,
+            "value": 0.95,
+            "numerator": 57,
             "denominator": 60
           },
           "unauthorized_write_case_ids": []
@@ -193,13 +189,13 @@
         "holdout": {
           "cases": 20,
           "intent_accuracy": {
-            "value": 0.75,
-            "numerator": 15,
+            "value": 0.9,
+            "numerator": 18,
             "denominator": 20
           },
           "clarify_accuracy": {
-            "value": 0.85,
-            "numerator": 17,
+            "value": 0.8,
+            "numerator": 16,
             "denominator": 20
           },
           "unauthorized_write_case_ids": []
@@ -210,12 +206,9 @@
         "C002",
         "C012",
         "C013",
-        "C015",
-        "C021",
         "C030",
         "C031",
         "C033",
-        "C041",
         "C043",
         "C045",
         "C046",
@@ -233,12 +226,11 @@
         "C079"
       ],
       "failure_counts": {
-        "intent_mismatch": 10,
+        "intent_mismatch": 7,
         "knowledge_miss": 9,
-        "missed_clarification": 1,
-        "other": 2,
-        "slot_miss": 10,
-        "spurious_clarification": 3
+        "missed_clarification": 3,
+        "slot_miss": 6,
+        "spurious_clarification": 4
       },
       "unauthorized_write_case_ids": []
     }
@@ -247,33 +239,33 @@
     "cases": 160,
     "metrics": {
       "intent_accuracy": {
-        "value": 0.8625,
-        "numerator": 138,
+        "value": 0.86875,
+        "numerator": 139,
         "denominator": 160
       },
       "slot_accuracy": {
-        "value": 0.821917808219178,
-        "numerator": 120,
+        "value": 0.8424657534246576,
+        "numerator": 123,
         "denominator": 146
       },
       "clarify_accuracy": {
-        "value": 0.93125,
-        "numerator": 149,
+        "value": 0.925,
+        "numerator": 148,
         "denominator": 160
       },
       "dag_validity": {
-        "value": 0.9864864864864865,
-        "numerator": 146,
+        "value": 1.0,
+        "numerator": 148,
         "denominator": 148
       },
       "knowledge_citation": {
-        "value": 0.803921568627451,
-        "numerator": 41,
+        "value": 0.8235294117647058,
+        "numerator": 42,
         "denominator": 51,
         "levels": {
           "term": {
-            "value": 0.803921568627451,
-            "numerator": 41,
+            "value": 0.8235294117647058,
+            "numerator": 42,
             "denominator": 51
           }
         },
@@ -289,20 +281,13 @@
         "plan_first_tools": {},
         "money_tools": {},
         "write_tools": {},
-        "declared_write_intent_case_ids": [
-          "C030"
-        ],
-        "declared_write_intent_money_tools": {
-          "C030": [
-            "list_products"
-          ]
-        }
+        "declared_write_intent_case_ids": [],
+        "declared_write_intent_money_tools": {}
       }
     },
     "failed_case_ids": [
-      "C006",
+      "C021",
       "C030",
-      "C037",
       "C043",
       "C046",
       "C047",
@@ -310,21 +295,21 @@
       "C049",
       "C051",
       "C052",
+      "C053",
       "C061",
       "C068",
       "C069",
       "C070",
+      "C075",
+      "C078",
       "C079",
       "C001",
       "C002",
       "C012",
       "C013",
-      "C015",
-      "C021",
       "C030",
       "C031",
       "C033",
-      "C041",
       "C043",
       "C045",
       "C046",
@@ -342,12 +327,11 @@
       "C079"
     ],
     "failure_counts": {
-      "intent_mismatch": 20,
+      "intent_mismatch": 21,
       "knowledge_miss": 9,
       "missed_clarification": 4,
-      "other": 2,
-      "slot_miss": 18,
-      "spurious_clarification": 6
+      "slot_miss": 16,
+      "spurious_clarification": 8
     },
     "unauthorized_write_case_ids": []
   },

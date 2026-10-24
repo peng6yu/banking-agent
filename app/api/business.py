@@ -800,6 +800,13 @@ def management_view(conn: sqlite3.Connection) -> dict[str, Any]:
                 "nav_updated_text": _time_text(int(row["nav_updated_ms"])),
                 "description": str(row["description"]),
                 "holding_shares_milli": shares,
+                # 下面四个字段表里本来就没有，也没有可信来源：显式给 null
+                # 比编一个「约 30 天持有期 / 0.15% 费率」诚实。
+                "duration_days": None,
+                "liquidity": None,
+                "fee": None,
+                "fee_text": "本演示环境不提供费率、持有期与流动性数据，不推测。",
+                "data_source": "contest_simulation",
             }
         )
 
@@ -833,6 +840,20 @@ def management_view(conn: sqlite3.Connection) -> dict[str, Any]:
             "products": products,
             "summary": holdings_summary,
             "data_source": "fund_products 表（演示数据：净值是固定的，不接行情）",
+            # 数据来源必须能被一眼看穿：这是比赛用的模拟产品表，
+            # 不是基金公司/行情源，也没有做过产品对比。
+            "simulation": {
+                "data_source": "contest_simulation",
+                "verified_source": False,
+                "note": (
+                    "基金产品是本地种子数据（fund_products），没有接基金公司或行情源；"
+                    "期限、流动性、费率、历史业绩一律不填，不编造。"
+                ),
+            },
+            "comparison": {
+                "supported": False,
+                "note": "没有做产品对比/排行：只展示同一张表里能读到的字段。",
+            },
             # 画像从 investor_profiles 读：没测过就是没测过，测过就照实给等级与可买范围。
             "suitability_assessed": profile is not None,
             "suitability": {

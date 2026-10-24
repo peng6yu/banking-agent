@@ -24,12 +24,15 @@ from typing import Any, Final
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import FileResponse, StreamingResponse
 
+import app.birthday as birthday
 import app.plans as plans
 import app.proactive as proactive
 import app.suitability as suitability
 from app import audit, clock, db
 from app.api.schemas import (
     AlertResolveRequest,
+    BirthdayPayRequest,
+    BirthdayPlanCreate,
     CancelRequest,
     MonitorRunRequest,
     PlanCreate,
@@ -796,6 +799,45 @@ async def run_plans(request: PlanRunRequest | None = None) -> dict[str, Any]:
     with _conn() as conn:
         result = plans.run_due(conn, plan_id=target)
     return {"ok": True, "executed": result["executed"], "count": result["count"]}
+
+
+@router.post("/api/plans/birthday")
+async def create_birthday_plan(request: BirthdayPlanCreate) -> dict[str, Any]:
+    """建生日计划：1000 元预算、鲜花与蛋糕两项、生日前两天到点提醒，全部落库。
+
+    预算占用是记账级（plan_budgets），不是资金冻结；到期也不代扣，付款要用户确认。
+    """
+    with _conn() as conn:
+        user_id = proactive.default_user_id(conn)
+        created = birthday.create_plan(
+            conn,
+            user_id=user_id,
+            birthday=request.birthday,
+            budget_fen=request.budget_fen,
+            items=[item.model_dump() for item in request.items] or None,
+            title=request.title,
+        )
+    return {"ok": True, "plan": created}
+
+
+@router.post("/api/plans/{plan_id}/items/{item_key}/pay")
+async def pay_birthday_item(
+    plan_id: str, item_key: str, request: BirthdayPayRequest | None = None
+) -> dict[str, Any]:
+    """付生日计划里的一项：确认 → 策略 → 令牌 → 执行，和手动付款同一条路径。
+
+    后台调度只提醒不代扣，所以这个端点是唯一能真正花钱的入口；缺多因子凭证时
+    一分钱都不会动，预算退回 reserved 等用户补验证。
+    """
+    payload = request or BirthdayPayRequest()
+    session_id = payload.session_id or f"plan:{plan_id}:{item_key}"
+    return await birthday.pay_item(
+        plan_id=plan_id,
+        item_key=item_key,
+        session_id=session_id,
+        approve=payload.approve,
+        proofs=[item.model_dump() for item in (payload.proofs or [])],
+    )
 
 
 @router.post("/api/proactive/simulate/expense")

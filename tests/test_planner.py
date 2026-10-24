@@ -547,9 +547,17 @@ def test_cancel_releases_every_hold_and_skips_the_rest(bank: Path) -> None:
     conn.close()
 
 
-def test_cancel_unknown_session_is_a_validation_error() -> None:
-    with pytest.raises(ValidationError):
-        asyncio.run(executor.cancel("s_nope", "试试"))
+def test_cancel_unknown_session_is_a_benign_noop() -> None:
+    """取消一个不存在的会话不该报错。
+
+    2026-10-24 起「中断」也覆盖重启后的场景：库里有轮次就按库取消，库里没有
+    就返回 cancelled=False。原来抛 VALIDATION 会让刷新后的页面点「中断」直接报错，
+    而这时用户看到的其实只是「没有可取消的东西」。
+    """
+    result = asyncio.run(executor.cancel("s_nope", "试试"))
+    assert result["ok"] is True
+    assert result["cancelled"] is False
+    assert result["released_holds"] == 0
 
 
 def test_ambiguous_payee_stops_and_lists_candidates(bank: Path) -> None:

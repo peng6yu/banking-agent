@@ -22,7 +22,18 @@ from app import audit, clock, db
 from app.clock import ValidationError
 from app.models import Action, Dag
 from app.planner.executor import _drive
-from app.planner.state import Confirmation, NodeRec, RunState, action_text, confirm_timeout_ms
+from app.planner.state import (
+    BUSY_STATES,
+    Confirmation,
+    NodeRec,
+    RunState,
+    action_text,
+    confirm_timeout_ms,
+    persist_node,
+    release_holds,
+    resolve_pending,
+    set_run_status,
+)
 from app.security import factors, token as token_mod
 from app.tools.base import primary_account
 
@@ -315,4 +326,50 @@ async def resume(session_id: str) -> dict[str, Any]:
         conn.close()
 
 
-__all__ = ["confirm", "rehydrate", "resume"]
+async def cancel(session_id: str, reason: str = "用户取消（重启后）") -> dict[str, Any]:
+    """重启后再点「中断」：内存里没有这一轮，但库里还有，必须照样能取消。
+
+    不这样做的话，页面上那张卡只能等它自己过期，用户想换个说法重来会一直被
+    conflict 挡住——「取消」按钮在刷新之后失灵，是比冲突本身更糟的体验。
+    """
+    conn = db.connect()
+    try:
+        try:
+            state = rehydrate(conn, session_id)
+        except ValidationError:
+            return {"ok": True, "cancelled": False, "reason": "没有可取消的轮次", "released_holds": 0}
+        status = _run_status(conn, state.run_id)
+        if status in ("done", "cancelled", "failed"):
+            return {
+                "ok": True,
+                "cancelled": False,
+                "idempotent": True,
+                "run_status": status,
+                "released_holds": 0,
+            }
+        state.cancelled = True
+        state.cancel_reason = reason
+        released = release_holds(state, reason)
+        for rec in state.nodes.values():
+            if rec.state in BUSY_STATES:
+                persist_node(state, rec, "skipped")
+        resolve_pending(state, {"cancelled": True})
+        set_run_status(state, "cancelled")
+        audit.append(
+            conn,
+            "session.end",
+            {"reason": reason, "released_holds": released, "recovered": True},
+            session_id=session_id,
+        )
+        return {
+            "ok": True,
+            "cancelled": True,
+            "released_holds": released,
+            "run_status": "cancelled",
+            "run_id": state.run_id,
+        }
+    finally:
+        conn.close()
+
+
+__all__ = ["cancel", "confirm", "rehydrate", "resume"]

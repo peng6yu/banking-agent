@@ -1,0 +1,139 @@
+{
+  "started_at": "2026-10-24T16:27:43+08:00",
+  "demo_db_sha256_before": "4e0b923db27ddf9d9aeffaf848ab3deab1642abf8a706137b2726c92c2b201e2",
+  "sandbox": "tmp/ui_journey_sandbox",
+  "journeys": {
+    "j1": {
+      "status": "pass",
+      "session_id": "s_86cf319c",
+      "balance_before_fen": 1286050,
+      "balance_after_fen": 1276050,
+      "node_states": {
+        "resolve_payee": "done",
+        "query_balance": "done",
+        "transfer": "done"
+      },
+      "audit_events": [
+        "confirm.approved",
+        "confirm.requested",
+        "dag.built",
+        "intent.parsed",
+        "policy.decided",
+        "session.end",
+        "session.start",
+        "token.issued",
+        "tool.executed",
+        "transfer.committed",
+        "transfer.initiated"
+      ],
+      "shot": "docs/交付/截图/信息架构/journey_01_small_transfer.png"
+    },
+    "j2": {
+      "status": "pass",
+      "session_id": "s_4c82f0db",
+      "challenges": 2,
+      "balance_before_fen": 1286050,
+      "balance_after_fen": 1086050,
+      "audit_events": [
+        "confirm.approved",
+        "confirm.requested",
+        "dag.built",
+        "factor.challenge_issued",
+        "factor.rejected",
+        "factor.verified",
+        "intent.parsed",
+        "policy.decided",
+        "session.end",
+        "session.start",
+        "token.issued",
+        "tool.executed",
+        "transfer.committed",
+        "transfer.initiated"
+      ],
+      "shots": [
+        "docs/交付/截图/信息架构/journey_02_red_mfa.png",
+        "docs/交付/截图/信息架构/journey_02_red_executed.png"
+      ]
+    },
+    "j4": {
+      "status": "pass",
+      "plan_id": "pl_f43f0790",
+      "birthday": "2026-11-23",
+      "budget_fen": 100000,
+      "items": [
+        "flowers",
+        "cake"
+      ],
+      "balance_unchanged_fen": 1286050,
+      "plan_status_after_reload": "active",
+      "shots": [
+        "docs/交付/截图/信息架构/journey_04_birthday_plan.png",
+        "docs/交付/截图/信息架构/journey_04_birthday_reloaded.png"
+      ]
+    },
+    "j5": {
+      "status": "pass",
+      "goal_id": "sg_aefda23a",
+      "alert_id": "pa_c59f6d93",
+      "alert_reason": "cashflow_insufficient",
+      "alert_text_before": "结余不足以支撑目标\n待处理\n按最近几个月的平均收入与必要支出，每月可结余 8,117.00 元，低于目标要求的 40,000.00 元；建议延长目标日期、下调目标金额，或先压缩可选消费。\n相关计划\n明年装修存 12 万\n触发时间\n2026-10-24 16:28\n忽略\n标记已处理",
+      "shots": [
+        "docs/交付/截图/信息架构/journey_05_savings_alert.png",
+        "docs/交付/截图/信息架构/journey_05_alert_resolved.png"
+      ]
+    },
+    "j3": {
+      "status": "pass",
+      "attempt": 1,
+      "prompt": "我们 AA 一下，300 元分摊给张三和李静，一人一半",
+      "session_id": "s_dc6e9389",
+      "balance_unchanged_fen": 1286050,
+      "node_states": {
+        "resolve_payee": "pending",
+        "split_transfer": "pending"
+      },
+      "audit_events": [
+        "dag.built",
+        "intent.parsed",
+        "policy.decided",
+        "session.end",
+        "session.start",
+        "tool.executed"
+      ],
+      "intents": [
+        "split_bill"
+      ],
+      "picker_cards": 1,
+      "attempts": [
+        {
+          "prompt": "我们 AA 一下，300 元分摊给张三和李静，一人一半",
+          "blocked": false,
+          "moved_money": false,
+          "picker_cards": 1,
+          "balance_after_fen": 1286050,
+          "node_states": {
+            "resolve_payee": "pending",
+            "split_transfer": "pending"
+          },
+          "audit_events": [
+            "dag.built",
+            "intent.parsed",
+            "policy.decided",
+            "session.end",
+            "session.start",
+            "tool.executed"
+          ],
+          "intents": [
+            "split_bill"
+          ]
+        }
+      ],
+      "shot": "docs/交付/截图/信息架构/journey_03_aa_blocked.png"
+    }
+  },
+  "demo_db_sha256_after": "4e0b923db27ddf9d9aeffaf848ab3deab1642abf8a706137b2726c92c2b201e2",
+  "demo_db_unchanged": true,
+  "finished_at": "2026-10-24T16:28:09+08:00",
+  "failures": [],
+  "status": "pass"
+}

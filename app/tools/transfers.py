@@ -100,6 +100,9 @@ def transfer(
             action,
             session_id=ctx.session_key(),
             node_id=ctx.node_key(),
+            # 幂等键带上本轮 run_id：同一轮里点两次确认仍然幂等，
+            # 但用户在同一会话里再说一次「再转 500」会被当成新的一笔，不许假成功。
+            run_id=ctx.task_id or "",
             token=token,
             secret=ctx.secret,
         )
@@ -168,6 +171,9 @@ def reserve_funds(
             action,
             session_id=ctx.session_key(),
             node_id=ctx.node_key(),
+            # 幂等键带上本轮 run_id：同一轮里点两次确认仍然幂等，
+            # 但用户在同一会话里再说一次「再转 500」会被当成新的一笔，不许假成功。
+            run_id=ctx.task_id or "",
             token=token,
             secret=ctx.secret,
             payee_id=funds.SYSTEM_PAYEE_ID,
@@ -213,6 +219,9 @@ def pay_merchant(
             action,
             session_id=ctx.session_key(),
             node_id=ctx.node_key(),
+            # 幂等键带上本轮 run_id：同一轮里点两次确认仍然幂等，
+            # 但用户在同一会话里再说一次「再转 500」会被当成新的一笔，不许假成功。
+            run_id=ctx.task_id or "",
             token=token,
             secret=ctx.secret,
             payee_id=funds.SYSTEM_PAYEE_ID,

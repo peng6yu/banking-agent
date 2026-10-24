@@ -41,6 +41,10 @@ def summarize(tool: str, data: dict[str, Any]) -> str:
         return f"已做账务冲正（本地反向记账），{amount} 元记回你的账户"
     if tool == "cancel_scheduled":
         return str(data.get("summary") or "这条预约已经取消了")
+    if tool == "split_transfer":
+        # AA 的钱分散在多个收款人身上，只说总额会让人以为只转了一笔；
+        # 工具已经算好"谁多少"，直接用它那句（缺了就退回总额）。
+        return str(data.get("summary") or f"已按 AA 拆分转出 {amount} 元")
     if tool == "query_balance":
         return f"余额 {_first_account(data).get('balance_yuan', '0.00')} 元"
     if tool == "query_transactions":

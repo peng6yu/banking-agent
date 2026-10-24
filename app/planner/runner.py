@@ -76,16 +76,20 @@ async def _settle(state: RunState, node: Any, rec: NodeRec, result: ToolResult, 
         await emit_event(emit, "error", {"code": result.error_code or "TOOL_FAILED", "user_text": summary})
         return CONTINUE
     data = dict(result.data)
-    question = _payee_gate(node, data)
+    split_run = _is_split_run(state)
+    question = _payee_gate(node, data, state)
     if question is not None:
         # 记下澄清上下文：下一轮用户只回「尾号4417」也能接回这句原话（app/planner/clarify.py）。
-        remember_clarify(
-            state.session_id,
-            text=state.user_text,
-            query=str(data.get("query") or ""),
-            candidates=[dict(item) for item in (data.get("candidates") or []) if isinstance(item, dict)],
-            question=question,
-        )
+        # AA 拆分不记：clarify.augment 只能把「一个」选择拼回原句，而 AA 可能有两位重名，
+        # 拼一次等于替第二位也做了决定。AA 改成让用户用「名字 尾号XXXX」重说一遍。
+        if not split_run:
+            remember_clarify(
+                state.session_id,
+                text=state.user_text,
+                query=str(data.get("query") or ""),
+                candidates=[dict(item) for item in (data.get("candidates") or []) if isinstance(item, dict)],
+                question=question,
+            )
         blocked = await block_on_amount(state, node, emit)
         if blocked is not None:
             return blocked
@@ -102,7 +106,7 @@ async def _settle(state: RunState, node: Any, rec: NodeRec, result: ToolResult, 
                 "balance_after_fen": balance_of(state),
                 # 候选收款人必须以结构化形式下发：前端要渲染可点的列表，
                 # 而不是让用户照着一段中文自己敲尾号。
-                "clarification": _payee_clarification(node, data, question),
+                "clarification": _payee_clarification(node, data, question, split=split_run),
             },
         )
         return STOP
@@ -116,7 +120,14 @@ async def _settle(state: RunState, node: Any, rec: NodeRec, result: ToolResult, 
     return CONTINUE
 
 
-def _payee_clarification(node: Any, data: dict[str, Any], question: str) -> dict[str, Any]:
+def _is_split_run(state: RunState) -> bool:
+    """这张图是不是 AA 拆分：拆分图里有 split_transfer 节点。"""
+    return any(node.tool == "split_transfer" for node in state.dag.nodes)
+
+
+def _payee_clarification(
+    node: Any, data: dict[str, Any], question: str, *, split: bool = False
+) -> dict[str, Any]:
     """把"等用户选收款人"这件事表达成结构化数据。
 
     候选里的手机号只给掩码：确认卡需要区分同名的人，不需要把完整号码摊开。
@@ -142,9 +153,15 @@ def _payee_clarification(node: Any, data: dict[str, Any], question: str) -> dict
         "count": len(candidates),
         "candidates": candidates,
         "question": question,
-        # 用户既可以点列表，也可以直接回「尾号4417」或「第二个」。
-        "accepts": ["select_candidate", "reply_text"],
-        "note": "选好之后我会重新生成确认卡片；金额、收款人任何一项变了，旧的授权都会作废。",
+        # 单个转账：既可以点列表，也可以直接回「尾号4417」或「第二个」。
+        # AA 拆分：不能用一次选择去代表多个参与人，只能带着尾号重说一遍。
+        "accepts": ["restate_with_tail"] if split else ["select_candidate", "reply_text"],
+        "note": (
+            "AA 拆分里一次只能确定一位参与人：请把名单里那一位写成「张三 尾号4417」再发一次；"
+            "在所有人都唯一之前，不会生成任何转账授权。"
+            if split
+            else "选好之后我会重新生成确认卡片；金额、收款人任何一项变了，旧的授权都会作废。"
+        ),
     }
 
 
@@ -257,7 +274,7 @@ def _literal_amount(params: dict[str, Any]) -> int | None:
     return value
 
 
-def _payee_gate(node: Any, data: dict[str, Any]) -> str | None:
+def _payee_gate(node: Any, data: dict[str, Any], state: RunState | None = None) -> str | None:
     """B3/B4：一个人都没找到或同名多人，都要停下来问用户，绝不猜。"""
     if node.tool != "resolve_payee":
         return None
@@ -265,9 +282,28 @@ def _payee_gate(node: Any, data: dict[str, Any]) -> str | None:
     if len(candidates) == DISAMBIGUATE_LIMIT:
         return None
     query = str(data.get("query") or "")
+    split = state is not None and _is_split_run(state)
+    # AA 拆分要指明是「第几位参与人」，否则两位都叫张三时，用户分不清这句话在问谁。
+    where = ""
+    if split and state is not None:
+        order = [n.id for n in planner_dag.topo(state.dag) if n.tool == "resolve_payee"]
+        if node.id in order:
+            where = f"AA 拆分第 {order.index(node.id) + 1} 位参与人"
+    prefix = f"{where}：" if where else ""
     if not candidates:
+        if split:
+            return (
+                f"{prefix}我没找到叫「{query}」的收款人。"
+                "请换成通讯录里的全名，或写成「张三 尾号4417」；"
+                "在所有人都能唯一确定之前，这笔 AA 不会执行。"
+            )
         return f"我没找到叫「{query}」的收款人，要不要换个名字或卡号尾号？"
     listing = "、".join(f"{item.get('name')}（尾号{item.get('card_tail')}）" for item in candidates[:3])
+    if split:
+        return (
+            f"{prefix}有 {len(candidates)} 位都叫「{query}」：{listing}。"
+            "请把这一位写成「张三 尾号XXXX」重说一遍；AA 不会替你挑候选，也不会先转其他人。"
+        )
     return f"有 {len(candidates)} 位都叫「{query}」：{listing}。你要付给哪一位？"
 
 

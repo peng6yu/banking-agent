@@ -194,14 +194,25 @@ def ref(node_id: str, *path: str) -> str:
 
 
 def resolve_refs(params: dict[str, Any], results: dict[str, Any]) -> dict[str, Any]:
-    """把 @开头的字符串换成上游节点结果里的真实值。"""
-    resolved: dict[str, Any] = {}
-    for key, value in params.items():
-        if isinstance(value, str) and value.startswith(REF_PREFIX):
-            resolved[key] = _lookup(value, results)
-        else:
-            resolved[key] = value
-    return resolved
+    """把参数里的 @引用换成上游节点结果里的真实值。
+
+    必须递归进 list/dict：AA 拆分的 payee_ids 是「一串引用」（每个参与人各一条），
+    早期版本只替换顶层字符串，于是 split_transfer 收到的仍是字面量
+    "@n1.candidates.unique.payee_id"，工具层只能判成「不是你的收款人」。
+    """
+    return {key: _resolve_value(value, results) for key, value in params.items()}
+
+
+def _resolve_value(value: Any, results: dict[str, Any]) -> Any:
+    if isinstance(value, str) and value.startswith(REF_PREFIX):
+        return _lookup(value, results)
+    if isinstance(value, list):
+        return [_resolve_value(item, results) for item in value]
+    if isinstance(value, tuple):
+        return tuple(_resolve_value(item, results) for item in value)
+    if isinstance(value, dict):
+        return {key: _resolve_value(item, results) for key, item in value.items()}
+    return value
 
 
 def split(intent: dict[str, Any]) -> tuple[str, dict[str, Any]]:
@@ -606,7 +617,16 @@ def _lookup(reference: str, results: dict[str, Any]) -> Any:
     parts = reference[len(REF_PREFIX):].split(".")
     current: Any = results.get(parts[0]) if parts else None
     for part in parts[1:]:
-        if "[" in part:
+        if part == "unique":
+            # @n1.candidates.unique.payee_id：要求候选恰好一个。
+            # AA 拆分用它替代 old `candidates.0`：同名多人时 0 索引会静默选中第一个人，
+            # 等于替用户做了转账决定。这里宁可直接失败（AA 不执行），也不猜。
+            if not isinstance(current, (list, tuple)) or len(current) != 1:
+                raise ValidationError(
+                    "收款人候选不唯一，不能继续", reason="DAG_PAYEE_AMBIGUOUS", ref=reference
+                )
+            current = current[0]
+        elif "[" in part:
             # 带过滤的一段：@n1.subs[merchant=爱奇艺会员] —— 唯一匹配的那一条
             current = resolve_match(current, part)
         elif isinstance(current, dict):
