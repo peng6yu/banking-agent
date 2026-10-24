@@ -6,7 +6,7 @@ PY ?= python3.12
 PIP_INDEX ?= https://pypi.tuna.tsinghua.edu.cn/simple
 VENV_PY ?= .venv/bin/python
 
-.PHONY: help setup install venv run seed reseed test cov redteam smoke browser-smoke fresh clean reset check-env
+.PHONY: help setup install venv run seed reseed test cov redteam smoke browser-smoke latency fresh clean reset check-env
 
 # make setup 的透传参数，例如 make setup ARGS="--dry-run" 或 ARGS="--ollama"
 ARGS ?=
@@ -24,6 +24,7 @@ help:
 	@echo   make redteam   跑 43 条红队用例
 	@echo   make smoke     模型连通性自检
 	@echo   make browser-smoke 真浏览器冒烟（Playwright + Chromium，截图进 docs/交付/截图/）
+	@echo   make latency  量一次「一句话到确认卡」的脚本桩端到端耗时
 	@echo   make fresh     从零到可演示
 	@echo   make clean     清理缓存与数据库
 
@@ -54,6 +55,9 @@ seed:
 
 reseed:
 	$(PY) -m scripts.seed --force
+
+latency:
+	PYTHONPATH=. $(VENV_PY) scripts/measure_latency.py
 
 test:
 	$(PY) -m pytest -q tests/

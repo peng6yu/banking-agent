@@ -80,7 +80,7 @@
 
 | 能力 | 落地范围（收窄版） | 明确不包含 | 证据 |
 |---|---|---|---|
-| 转人工状态 | `handoffs` 表 + `pending/claimed/need_info/rejected/cancelled/resumed/failed` 七态；`PAYEE_AMBIGUOUS`/`PAYEE_NOT_FOUND` 自动建 pending handoff | 不接真实工单系统；`operator` 只是审计字符串，**无 RBAC** | `app/handoffs.py`、`app/planner/runner.py`、`tests/test_handoff.py`（14 条） |
+| 转人工状态 | `handoffs` 表 + `pending/claimed/need_info/rejected/cancelled/resumed/failed` 七态；`PAYEE_AMBIGUOUS`/`PAYEE_NOT_FOUND` 自动建 pending handoff | 不接真实工单系统；`operator` 只是审计字符串，**无 RBAC** | `app/handoffs.py`、`app/planner/runner.py`、`tests/test_handoff.py`（13 条） |
 | 断点信息 | 原始用户请求、run_id、当前 DAG、已完成/失败节点、失败原因、权限裁决、授权状态全部落库 | 不保存模型原始思维链（本就不存在） | `handoffs.dag_json / done_nodes_json / failed_node_json / failure_json / decision_json / auth_json` |
 | 操作员动作 | 受保护的任务列表、领取、拒绝、要求补充、取消、恢复六类端点（`/api/handoffs`）；领取用条件 UPDATE 保证**同一任务只有一个操作员** | 不做分配队列/优先级/工单 SLA | `app/api/handoffs_api.py`、`tests/test_handoff.py`（并发领取） |
 | 安全恢复 | 恢复前重查：新轮次是否占用、确认卡是否过期、计划授权是否仍有效、账户是否可用、余额是否足够；**不重跑已完成的资金节点**；失败落 `failed` 而非静默成功；过期写令牌直接拒绝 | 不自动放宽任何权限等级 | 同左；错误码 `HANDOFF_CONFIRM_EXPIRED / HANDOFF_AUTH_EXPIRED / HANDOFF_INSUFFICIENT_FUNDS` |
