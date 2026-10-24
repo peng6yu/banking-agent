@@ -92,13 +92,13 @@
 |---|---|
 | ① AIR 公开能力 | 消费洞察（"instant spending insights"、"Where's my money going?"）、分类与趋势、预算辅助、储蓄测算（"How much can I save this month?"）、投资收益查询；官方**没有**说明做异常交易识别或月/年报 |
 | ② AIR 依据与证据状态 | A3、A4、A5、A6 https://www.revolut.com/legal/rita-disclaimer/ ——消费/趋势/预算/储蓄测算**官方资料明确证实**；"消费者端图表形态"、"异常交易识别"、"月/年报"**尚未核实**（研究文档 Q3） |
-| ③ 本项目真实实现状态 | 部分：`analyze_bill` 支持 `period=month/year`（`app/tools/bill.py:43`、`:89 _period_range`、`:85 _range_label`），分类统计（`:145 _by_category`）、Top 商户（`:164 _top_merchants`）、3 类异常（`:34` 常量 `split_orders/odd_hour_overseas/subscription_hike`、`:192 _detect_anomalies`）；无储蓄/预算测算、无图表、无月报导出。**复核补记（2026-10-23 19:00）**：储蓄测算 compute_savings_plan 与预算偏离 budget_deviation 已在 app/proactive.py 实现，但未注册为工具，DAG 里没有入口。**2026-10-24 复核更新**：compute_savings_plan **已注册为工具**（`app/tools/proactive.py:31`、`app/tools/tool_specs.py:572`，有单测），但 9 条意图模板（`dag.INTENT_TEMPLATES`）里仍无储蓄测算入口，自然语言仍走不通；`budget_deviation`（`app/proactive.py:451`）仍是内部函数、未注册 |
+| ③ 本项目真实实现状态 | 部分：`analyze_bill` 支持 `period=month/year`、分类统计、Top 商户、3 类异常；**无图表、无月报导出**。`compute_savings_plan` 已注册为只读工具并有单测（`app/tools/proactive.py:31`、`tool_specs.py:572`），但 `INTENT_TEMPLATES` 无储蓄入口，自然语言仍走不通；`budget_deviation`（`app/proactive.py:451`）仍是内部函数、未注册 |
 | ④ 代码位置与测试证据 | 工具在 `registry.TOOLS`（只读，R01 直接放行）；DAG 模板 `dag.py:43-71` 的 `bill_analysis→analyze_bill`；测试 `tests/test_tools.py`、`tests/test_acceptance.py`、`tests/test_planner.py` 覆盖账单意图与统计 |
 | ⑤ 能力缺口 | **G02** 收窄：储蓄测算工具已注册可用，但缺意图模板（问"这个月能存多少"仍进不来），预算偏离仍只是内部函数；**G03** 洞察无可视化（前端无图表，只有文本摘要） |
 | ⑥ 可借鉴设计 | E2 最小可见性（账单只算本人账户）；E3 查询不打扰；测算类输出必须给"口径+区间"，不能给一个裸数字 |
-| ⑦ 改造复杂度与风险 | G02 3–4 人日：新增只读工具 `compute_savings_plan`（收入−固定支出−近 3 月均值），金额用 int 分；G03 2–3 人日：前端加 2 张图（分类占比、月度趋势），不引入图表库可用内联 SVG；风险：测算被误读为理财建议，文案必须限定"基于本人历史流水的估算" |
+| ⑦ 改造复杂度与风险 | 已完成 `compute_savings_plan` 工具与测试；剩余：①补一条储蓄意图模板（让自然语言进入）；②决定 `budget_deviation` 是否注册；③前端 2 张图（分类占比、月度趋势）。估工 1–2 人日；风险：测算被误读为理财建议，文案必须限定"基于本人历史流水的估算" |
 | ⑧ 对应赛题要求 | 场景 2 账单分析（分类统计、异常识别、月/年报）；40% 任务完成率 |
-| ⑨ 验收方法 | 固定种子库里"上月餐饮支出"与 SQL 手算一致；断言"分类金额之和 = 总支出"；异常三类各有 1 条正例 + 1 条反例；"今年一共花了多少"返回年报表且区间标签来自 `bill._range_label` |
+| ⑨ 验收方法 | 账单：固定种子库"上月餐饮支出"与 SQL 手算一致、分类金额和=总支出、三类异常各 1 正/1 反、年报表区间标签来自 `bill._range_label`；储蓄：`compute_savings_plan` 单测已通过，意图模板接入后「这个月能存多少」返回区间与口径（当前自然语言尚未接入） |
 | ⑩ 优先级 | **P1**（赛题场景 2 的主体已达标，G02/G03 是增强；G02 剩余部分只是"给已注册工具补一条意图模板"） |
 
 ### D03 转账与工具调用
@@ -141,9 +141,9 @@
 | ④ 代码位置与测试证据 | `app/tools/subs.py:29/55/92/_cancel_payload`；`app/planner/dag.py:43-71` 的 `subscription→list_subs`；测试 `tests/test_subscription_cancel.py`、`tests/test_tools.py`、`tests/test_acceptance.py` |
 | ⑤ 能力缺口 | **G05 收窄**：①流水推断已实现（启发式，有置信度/证据笔）；②`upcoming` 只在页面打开时计算，**无推送**；③仍无 `paused` 状态（只有 active/cancelled） |
 | ⑥ 可借鉴设计 | E3 查询/取消走黄灯；E14 提醒定位为"基于本人流水的自研能力"，不得写成 AIR 对标；识别结果必须可解释（命中哪几笔） |
-| ⑦ 改造复杂度与风险 | 5–7 人日 / 约 500–700 行 + 2 张表：识别器（按商户聚合 ≥3 笔、间隔方差阈值、金额波动阈值）产出候选；提醒表复用 G08 的 `proactive_alerts`；风险：误报会让"自动识别"变成骚扰，必须给置信度与"忽略此订阅"入口；`subs.status` CHECK 约束改动要迁移 |
+| ⑦ 改造复杂度与风险 | 识别器/提醒表已落地（`app/subscriptions.py` + `proactive_alerts`）；剩余：推送通道、`paused` 状态、误报治理（忽略入口/置信度展示）与 `subs.status` 迁移。估工 2–3 人日；风险：误报会让"自动识别"变成骚扰 |
 | ⑧ 对应赛题要求 | 场景 5 订阅代扣（自动识别、续费提醒、一键取消）——**赛题原文比 AIR 更进一步**，AIR 无证据，需自研 |
-| ⑨ 验收方法 | 构造 4 个月同商户扣款 → 识别为候选并给出证据笔；取消后下一周期不再扣；到期前 3 天产生提醒且只提醒一次；误报样本（同商户但金额/间隔不稳）不识别 |
+| ⑨ 验收方法 | 已完成：4 个月同商户样本识别为候选并给证据笔；取消后下周期不再扣；`upcoming` 近 7 天展示；误报样本不识别。待补：推送只提醒一次、`paused` 状态 |
 | ⑩ 优先级 | **P1**（场景 5 已有推断/展示/取消；剩余推送与暂停状态为增强） |
 
 ### D06 理财与适当性
@@ -156,9 +156,9 @@
 | ④ 代码位置与测试证据 | `app/policy/rules.py` `INVEST_TOOLS` + R10；`app/planner/dag.py:35-40 INVEST_TEMPLATES`；测试 `tests/test_invest.py`、`tests/test_invest_intent_dag.py`、`tests/test_policy.py` |
 | ⑤ 能力缺口 | **G06 收窄**：适当性问卷/拒售已实现（17 条测试）；仍缺横向对比表（`compare_products` 未实现）与持仓收益报表；产品期限/流动性/费率无可信数据源 |
 | ⑥ 可借鉴设计 | E4 的"声明偏离 + 补偿控制"：AIR 禁下单是法律边界，赛题要求一键申赎，我们**有意偏离**，补偿=红级三因子（本地模拟）+ 产品风险等级/风险揭示展示 + 全程审计；适当性问卷/匹配已实现（演示级 5 题），**冷静期/双录/产品说明书确认仍未实现**，不在答辩中宣称 |
-| ⑦ 改造复杂度与风险 | 4–6 人日 / 约 400 行 + 1 张表：`risk_profiles(user_id, score, level, assessed_at)` + 只读 `assess_suitability` + `compare_products`；风险：合规话术（"不构成投资建议"必须与推荐同时出现）、红队"诱导买高风险"用例、R10 规则不可放宽 |
+| ⑦ 改造复杂度与风险 | 已完成 `risk_profiles` / `assess_suitability`（5 题问卷 + 拒售）与 R10；剩余：`compare_products` 横向对比表、持仓收益报表、期限/流动性/费率数据源。估工 2–3 人日；风险：合规话术、对比字段无权威来源 |
 | ⑧ 对应赛题要求 | 场景 3 理财操作（推荐对比、风险评估、一键申购/赎回）；30% 安全合规 |
-| ⑨ 验收方法 | 5 题问卷映射 R1–R5；低承受买 R4 被拒或转人工；对比表含期限/起购/风险/费率且字段来自 DB；申购必过三因子，审计含 `product_id+risk_level`；`pytest tests/test_invest.py tests/test_policy.py -q` 不回归 |
+| ⑨ 验收方法 | 已完成：5 题问卷映射、低承受买 R4 拒售、申购三因子与审计、`tests/test_invest.py tests/test_policy.py -q` 不回归；待补：对比表字段（期限/起购/风险/费率）来自 DB、持仓收益报表 |
 | ⑩ 优先级 | **P0**（适当性已完成；横向对比表为增强，不阻塞场景 3 演示） |
 
 ### D07 跨场景规划
@@ -259,11 +259,11 @@
 | ② AIR 依据与证据状态 | B1（**可信公开技术资料证实，原页未打开**）；具体指标/阈值/数据集规模**尚未核实** |
 | ③ 本项目真实实现状态 | **已补强**：`tests/eval/` 80 例中文评估集 + 可复现脚本 + A/B 报告（真模型，6 项指标：intent/slot/clarify/dag/knowledge_citation/unauthorized）；全量 **1415 passed / 4 skipped**（2026-10-24 终态复跑，196.86s；历史基线 1336）、88 个测试文件（`tests/test_*.py`）、43 条红队 **PASS 43 / FAIL 0**、前端 66 项、哈希链审计可验证。**仍无**延迟/token/成本指标与人工质量抽样 |
 | ④ 代码位置与测试证据 | `tests/`、`tests/eval/{intent_cases.yaml,run_eval.py,evaluation_report.md,test_eval_harness.py}`、`scripts/redteam.py`、`scripts/check_frontend.py`、`app/api/routes.py /api/audit/verify` |
-| ⑤ 能力缺口 | **G13**：40% 完成率需要"可量化的意图理解准确率"，当前只有"测试全绿"这一间接证据 |
+| ⑤ 能力缺口 | **G13 收窄**：80 例评估集 + 8 轮 A/B 已入库；仍无延迟/token/成本指标、人工质量抽样与 CI 阈值；每轮单次采样不能谈显著性 |
 | ⑥ 可借鉴设计 | E7：小步引入 evals + 标注集，不建平台；指标只做三项（意图准确率、工具成功率、P95 延迟） |
-| ⑦ 改造复杂度与风险 | 3–5 人日：`eval/` 目录 + 80–100 句标注（六场景+模糊+拒绝样本）+ 脚本输出准确率/混淆矩阵 + CI 阈值；风险：R4 模型随机性（temperature=0 + 3 次多数投票）、不要把评测写成"刷分" |
+| ⑦ 改造复杂度与风险 | 已完成 `tests/eval/` 80 例、run_eval、A/B 报告；剩余：CI 阈值、延迟/成本采集、人工质量抽样。估工 1–2 人日；风险：模型随机性、不要把评测写成"刷分" |
 | ⑧ 对应赛题要求 | 40% 任务完成率、技术文档 |
-| ⑨ 验收方法 | `python -m eval.run` 输出 ≥80 句的总准确率与分场景召回，低于阈值退出码非 0；报告可附进技术文档；重跑结果稳定（同输入两次差异 ≤2%） |
+| ⑨ 验收方法 | 已完成：`python3.12 -m tests.eval.run_eval ...` 输出总准确率/分场景召回，报告已入库；待补：CI 阈值（低于阈值退出码非 0）、同输入两次差异 ≤2% 的稳定性门槛、延迟/token 记录 |
 | ⑩ 优先级 | **P0**（成本低、直接支撑 40% 评分与答辩"证据链"） |
 
 ### D14 领域知识与术语
@@ -276,9 +276,9 @@
 | ④ 代码位置与测试证据 | `app/knowledge/loader.py`、`retrieve.py`（docstring 明确"不引入向量检索"）、`app/planner/kb_bridge.py`、`app/api/routes.py:_audit_knowledge`；测试 `tests/test_knowledge_{loader,normalize,retrieve,integration}.py`、`tests/test_security_knowledge.py`；43 条红队已复跑 PASS 43 / FAIL 0 |
 | ⑤ 能力缺口 | **G14 已关闭**（原缺口：缺 4 个数据文件、缺接线、缺审计与降级策略）；残余：知识仅参与「问不问/填什么/怎么解释」，不进模型上下文（受 SYSTEM_PROMPT 逐字测试约束），语义泛化仍靠别名表 |
 | ⑥ 可借鉴设计 | E5 知识库+产品生态直连；知识是**数据不是指令**（基线原则），冲突时降级并审计；检索用结构化/关键词即可，**不上向量库** |
-| ⑦ 改造复杂度与风险 | 8–12 人日：补 terms 80–120 条、ontology、intent_rules 同义词、workflows 与 6 场景对齐；接线 4 处（parse 前后、build_messages、dag 校验、policy 只收窄）；风险：R1（不改 SYSTEM_PROMPT，知识只能从 user 消息注入）、注入攻击（知识文本按 DATA 处理）、加载失败拖垮主链路（需降级为空知识+告警）、R2 事件闭集 |
+| ⑦ 改造复杂度与风险 | 已完成 5 个 YAML（40/25/22/11/10/34）与 kb_bridge 接线；剩余：长尾术语扩到 80–120、别名表之外的语义泛化、知识文本外发边界评审。估工 2–4 人日；风险：R1 SYSTEM_PROMPT 不可改、注入、加载降级 |
 | ⑧ 对应赛题要求 | 3.3 领域理解；技术文档"知识来源可追溯"；40% 完成率 |
-| ⑨ 验收方法 | 80 条术语命中/未命中测试；缺文件时降级不崩且写 `knowledge.warning`；现有 1415 条测试零回归（历史基线 916）；`knowledge.retrieved` 审计含 ids 与版本 |
+| ⑨ 验收方法 | 已完成：`tests/test_knowledge_*`、缺文件降级不崩且写 `knowledge.warning`、`knowledge.retrieved` 含 ids/版本、全量零回归；扩展目标：80 条术语命中/未命中测试 |
 | ⑩ 优先级 | **P0**（阶段 0 已投入，不接线等于白做；也是 G12 的前置） |
 
 ### D15 中断/回退/人工接管
