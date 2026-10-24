@@ -9,9 +9,9 @@
 
 1. 七条旅程（j1、j2、j4、j5、j6、j7、j3）全部由当前 scripts/ui_journeys.py 定义并在 run() 里真实执行：六条在一个 MOCK_MODE=script 后端上顺序跑，j3 停掉该后端、重播沙箱、以 MOCK_MODE=false 重启后单独跑。
 2. 归档 docs/交付/browser_journeys.json 7/7 pass，status=pass，failures 为空，demo_db_sha256 before==after。
-3. j3 确实核验了服务端状态（session_view 的 node_states + audit_events + 余额），归档里 split_transfer=pending、resolve_payee=pending、无 transfer.committed、余额未变（sid=s_4484b1d6）。原先「session_id 解析失败时 nodes 退化为空字典」的边界已封：`session_id_of`（scripts/ui_journeys.py:90-95）取不到会话号直接 `raise JourneyFail`，J3 在 :570-572 再断言一次；归档那次 sid 正常。
+3. j3 确实核验了服务端状态（session_view 的 node_states + audit_events + 余额），归档里 split_transfer=pending、resolve_payee=pending、无 transfer.committed、余额未变（20:38 那轮 sid=s_abf3620d）。原先「session_id 解析失败时 nodes 退化为空字典」的边界已封：`session_id_of`（scripts/ui_journeys.py:90-95）取不到会话号直接 `raise JourneyFail`，J3 在 :570-572 再断言一次；归档那次 sid 正常。
 4. j4/j5 的写操作是 API 驱动（直接调 /api/plans/birthday、/api/savings/goals 等），UI 只做读断言与刷新恢复；文档把它们标为「流程级」是准确的。本轮已把「真模型」口径收窄到 j3。
-5. 原有三处文档标注与代码事实不一致（真模型范围、release_manifest 的「5 条」、截图张数）：提交物对照表与比赛演示方案本轮已改准；release_manifest 不在本组写权限，仍待其负责人重跑（§6）。
+5. 原有三处文档标注与代码事实不一致（真模型范围、release_manifest 的「5 条」、截图张数）：提交物对照表与比赛演示方案本轮已改准；release_manifest 已由负责人于 20:57 按其脚本重生成，旧计数（tables 27 / events 49 / pytest 1336 / 旅程 5 条）已收口（§4/§6）。
 6. 同轮绑定只能做到「时间戳在窗口内 + 内容断言一致」；journey JSON 不存截图 SHA、脚本也没有 --verify 模式，因此不能声称 SHA 级绑定。
 
 ## 1. 七条旅程的定义与运行方式
@@ -65,11 +65,11 @@ docs/交付/截图/信息架构/browser_report.json 由 scripts/ui_screenshots.p
 
 ## 4. release_manifest 的引用关系
 
-docs/benchmark/release_manifest.json（generated_at 2026-10-24T17:35:45+08:00，git head 5d7ac5aa5947af2551d7594dbec3467d657bc83d）里：
+docs/benchmark/release_manifest.json（generated_at 2026-10-24T20:57:00+08:00，git head 61c5cf3，dirty=false）里：
 
-- journeys.report 指向 docs/交付/browser_journeys.json，status=pass，items 是 j1/j2/j4/j5/j6/j7/j3 全 pass，demo_db_unchanged=true —— 与归档 JSON 逐字段一致。
-- 生成脚本 scripts/release_manifest.py:207-215 是读 journey JSON 现算的，不是手填。
-- 但 limits 里「浏览器旅程 status=5 条流程级」是硬编码字符串：scripts/release_manifest.py:248 与 release_manifest.json:503。这与同一份 JSON 里 7 条 items 自相矛盾，属陈旧计数（见 §6）。manifest 的 generated_at 是 17:35:45，早于 20:06 的旅程刷新，所以它引用的 journeys 快照仍是 17:09 那轮；items 7 条 pass 恰好与当前归档一致，但 limits 的「不是点击级」也已过时（J1/J2/J6/J7 现在都是点击级）。
+- journeys.report 指向 docs/交付/browser_journeys.json，status=pass，items 是 j1/j2/j4/j5/j6/j7/j3 全 pass，demo_db_unchanged=true —— 与归档 JSON（20:38 那轮 7/7）逐字段一致。
+- 生成脚本 scripts/release_manifest.py:207-215 是读 journey JSON 现算的，不是手填；limits 里的「浏览器旅程」行已从硬编码的「5 条流程级」改为「7 条（j1/j2/j4/j5/j6/j7 + j3）」，并注明 J1/J2/J6/J7 点击级、J4/J5 API 驱动流程级，与归档一致。
+- 17:35 那版清单的陈旧计数（tables 27 / events 49 / pytest 1336 / 旅程 5 条）已随本轮提交收口；现在的清单与代码事实一致（tools 35 / tables 30 / events 61 / rules 13 / paths 39 / pytest 1415 / 旅程 7）。
 
 ## 5. j3 服务端核验的具体证据与边界
 
@@ -86,7 +86,7 @@ docs/benchmark/release_manifest.json（generated_at 2026-10-24T17:35:45+08:00，
 | docs/提交物对照表.md:293 | 「scripts/ui_journeys.py（真模型 + playwright）」 | 六条走 MOCK_MODE=script，只有 j3 真模型 | **已改**（本轮）：j3 真模型，其余六条确定性桩 + 真浏览器；J1/J2/J6/J7 点击级，J4/J5 API 驱动流程级 |
 | docs/交付/比赛演示方案.md:279 | 「在真模型 + 真浏览器下跑出」 | 同上 | **已改**（本轮）：改为「Playwright 真浏览器 7/7；j3 单独 MOCK_MODE=false，其余 MOCK_MODE=script」 |
 | docs/benchmark/final_acceptance_report.md:24 | 「7 条旅程…用 DeepSeek 复跑 PASS」 | 六条不经过模型；DeepSeek 只影响 j3 | 缩窄到 j3，或注明桩模式 |
-| scripts/release_manifest.py:248 / release_manifest.json:503 | 「5 条流程级」 | 实际 7 条，同一 JSON items 也是 7 条 | 改 7 条，再重跑 release_manifest.py 重新生成 |
+| scripts/release_manifest.py / release_manifest.json | 「5 条流程级」（17:35 版） | 实际 7 条，同一 JSON items 也是 7 条 | **已修**：脚本改 7 条并注明点击级/流程级；清单于 20:57 重生成（tables 30 / events 61 / pytest 1415 / 旅程 7） |
 | docs/交付/比赛演示方案.md:360 | 「27 张截图（12 视图 + 7 主线 + 8 旅程）」 | 实际 29 张：12 信息架构 + 7 主线 + 10 旅程 | **已改**（本轮，29 张） |
 
 本轮同时修正的邻近说法：docs/提交物对照表.md 原 :302「7 条里只有 J6/J7 是点击级」已过时——j1/j2 是聊天输入 + 点按钮，j3 是聊天输入 + 服务端断言，j4/j5 才是纯 API 驱动；现统一为「J1/J2/J6/J7 点击级，J3 聊天输入 + 服务端状态硬断言，J4/J5 API 驱动流程级」。
