@@ -187,7 +187,7 @@
 > `docs/benchmark/release_manifest.json` 为准；该文件由 `scripts/release_manifest.py` 从代码与运行日志生成。
 
 **本机实际跑过、可复现的强证据**
-- 全量 pytest：**1330 passed / 4 skipped / 1 warning（46.61s，.venv/bin/python -m pytest -q，2026-10-24 终测）**。4 skipped 仍是浏览器冒烟（.venv 无 playwright）。
+- 全量 pytest：**1330 passed / 4 skipped / 1 warning（.venv/bin/python -m pytest -q，2026-10-24 终测；耗时见 release_manifest.json）**。4 skipped 仍是浏览器冒烟（.venv 无 playwright）。
 - 与上一版差异：1131（10-23 基线）→ 1152（信息架构轮）→ 1258（安全补强）→ 1264（策略拦截事件 + 月末钳制）→ 1275（租约/授权保质期/恢复多轮/刷新重建，+11）→ 1279（单姓收款人 + 兜底赎回链，+4）→ **1330（本轮任务书整改：AA 拆分、生日计划、ticker 一致性、真实渠道闸门等，+51）**。中间新增批次：test_factor_challenges 12、test_suitability 17、test_channels 14、test_recover 8、test_plans 12、test_session_cards 3、test_scheduled_calendar 6、test_scheduled_lease 7、test_business_api 14。
 - 本轮新增的运行时证据：多因子服务端挑战（签发/通过/拒绝三条审计 + 无证明不执行）、卡与账户闸门（含 hold 后冻结卡）、R07 硬线、confirm.expired 与 rejected 可区分、断流恢复后真出账、适当性拒买、订阅推断、持久计划跨重启、34 条原话防护、浏览器六区 + 主线 7 张（含刷新后重建的卡片）。
 - 预约转账的并发与时效证据：租约（`claim_token`/`claimed_ms`）让第二个 worker 抢不到就跳过，`scheduled.auth_expired` 让 31 天前的人脸验证不再被当成永久通行证——两条都在 tests/test_scheduled_lease.py 里用「余额不动 / 只少一次」反证。

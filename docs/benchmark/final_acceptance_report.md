@@ -46,7 +46,7 @@
 
 | # | 命令 | 结果 |
 |---|---|---|
-| 1 | `.venv/bin/python -m pytest -q tests/` | **1330 passed, 4 skipped, 1 warning in 46.61s**（2026-10-24 终测；秒数取决于机器负载，以 `release_manifest.json` 记录为准）；4 个 skip 是浏览器冒烟默认关闭 |
+| 1 | `.venv/bin/python -m pytest -q tests/` | **1330 passed, 4 skipped, 1 warning**（2026-10-24 终测；耗时取决于机器负载，以 `release_manifest.json` 记录为准）；4 个 skip 是浏览器冒烟默认关闭 |
 | 2 | `RUN_BROWSER_SMOKE=1 python3.12 -m pytest tests/test_browser_smoke.py -q` | **4 passed in 6.44s**（最终代码，固定模型） |
 | 3 | `python3.12 scripts/check_frontend.py` | **前端检查通过：66/66** |
 | 4 | `python3.12 -m scripts.redteam` | **43 条：PASS 43 / FAIL 0** |

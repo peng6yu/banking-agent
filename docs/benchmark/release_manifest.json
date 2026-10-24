@@ -1,10 +1,10 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-10-24T16:33:25+08:00",
+  "generated_at": "2026-10-24T16:45:45+08:00",
   "git": {
-    "head": "94be1f5608a88d76246ce9b2f4f5891c18e3f271",
-    "head_short": "94be1f5",
-    "subject": "feat(plans+safety): 任务书 8 项整改落地——AA 消歧、生日长期计划、调度器一致性、单会话冲突、真实渠道闸门、五条浏览器旅程、统一数字口径",
+    "head": "e07a732bf1ea869729d2891a33cd05c4cc34b731",
+    "head_short": "e07a732",
+    "subject": "test: 加 pytest.ini 把收集范围固定在 tests/，避免 tmp 下的临时克隆被当成第二份 tests",
     "branch": "main",
     "dirty": false,
     "changed_paths": 0
@@ -103,7 +103,7 @@
     "passed": 1330,
     "failed": 0,
     "skipped": 4,
-    "duration_s": 46.61,
+    "duration_s": 31.64,
     "log": "tmp/pytest_final.log",
     "parsed": true
   },
