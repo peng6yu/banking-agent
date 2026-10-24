@@ -241,3 +241,55 @@ def test_api_layer_leaves_clean_sentence_alone() -> None:
     # 正常只读请求不进 guard 分支；这里只断言它没有被改成反问。
     assert payment_guard.inspect("余额还有多少").ambiguous is False
     assert parsed.question is None
+
+
+# ------------------------------------------- 只有一个姓的收款人（A/B C037 抓出）
+
+
+def test_surname_only_payee_must_be_asked_again() -> None:
+    """「转500给王」：只给一个姓，系统不能把它当成收款人直接建图。"""
+    finding = payment_guard.inspect("转500给王")
+    assert finding.ambiguous is True
+    assert finding.reason == payment_guard.REASON_INCOMPLETE_PAYEE
+    assert "王" in finding.question
+    assert "全名" in finding.question or "卡号后四位" in finding.question
+
+
+def test_surname_only_payee_does_not_block_kinship_or_full_names() -> None:
+    """单字亲属称谓能唯一指向通讯录条目，全名和带尾号的写法也不该被拦。"""
+    assert payment_guard.inspect("转500给妈妈").ambiguous is False
+    assert payment_guard.inspect("给爸转300").ambiguous is False
+    assert payment_guard.inspect("转500给王强").ambiguous is False
+    # 用户自己给了卡号尾号时，同名靠尾号就能分开，不需要再问。
+    assert payment_guard.inspect("转500给王，尾号4417").ambiguous is False
+    # 金额里的四位数字不是卡号尾号：不能因为「1000」放行只给姓的收款人。
+    assert payment_guard.inspect("转1000给王").ambiguous is True
+
+
+def test_surname_payee_round_trips_through_the_intent_layer() -> None:
+    """API 层也要停：模型给了 transfer，原话层仍把它钉成反问，不建图。"""
+    parsed = intent.IntentResult(
+        intent="transfer",
+        slots={"payee_name": "王", "amount_fen": 50000},
+        confidence=0.75,
+    )
+    chunks = _drain(parsed, "转500给王")
+    assert parsed.ok is False
+    assert parsed.guard_reason == payment_guard.REASON_INCOMPLETE_PAYEE
+    names = [
+        line.removeprefix("event: ")
+        for chunk in chunks
+        for line in chunk.splitlines()
+        if line.startswith("event: ")
+    ]
+    assert "plan" not in names
+
+
+def test_fallback_never_collapses_a_wealth_chain_into_plain_transfer() -> None:
+    """B 组 C048：「把货币基金卖了转3000给我妈」不能只接住转账那半句。"""
+    assert intent._fallback_transfer("把货币基金卖了转3000给我妈") is None
+    # 不含卖出/赎回的普通转账句仍走确定性兜底，别把能力收没了。
+    plain = intent._fallback_transfer("转3000给我妈")
+    assert plain is not None
+    assert plain.intent == "transfer"
+    assert plain.slots["amount_fen"] == 300000

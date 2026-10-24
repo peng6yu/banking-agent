@@ -2,7 +2,7 @@
 
 > **用途**：2026 深圳国际金融科技大赛「人工智能赛道 · 银行 AI 智能体」阶段 0.3 / 0.4 交付物。把 Revolut AIR 的公开能力逐维度拆成可执行的改造项，回答三件事：差在哪、值不值得补、补完怎么验收。
 > **对标对象**：Revolut AIR（AI by Revolut），证据全部复用 `docs/benchmark/revolut_air_research.md` 的台账编号（A1–A17 / B1–B15 / F1–F7）与四档证据状态，**不新增来源、不升级证据等级**。
-> **本项目证据口径**：代码路径 + 测试。基线数字来自 `docs/改造实施基线.md`（改造前基线：**904 passed / 4 skipped**）；本文写作时（2026-10-23）一度处于并行改造中间态（916/935 passed），**已收口**。最终交付状态：**1275 passed / 4 skipped**（`.venv/bin/python -m pytest -q`，19.94s）、前端静态检查 **66/66**、红队 **PASS 43 / FAIL 0**、A/B 评估 **80 例**（详见 `docs/benchmark/final_acceptance_report.md`）。中间态数字只作过程记录，不作交付依据。
+> **本项目证据口径**：代码路径 + 测试。基线数字来自 `docs/改造实施基线.md`（改造前基线：**904 passed / 4 skipped**）；本文写作时（2026-10-23）一度处于并行改造中间态（916/935 passed），**已收口**。最终交付状态：**1279 passed / 4 skipped**（`.venv/bin/python -m pytest -q`，19.94s）、前端静态检查 **66/66**、红队 **PASS 43 / FAIL 0**、A/B 评估 **80 例**（详见 `docs/benchmark/final_acceptance_report.md`）。中间态数字只作过程记录，不作交付依据。
 > **硬约束**：本矩阵不改代码；所有"本项目"结论都能回指真实文件；拿不准的一律写「待核实」，不用常识补齐。
 
 ---
@@ -213,7 +213,7 @@
 | ① AIR 公开能力 | 敏感动作要求生物识别；Business 版动作前校验角色权限；写操作范围受限（投资写侧整类禁止） |
 | ② AIR 依据与证据状态 | A4（生物识别）、A7 https://www.revolut.com/legal/assistant-business-disclaimer/ （角色权限）——**官方资料明确证实**；逐动作权限分级表**尚未核实**（C.4-7） |
 | ③ 本项目真实实现状态 | 已实现（本项目最强项）：12 条规则 R01–R12（`app/policy/rules.py`）、令牌七步（`app/policy/token.py`）、`params_hash` 绑定、日累计 1000 元（`SINGLE_LIMIT_FEN=DAILY_LIMIT_FEN=100_000`）、熔断（5 分钟 3 次→60 秒）、三因子（mock）、哈希链审计 + `/api/audit/verify`。缺口：多因子是模拟（R6）、无登录/多用户/RBAC（R7）、额度固定不可配置 |
-| ④ 代码位置与测试证据 | `app/policy/rules.py`、`token.py`、`breaker.py`、`app/audit.py`；测试 `tests/test_policy.py`、`test_token.py`、`test_breaker.py`、`test_confirm_*`、`test_injection*.py`、`tests/redteam/cases.yaml`（43 条，**本轮未复跑**） |
+| ④ 代码位置与测试证据 | `app/policy/rules.py`、`token.py`、`breaker.py`、`app/audit.py`；测试 `tests/test_policy.py`、`test_token.py`、`test_breaker.py`、`test_confirm_*`、`test_injection*.py`、`tests/redteam/cases.yaml`（43 条；2026-10-24 复跑两次，最终代码 + DeepSeek 下 **43/43 PASS**） |
 | ⑤ 能力缺口 | **G10**：真实认证通道（短信/UKey/人脸）与多用户 RBAC、分级额度配置——属"需外部服务"的 P2；安全内核本身不缺 |
 | ⑥ 可借鉴设计 | E3/E12：动作前二次校验、权限先于执行；多因子做成**可插拔 provider**，演示用桩、生产可换 |
 | ⑦ 改造复杂度与风险 | 8–12 人日（外部短信/UKey 接入 + 用户体系 + 迁移）；风险：演示环境无法接真实银行认证，不能宣称"已对接"；R7 改动面大（所有工具都要 user_id） |
@@ -257,7 +257,7 @@
 |---|---|
 | ① AIR 公开能力 | 官方未公开评测方法；B1 称有多 Agent 平台、guardrails、evals、monitoring、标注与 QA/QC 流程、集中式 AI 网关 |
 | ② AIR 依据与证据状态 | B1（**可信公开技术资料证实，原页未打开**）；具体指标/阈值/数据集规模**尚未核实** |
-| ③ 本项目真实实现状态 | **已补强**：`tests/eval/` 80 例中文评估集 + 可复现脚本 + A/B 报告（真模型，6 项指标：intent/slot/clarify/dag/knowledge_citation/unauthorized）；全量 **1275 passed / 4 skipped**（2026-10-24 终测）、75 个测试文件、43 条红队 **PASS 43 / FAIL 0**、前端 66 项、哈希链审计可验证。**仍无**延迟/token/成本指标与人工质量抽样 |
+| ③ 本项目真实实现状态 | **已补强**：`tests/eval/` 80 例中文评估集 + 可复现脚本 + A/B 报告（真模型，6 项指标：intent/slot/clarify/dag/knowledge_citation/unauthorized）；全量 **1279 passed / 4 skipped**（2026-10-24 终测）、75 个测试文件、43 条红队 **PASS 43 / FAIL 0**、前端 66 项、哈希链审计可验证。**仍无**延迟/token/成本指标与人工质量抽样 |
 | ④ 代码位置与测试证据 | `tests/`、`tests/eval/{intent_cases.yaml,run_eval.py,evaluation_report.md,test_eval_harness.py}`、`scripts/redteam.py`、`scripts/check_frontend.py`、`app/api/routes.py /api/audit/verify` |
 | ⑤ 能力缺口 | **G13**：40% 完成率需要"可量化的意图理解准确率"，当前只有"测试全绿"这一间接证据 |
 | ⑥ 可借鉴设计 | E7：小步引入 evals + 标注集，不建平台；指标只做三项（意图准确率、工具成功率、P95 延迟） |
@@ -272,7 +272,7 @@
 |---|---|
 | ① AIR 公开能力 | 直连内部知识库与产品生态，能回答产品/条款类问题；未见术语表或法规知识库的公开细节 |
 | ② AIR 依据与证据状态 | B1（**可信公开技术资料证实，原页未打开**）；A6（AI 透明度）——**官方资料明确证实**；知识库结构**尚未核实** |
-| ③ 本项目真实实现状态 | **已完成**：`app/knowledge/` 6 个模块 + 5 个 YAML（terms 40 / entities 25 / relations 22 / intents 11 / workflows 10 / sources 34），`app/planner/kb_bridge.py` 接入 intent + dag + routes，`knowledge.retrieved` 审计落库；知识集成测试 7 条失败已收口，全量 1275 passed；加载失败降级为「空知识 + warning + 追问」并有专门测试 |
+| ③ 本项目真实实现状态 | **已完成**：`app/knowledge/` 6 个模块 + 5 个 YAML（terms 40 / entities 25 / relations 22 / intents 11 / workflows 10 / sources 34），`app/planner/kb_bridge.py` 接入 intent + dag + routes，`knowledge.retrieved` 审计落库；知识集成测试 7 条失败已收口，全量 1279 passed；加载失败降级为「空知识 + warning + 追问」并有专门测试 |
 | ④ 代码位置与测试证据 | `app/knowledge/loader.py`、`retrieve.py`（docstring 明确"不引入向量检索"）、`app/planner/kb_bridge.py`、`app/api/routes.py:_audit_knowledge`；测试 `tests/test_knowledge_{loader,normalize,retrieve,integration}.py`、`tests/test_security_knowledge.py`；43 条红队已复跑 PASS 43 / FAIL 0 |
 | ⑤ 能力缺口 | **G14 已关闭**（原缺口：缺 4 个数据文件、缺接线、缺审计与降级策略）；残余：知识仅参与「问不问/填什么/怎么解释」，不进模型上下文（受 SYSTEM_PROMPT 逐字测试约束），语义泛化仍靠别名表 |
 | ⑥ 可借鉴设计 | E5 知识库+产品生态直连；知识是**数据不是指令**（基线原则），冲突时降级并审计；检索用结构化/关键词即可，**不上向量库** |

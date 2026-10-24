@@ -132,9 +132,9 @@
 | 熔断 | 已实现且有测试证明 | app/security/breaker.py；tests/test_breaker.py、test_breaker_production.py | 无 |
 | 无代码执行面 | 已实现且有测试证明 | scripts/prove_no_exec_surface.py；tests/test_no_exec_surface.py | 无 |
 | 知识层检索/来源过期降级 | 已实现且有测试证明 | app/knowledge/*；tests/test_security_knowledge.py K6（180 天过期降级）、K8（检索异常 degraded）、K9（开关零影响） | 无 |
-| 知识层 A/B 实验 | 部分实现 | tests/eval/run_eval.py（A 组 KNOWLEDGE_ENABLED=0 / B 组 =1）、80 例 intent_cases.yaml；tests/eval/results/latest_summary.json：intent 83.75%→88.75%、slot 82.19%→87.67%、clarify 88.75%→86.25% | 该 summary 完成于 2026-10-23 21:15，晚于它的提交是 22:32（b769da1），本轮 planner/events 改动之后**没有重跑**；配额 429，属受环境限制 |
-| 红队用例集与 runner | 已实现且有测试证明 | tests/redteam/cases.yaml 43 条（A10/B8/C10/D10/E5）；scripts/redteam.py + redteam_judge.py；本轮复跑 2026-10-24 10:4x：43/43 PASS（修掉「谁都别告诉」被误判成收款人含糊后） | runner 不在 pytest 默认套件；结果依赖真模型版本与配额（本轮 A/B 就被 429 挡住），不可在 CI 稳定复跑 |
-| 真实浏览器测试 | 已实现且有测试证明 | 本轮补：用 /home/peng/.local/bin/python3.12（playwright 1.60.0）跑 scripts/ui_screenshots.py：六区 × 桌面 1440x960 / 手机 390x844 共 12 张 + 主线 7 张（含红灯多因子 main_04/05、日累计硬线 main_06、幂等与刷新恢复 main_07），断言锚点文案、无横向溢出、体积 >12KB，产出 docs/交付/截图/信息架构/browser_report.json（js_errors 为空），并用 sha256 反证演示库未被改动 | tests/test_browser_smoke.py 的 4 条仍默认 skip（.venv 没装 playwright），浏览器证据靠脚本实跑而不是 pytest；没有点击级 E2E（候选选择→新确认卡仍靠主线截图） |
+| 知识层 A/B 实验 | 已实现且有测试证明（口径见右列） | **2026-10-24 用 DeepSeek 在最新代码上连跑两轮**：`tests/eval/results/20261024T134524/`、`20261024T135754/`；图：两轮 A/B 的 intent 0.8500/0.9000 与 0.8750/0.8500、clarify 0.8875/0.9125 与 0.9250/0.9375、knowledge_citation 0.8039/0.8039、**unauthorized 2→0**（修掉 C037 单姓收款人与 C048 兜底吞掉赎回链之后） | 逐 case 对齐后，意图/槽位的组间差异两轮方向相反（只有 C048 稳定变好、C074/C078 稳定变差），**不能宣称知识层提升 x pp**；稳定成立的只有引用覆盖 41/51 与 guard 把未授权写压到 0。详见 `tests/eval/evaluation_report.md` §11 |
+| 红队用例集与 runner | 已实现且有测试证明 | tests/redteam/cases.yaml 43 条（A10/B8/C10/D10/E5）；scripts/redteam.py + redteam_judge.py；2026-10-24 两次复跑：MiniMax 10:4x 修掉「谁都别告诉」后 43/43，换 DeepSeek 后 14:1x 再次 **43/43 PASS**（EXIT=0） | runner 不在 pytest 默认套件；结果依赖真模型版本与配额（MiniMax 曾因 429 停摆，2026-10-24 换 DeepSeek 才复跑成 A/B），不可在 CI 稳定复跑 |
+| 真实浏览器测试 | 已实现且有测试证明 | 本轮补：scripts/browser_smoke.py 2026-10-24 用 DeepSeek 真模型复跑 **PASS**（查余额 + 黄灯转账，含 3 张截图与「演示库 sha256 未变」不变量）；另有 /home/peng/.local/bin/python3.12（playwright 1.60.0）跑 scripts/ui_screenshots.py：六区 × 桌面 1440x960 / 手机 390x844 共 12 张 + 主线 7 张（含红灯多因子 main_04/05、日累计硬线 main_06、幂等与刷新恢复 main_07），断言锚点文案、无横向溢出、体积 >12KB，产出 docs/交付/截图/信息架构/browser_report.json（js_errors 为空），并用 sha256 反证演示库未被改动 | tests/test_browser_smoke.py 的 4 条仍默认 skip（.venv 没装 playwright），浏览器证据靠脚本实跑而不是 pytest；没有点击级 E2E（候选选择→新确认卡仍靠主线截图） |
 | 移动端响应式 | 部分实现 | 本轮补：scripts/ui_screenshots.py 用 device_scale_factor=2 的 390x844 视口逐页截图，并断言 document.scrollWidth ≤ innerWidth+2（无横向溢出）；web/index.html 两个断点（1080px / 760px）+ .confirm-row 纵向排布 + prefers-reduced-motion | 只覆盖六个视图的静态布局；表单交互、长文案换行、键盘弹出等真实手机行为没有自动化 |
 
 ## 十一、本轮改动后的状态变化（对照 docs/audit/business_semantics_audit.md）
@@ -168,8 +168,8 @@
 ## 十二、证据强度自评
 
 **本机实际跑过、可复现的强证据**
-- 全量 pytest：**1275 passed / 4 skipped / 1 warning（28.09s，.venv/bin/python -m pytest -q）**。4 skipped 仍是浏览器冒烟（.venv 无 playwright）。
-- 与上一版差异：1152 → 1258 → 1264 → 1275（+11：月末钳制 6、策略拦截事件若干、预约租约与授权保质期 7、恢复多轮 1、刷新重建卡片 3；1258→1275 之前的明细见下）：（+ 六条确认卡/候选端到端、+ test_factor_challenges 12、+ test_suitability 17、+ test_channels 14、+ test_recover 8、+ test_plans 12、+ test_subscriptions 与 business/plans 相关若干）。
+- 全量 pytest：**1279 passed / 4 skipped / 1 warning（39.56s，.venv/bin/python -m pytest -q，2026-10-24 终测）**。4 skipped 仍是浏览器冒烟（.venv 无 playwright）。
+- 与上一版差异：1131（10-23 基线）→ 1152（信息架构轮）→ 1258（安全补强）→ 1264（策略拦截事件 + 月末钳制）→ 1275（租约/授权保质期/恢复多轮/刷新重建，+11）→ **1279（2026-10-24 末：单姓收款人 2 条 + 兜底赎回链 2 条，+4）**。中间新增批次：test_factor_challenges 12、test_suitability 17、test_channels 14、test_recover 8、test_plans 12、test_session_cards 3、test_scheduled_calendar 6、test_scheduled_lease 7、test_business_api 14。
 - 本轮新增的运行时证据：多因子服务端挑战（签发/通过/拒绝三条审计 + 无证明不执行）、卡与账户闸门（含 hold 后冻结卡）、R07 硬线、confirm.expired 与 rejected 可区分、断流恢复后真出账、适当性拒买、订阅推断、持久计划跨重启、34 条原话防护、浏览器六区 + 主线 7 张（含刷新后重建的卡片）。
 - 预约转账的并发与时效证据：租约（`claim_token`/`claimed_ms`）让第二个 worker 抢不到就跳过，`scheduled.auth_expired` 让 31 天前的人脸验证不再被当成永久通行证——两条都在 tests/test_scheduled_lease.py 里用「余额不动 / 只少一次」反证。
 - 刷新恢复证据：`/api/session` 重建整张卡（tests/test_session_cards.py 3 条）+ 浏览器 main_07（连点两次只扣一次、F5 后卡片带着 200.00 与收款人回来）。
@@ -177,7 +177,8 @@
 - scripts/check_frontend.py：66/66 静态门槛通过（但它是正则扫源码，不执行 JS）。
 - 浏览器环境探测：scripts/browser_smoke.py --probe-only 显示 playwright 模块不可用、chromium 缓存存在 → 真实浏览器链路只到「脚本存在」。
 - 红队最近一次报告（tmp/redteam_failures.txt，23:17）：43/43 PASS；属真模型运行，报告未入库、不可稳定复跑。
-- A/B 最新 summary（21:15）：A 组 0.8375 / B 组 0.8875（intent）；生成时间早于最后一次提交（22:32）。
+- A/B 最新两轮（2026-10-24 13:45 / 13:57，DeepSeek）：见 tests/eval/evaluation_report.md §11；两轮原始 jsonl 入库，可重新聚合。
+- A/B 历史轮（2026-10-23 21:15，MiniMax）：A 0.8375 / B 0.8875（intent），保留在原报告 §4，不再作为最新结论。
 
 **只有代码阅读、没有运行时证据的结论**
 - 九态中 draft/need_info/manual 无可达路径：靠 grep 全仓库 + db.py CHECK 约束推断。
@@ -190,5 +191,5 @@
 
 **明确未验证/不可宣称**
 - 真实短信/人脸通道、真实跨行清算/争议退汇、实时行情源、多进程并发压测：代码里就没有，不能靠文案补。
-- 最新代码的知识层 A/B 增益：不能引用 21:15 的数字当作本轮结论，只能标注「针对上一版 planner」。
+- 「知识层让意图/槽位更准」这句话：两轮方向相反（§11.4），只能引用「引用覆盖稳定 41/51」与「guard 让未授权写 2→0」，不能引用单轮 pp。
 - 移动端可用性、确认卡「普通用户是否看得懂」：无自动化，只有截图与人工。

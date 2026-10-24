@@ -430,11 +430,21 @@ def scenario_confirm(page: Any, shots: Path, prev: dict[str, Any]) -> dict[str, 
     page.wait_for_timeout(600)
     chat = page.inner_text("#chat-log")
     check("已转出 100.00 元" in chat, "点确认后没看到已转出回执")
-    done_line = [ln for ln in chat.splitlines() if "交易后余额" in ln]
-    check(bool(done_line), "没找到交易后余额回执")
-    after_fen = int(done_line[-1].split("：")[-1].strip())
-    import re
-    before_fen = int(float(prev["balance"].replace(",", "")) * 100)
+    # 2026-10-24：done 气泡的措辞从「交易后余额」改成「账户当前余额（后端返回值）」——
+    # 只有真出账才叫「交易后」，而这条链路上查询也会走到 done。两种措辞都认，避免脚本先崩。
+    done_line = [
+        ln for ln in chat.splitlines()
+        if "交易后余额" in ln or "账户当前余额" in ln
+    ]
+    check(bool(done_line), "没找到余额回执")
+    # 前半段（旧措辞）回的是分，后半段（2026-10-24 起）回的是「12,760.50 元」。
+    # 两种都解析，否则脚本会在一个纯展示格式上崩掉，看起来像产品坏了。
+    raw = done_line[-1].split("：")[-1].strip()
+    if raw.endswith("元"):
+        after_fen = int(round(float(raw.rstrip("元").replace(",", "").strip()) * 100))
+    else:
+        after_fen = int(raw)
+    before_fen = int(round(float(prev["balance"].replace(",", "").strip()) * 100))
     print(f"[余额] 转账前 {before_fen} 分，转账后 {after_fen} 分")
     check(after_fen == before_fen - 10000, f"余额变化不等于 100 元：{before_fen} -> {after_fen}")
     print("[权限灯]", panel_text(page, "panel-policy").replace("\n", " / ")[:200])

@@ -73,8 +73,12 @@ make run     # 启动日志会打印一条带 #token= 的地址，打开那一�
 | 16 | **因子授权保质期 30 天**（`AUTH_TTL_MS` + 事件 `scheduled.auth_expired`） | 一次人脸验证被当成永久通行证：30 天后的预约仍按已授权直接扣款 | `tests/test_scheduled_lease.py`（31 天前的授权→顺延 + 退回复核 + 审计留痕） |
 | 17 | 恢复时**优先挑未完成的那一轮** | 同一会话里再问一句已答完的问题，新一轮 `done` 会盖住上一轮还挂着的确认卡 | `tests/test_recover.py::test_recovery_prefers_an_unfinished_run_over_a_newer_finished_one` |
 | 18 | 刷新后**服务端重建同一张确认卡**（`planner.events.confirmation_frame`），并自动切回 AI 助手视图 | `/api/session` 只回确认号，刷新后用户得在看不见金额和收款人的情况下再签一次字；后来还发现卡片被画在隐藏视图里，人从总览页「待处理的授权」点进去也看不到 | 截图 `main_07_idempotent_refresh.png`（连点两次只扣一次、F5 后卡片带 200.00/李静/尾号 8821 回来）；`tests/test_session_cards.py` |
+| 19 | **换模型跑通**（DeepSeek `deepseek-flash` / `deepseek-v4-pro`，OpenAI 兼容协议） | MiniMax 配额耗尽（`429 rate_limit_error`），A/B 与任何真模型评估都停摆 | `scripts/provider_check.py` **4/4 PASS**（连通 / tool_calls / tool_choice:auto / SSE 88 行）；配置写法见 `docs/模型配置说明.md` §5.1（不含 key） |
+| 20 | **在最终代码上跑了两轮 A/B**，并修掉两轮各一条未授权写 | 10-23 那轮 A/B 早于最后一次代码改动，「最终代码没有 A/B」是最大诚实性缺口 | r1 `20261024T134524` / r2 `20261024T135754`；修的是 C037（「转500给王」把单姓当收款人）与 C048（兜底把「卖了基金转3000」压成纯转账）；**unauthorized 1/1 → 0/0**，但意图/槽位两轮方向相反，**不宣称 pp**（`tests/eval/evaluation_report.md` §11） |
+| 21 | **单姓收款人必须追问**（`payment_guard`）+ **兜底不吞赎回链**（`intent`） | 这两条正是 r1 A/B 各自漏掉的未授权写：一个把「王」当成收款人直接建计划，一个只剩半句仍然转钱 | `tests/test_payment_guard.py` 追加 4 条；`test_payment_guard + test_utterance_eval` = 56 passed |
+| 22 | **换模型后重跑红队与真浏览器冒烟** | 43/43 与 browser_smoke 都只有 MiniMax 时代的记录，换厂商等于没验过 | 红队 `.venv/bin/python -m scripts.redteam` → 43/43 PASS；`browser_smoke.py`（playwright 3.12）→ PASS（查余额 + 黄灯转账，演示库 sha256 不变）；顺带修脚本两处过期断言 |
 
-同一轮里也修了七个由测试/截图抓出来的真 bug：未满足的条件步忘了把状态退回 pending（一次不满足就永久卡住）、`_settle_plan` 把「已暂停」误判成「已完成」、模糊收款人正则把「谁都别告诉」里的「谁」当成收款人（导致一笔明确写了卡号的大额转账绕开了 R07 红灯）、桩模式抽取收款人时把动词一起吃进去（「帮我给妈妈转 2000 元」抽成「妈妈转」，浏览器里直接找不到收款人）、没有金额也没有操作说明的 SSE 帧会画出一张字段全是「见操作说明全文」的空确认卡，以及刷新页面时 `/api/session` 只回确认号（用户在看不见金额和收款人的情况下被要求再签一次字，现在改成服务端用 `confirmation_frame` 重建同一张卡）。
+同一轮里也修了九个由测试/截图/A/B 抓出来的真 bug：未满足的条件步忘了把状态退回 pending（一次不满足就永久卡住）、`_settle_plan` 把「已暂停」误判成「已完成」、模糊收款人正则把「谁都别告诉」里的「谁」当成收款人（导致一笔明确写了卡号的大额转账绕开了 R07 红灯）、桩模式抽取收款人时把动词一起吃进去（「帮我给妈妈转 2000 元」抽成「妈妈转」，浏览器里直接找不到收款人）、没有金额也没有操作说明的 SSE 帧会画出一张字段全是「见操作说明全文」的空确认卡，以及刷新页面时 `/api/session` 只回确认号（用户在看不见金额和收款人的情况下被要求再签一次字，现在改成服务端用 `confirmation_frame` 重建同一张卡）、把「转500给王」里的单姓当成了收款人（现在要求全名或卡号后四位）、以及兜底解析把「把货币基金卖了转3000给我妈」压成一句纯转账（现在遇到赎回/基金/理财等词就拒答，交给模型重新理解）。后两条是 2026-10-24 两轮 A/B 里各自漏掉的未授权写，不是读代码猜的。
 
 ## 快速开始（评委复现路径）
 
@@ -84,7 +88,7 @@ make run     # 启动日志会打印一条带 #token= 的地址，打开那一�
 |---|---|---|
 | 0. 一键配置 | `make setup`（等价 `bash scripts/setup.sh`） | 建 `.venv`、装依赖、生成 `.env`、选模型、建库、自检；幂等可重跑，`--dry-run` 只打印计划 |
 | 1. 起服务 | `make run`（等价 `python3.12 -m uvicorn app.main:app --port 8000`） | 启动日志打印 `http://127.0.0.1:8000/#token=…`；打开这条（令牌存 sessionStorage，之后同标签页可裸访问） |
-| 2. 自检 | `curl -s -H "X-API-Token: $(cat data/api_token)" http://127.0.0.1:8000/api/health` | `{"ok":true,"status":"ok","model":"MiniMax-M3.1-Flash-Preview","tools":35,"db":true,...}` |
+| 2. 自检 | `curl -s -H "X-API-Token: $(cat data/api_token)" http://127.0.0.1:8000/api/health` | `{"ok":true,"status":"ok","model":"deepseek-flash","tools":35,"db":true,...}`（model 随 `.env` 变，以实际返回为准） |
 | 3. 不配模型也要演 | `make setup ARGS="--mock"` | `MOCK_MODE=script` 离线协作桩：查余额、转账两种业务照演，其余照实反问 |
 | 4. 演示跑脏了复原 | `make reseed`（等价 `python3.12 -m scripts.seed --force`） | 删库重建初始态，末行 `seed.ok random_seed=… tables=26 window_days=180` |
 | 5. 换模型 / 换厂商 | 改 `.env` 三行 → `make smoke` | 4/4 PASS 才算配好，见下一节「模型配置」 |
@@ -94,7 +98,8 @@ make run     # 启动日志会打印一条带 #token= 的地址，打开那一�
 ## 模型配置（仓库不含密钥，换厂商只改三行）
 
 **这个仓库是公开的，里面没有任何人的 API key**，模型完全由你自己的 `.env` 或环境变量决定。
-默认厂商是 MiniMax，但代码只依赖 **OpenAI 兼容协议**（`POST {base}/chat/completions` + Bearer 鉴权 + `tool_calls`），
+默认配置指向 MiniMax（`scripts/setup.sh` 的出厂值），**本机当前实际跑的是 DeepSeek**（2026-10-24 换的，因为 MiniMax 配额耗尽 429）。
+代码只依赖 **OpenAI 兼容协议**（`POST {base}/chat/completions` + Bearer 鉴权 + `tool_calls`），
 换厂商**不用改一行代码**，只改 `.env` 三行：
 
 | 变量 | 填什么 | 默认 | 旧名（仍生效） |
@@ -110,8 +115,8 @@ python3.12 -m app.smoke               # 自检：4/4 PASS 才算配好（会打�
 
 | 厂商 | `LLM_BASE_URL` | `LLM_MODEL` |
 |---|---|---|
-| MiniMax（默认，已实测） | `https://api.minimaxi.com` | `MiniMax-M3.1-Flash-Preview` |
-| DeepSeek | `https://api.deepseek.com` | `deepseek-chat` |
+| DeepSeek（**本机当前**，已实测 4/4 + 两轮 A/B） | `https://api.deepseek.com` | `deepseek-flash`（备用 `deepseek-v4-pro`；`deepseek-chat` 不是可售名） |
+| MiniMax（出厂默认，历史轮已实测；配额可能耗尽） | `https://api.minimaxi.com` | `MiniMax-M3.1-Flash-Preview` |
 | 智谱 GLM | `https://open.bigmodel.cn/api/paas/v4` | `glm-4-flash` |
 | 通义千问（兼容模式） | `https://dashscope.aliyuncs.com/compatible-mode/v1` | `qwen-plus` |
 | Kimi | `https://api.moonshot.cn/v1` | `moonshot-v1-8k` |
@@ -283,7 +288,7 @@ curl -s http://127.0.0.1:8000/api/audit/verify
 ### 单元与集成测试（实测全绿，用例数持续增补）
 
 ```bash
-python3.12 -m pytest -q tests/            # 1275 passed, 4 skipped（2026-10-23 本轮实测；用例会随增补变化，复跑以实测为准）
+python3.12 -m pytest -q tests/            # 1279 passed, 4 skipped（2026-10-23 本轮实测；用例会随增补变化，复跑以实测为准）
 ```
 
 ### 前端合规自检（实测 66 项全过）
@@ -296,7 +301,7 @@ python3.12 scripts/check_frontend.py      # 实测「前端检查通过：66/66 
 
 `scripts/check_frontend.py` 用正则扫 HTML 源码，一行 JavaScript 都没执行过；`scripts/browser_smoke.py` 用 Playwright 驱动真实 Chromium 打开页面、真的往输入框敲一句话，再对渲染后的 DOM 断言。
 
-> 注意：`scripts/browser_smoke.py` 会调用真实模型，需要可用配额；`tests/test_browser_smoke.py` 用固定模型，无网络也能跑。2026-10-23 22:10 后 MiniMax Token Plan 配额耗尽（429），最终代码只复跑了后者（4 passed）。
+> 注意：`scripts/browser_smoke.py` 会调用真实模型，需要可用配额；`tests/test_browser_smoke.py` 用固定模型，无网络也能跑。2026-10-23 MiniMax 配额耗尽（429）时只复跑了后者；2026-10-24 换 DeepSeek 后**两个都跑过**：`browser_smoke.py` PASS（查余额 12,860.50 → 黄灯转账后 12,760.50，演示库未变），`tests/test_browser_smoke.py` 4 passed。
 
 ```bash
 export PATH=$PATH:/home/peng/.local/bin
@@ -355,7 +360,7 @@ python3.12 -m app.smoke                    # 实测 4/4 PASS，主脑延迟约 1
 | `app/tools/` | 35 个工具：查人、查余额、账单、卡片、订阅、转账、资金冻结 + 7 个主动财务（只读/需确认，无动钱语义） |
 | `app/api/` | 会话/确认/审计等 28 条 API 路径 + 只读业务视图 `business.py`（overview / bill / management / plans / executions 五个 GET，六个区域的唯一数据来源） |
 | `web/index.html` | 单文件前端（原生 JS，无框架、无 CDN、零外链） |
-| `tests/` | pytest 用例集（1275 passed / 4 skipped，2026-10-23 本轮实测）+ 43 条红队 YAML + `tests/eval/` 80 例 A/B 评估集 |
+| `tests/` | pytest 用例集（1279 passed / 4 skipped，2026-10-24 终测）+ 43 条红队 YAML + `tests/eval/` 80 例 A/B 评估集（10-24 两轮结果已入库） |
 | `scripts/` | 种子脚本、前端合规检查器、真实 Chromium 冒烟(`browser_smoke.py`)、六区+主线截图(`ui_screenshots.py`) |
 | `docs/` | 交接规格书 00—10（改造前基线，写代码前必读）+ 11—15 改造设计与验收 + 答辩与演示交付件 |
 | `规划/` | 前期选型与模型实测记录 |
@@ -369,7 +374,7 @@ python3.12 -m app.smoke                    # 实测 4/4 PASS，主脑延迟约 1
 | `make setup` | 一键配置新电脑（.venv + 依赖 + .env + 选模型 + 建库 + 自检） | ✅ 幂等；`ARGS="--dry-run"` 可预演 |
 | `make run` | 启动服务（--reload） | ✅ |
 | `make seed` | 建库 + 种子（幂等） | ✅ |
-| `make test` | pytest 全跑 | ✅ 全绿（1275 passed / 4 skipped，2026-10-23 本轮实测） |
+| `make test` | pytest 全跑 | ✅ 全绿（1279 passed / 4 skipped，2026-10-23 本轮实测） |
 | `make smoke` | 模型连通性自检 | ✅ 4/4 |
 | `make cov` | 覆盖率（未装 pytest-cov 时自动退回纯跑） | ✅ |
 | `make reset` | `POST /api/demo/reset` 演示前清场 | ✅ |
@@ -380,7 +385,7 @@ python3.12 -m app.smoke                    # 实测 4/4 PASS，主脑延迟约 1
 
 下面 10 条是真正还没解决的问题：设计取舍，或没有条件验证。2026-10-24 这一轮改掉了其中四条（多因子自证、卡状态不进动钱路径、后台只有预约转账、没有适当性评估），改到什么程度、还剩什么，逐条写明。
 
-1. **其他云厂商没有 key，未真机验证。** DeepSeek / 通义 / 智谱 / Kimi / OpenAI 的填法在「模型配置」表里；代码只依赖 OpenAI 兼容协议，降级侧有 21 条单测覆盖，但本仓库不替它们的真实行为背书——换之前先跑 `python3.12 -m scripts.provider_check` 与 `make smoke`。
+1. **只有一个厂商做过真机 A/B。** DeepSeek（`deepseek-flash` / `deepseek-v4-pro`）已跑通 `provider_check` 4/4 并跑了两轮 80 例 A/B；MiniMax 有历史轮但配额已耗尽（429）。通义 / 智谱 / Kimi / OpenAI 的填法在「模型配置」表里，代码只依赖 OpenAI 兼容协议，降级侧有 21 条单测覆盖，但**没有它们的 key，不做真机背书**——换之前先跑 `python3.12 -m scripts.provider_check` 与 `make smoke`。
 2. **自动降级只在「失败」时发生。** 401/403/404/408/429/5xx/超时切下一个目标，400/422 直接抛（请求体错了，换谁都一样）。不做语义级路由（例如「这类任务交给更便宜的模型」），也不做延迟加权选目标。
 3. **本地小模型有准确率上限。** `qwen2.5:0.5b` 证明的是协议通、降级通、离线可演；复杂多轮意图会退化。演示请用云端主模型，Ollama 只作降级与断网备份。
 4. **场景覆盖有边界。** 转账支持口语金额、同名按卡尾号收敛、日累计与多因子升色；季付定时与 AA 拆分未实现。账单异常识别三类（拆单、凌晨境外、订阅涨价），是启发式提示而不是欺诈认定，不做全量对账。已执行的转账只能做**本地反向记账的账务冲正**，不代表能从对方追回资金；取消预约与追回已执行交易在界面上是两个不同的动作。
@@ -455,9 +460,9 @@ docs/10_测试与验收清单.md         ← 43 条红队 + 里程碑验收
 
 | 选择 | 理由 |
 |---|---|
-| 运行时模型 MiniMax-M3.1-Flash-Preview（云端，可换） | 实测 1.56s、5/5 稳定、不吐思维链；本机 GPU 驱动异常不可用。**厂商可换**：只依赖 OpenAI 兼容协议，配置见 [docs/模型配置说明.md](docs/模型配置说明.md) |
+| 运行时模型：**DeepSeek `deepseek-flash`**（当前）/ MiniMax-M3.1-Flash-Preview（历史轮） | DeepSeek：`provider_check` 4/4、单次约 3.0s（默认 effort）、两轮 80 例 A/B 已跑；MiniMax：单次 1.56s 但配额会耗尽（429）。本机 GPU 驱动异常不可用，本地只作对照。**厂商可换**：只依赖 OpenAI 兼容协议，配置见 [docs/模型配置说明.md](docs/模型配置说明.md) |
 | 不用 LangGraph / 多 Agent 框架 | 审计链要逐字段可控；金融场景要单点可追溯，多 Agent 会糊掉责任边界 |
-| 结构化输出只走 tool_calls | 实测 MiniMax 的 `response_format: json_object` 不被遵守 |
+| 结构化输出只走 tool_calls | 实测 MiniMax 的 `response_format: json_object` 不被遵守；两家都按 tool_calls 解析 |
 | SQLite + 标准库 | 零运维，评审可一键复现；审计表用触发器禁改 |
 | 单文件前端 | 断网也能演示；SSE 用 fetch + ReadableStream 手工解析，不引任何框架 |
 

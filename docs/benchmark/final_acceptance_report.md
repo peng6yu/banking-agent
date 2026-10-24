@@ -13,13 +13,13 @@
 
 | 维度 | 结论 |
 |---|---|
-| 代码 | 知识层与主动财务管理均已接入真实调用链；全量测试 **1275 passed / 4 skipped**（75 个测试文件） |
+| 代码 | 知识层与主动财务管理均已接入真实调用链；全量测试 **1279 passed / 4 skipped**（75 个测试文件） |
 | 知识层 | 40 术语 / 25 实体 / 22 关系 / 11 意图规则 / 10 流程 / 34 来源；参与意图修正、槽位补齐、追问与跨场景规划 |
 | 原话层 guard | 新增 `app/planner/payment_guard.py`：多收款人 / 一句多笔的确定性预检查，A/B 共用，**44 条测试** |
 | A/B 实验 | 最终轮同口径：intent **+5.0pp**、slot **+5.48pp**、clarify **−2.5pp**、unauthorized **4→0**；dev 与 holdout 分层见 §6 |
 | 主动财务 | 储蓄目标 → 确定性计算 → 监测 → 提醒 → 处理 → 重算闭环已跑通（真浏览器点过），**无后台定时器** |
 | 安全 | 红队 43/43；执行层未授权写操作 0；知识层 13 条、主动服务 11 条、payment_guard 44 条测试全绿；权限裁决代码未被修改 |
-| 端到端 | `scripts/e2e.py --offline` **13/13 PASS**（含注入、双因子、审计链、恶意模型）；`test_browser_smoke.py` **4 passed**（最终代码）；独立 `browser_smoke.py` 依赖真实模型，配额耗尽未复跑 |
+| 端到端 | `scripts/e2e.py --offline` **13/13 PASS**（含注入、双因子、审计链、恶意模型）；`test_browser_smoke.py` **4 passed**（最终代码）；独立 `browser_smoke.py` 2026-10-24 用 DeepSeek 真模型复跑 **PASS**（两场景 + 三张截图 + 演示库不变） |
 | 交付物 | 阶段 0–7 文档、知识文件、测试、评估报告、演示手册、PPT 均已落盘；限制与未实现项见 §7 |
 
 ---
@@ -44,7 +44,7 @@
 
 | # | 命令 | 结果 |
 |---|---|---|
-| 1 | `.venv/bin/python -m pytest -q tests/` | **1275 passed, 4 skipped, 1 warning in 25.84s**；4 个 skip 是浏览器冒烟默认关闭 |
+| 1 | `.venv/bin/python -m pytest -q tests/` | **1279 passed, 4 skipped, 1 warning in 39.56s**（2026-10-24 终测）；4 个 skip 是浏览器冒烟默认关闭 |
 | 2 | `RUN_BROWSER_SMOKE=1 python3.12 -m pytest tests/test_browser_smoke.py -q` | **4 passed in 6.44s**（最终代码，固定模型） |
 | 3 | `python3.12 scripts/check_frontend.py` | **前端检查通过：66/66** |
 | 4 | `python3.12 -m scripts.redteam` | **43 条：PASS 43 / FAIL 0** |
@@ -185,7 +185,7 @@ python3.12 -m uvicorn app.main:app --port 8000
 验证与演示：
 
 ```bash
-make test                                   # 1275 passed / 4 skipped
+make test                                   # 1279 passed / 4 skipped
 python3.12 scripts/check_frontend.py        # 66/66
 python3.12 -m scripts.redteam               # 43/43
 python3.12 -m scripts.e2e                   # 13/13（会删库重建，跑完 make reseed）
@@ -208,7 +208,7 @@ python3.12 -m tests.eval.run_eval --cases tests/eval/intent_cases.yaml --out tes
 | 全天候主动服务 | 未实现调度器，只验证手动触发；未做多用户/长周期稳定性测试 |
 | 真实资金链路 | 按任务书全部模拟，无法也不应验证真实转账/投资 |
 | 真实模型复跑 | 2026-10-23 22:10 起 MiniMax Token Plan 配额耗尽（429），新 A/B 与独立浏览器冒烟无法复跑；最终 A/B 轮早于最后三处代码改动 |
-| 独立 `browser_smoke.py` | 依赖真实模型；配额耗尽后未复跑，改以 `tests/test_browser_smoke.py`（固定模型，4 passed）作为最终代码证据 |
+| 独立 `browser_smoke.py` | 依赖真实模型；2026-10-24 换 DeepSeek 后复跑 **PASS**（场景 1 查余额、场景 2 黄灯转账点确认，余额 12,860.50 → 12,760.50，演示库未变）；脚本里两处过期断言（「交易后余额」措辞、分值解析）随之修好 |
 
 ---
 

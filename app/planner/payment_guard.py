@@ -31,6 +31,8 @@ REASON_MULTI_AMOUNT: Final[str] = "multi_amount"
 #: 条件句 / 收款人只是指代：都需要先问清，不能当成一笔能立刻执行的转账。
 REASON_CONDITIONAL: Final[str] = "conditional"
 REASON_VAGUE_PAYEE: Final[str] = "vague_payee"
+#: 收款人只给了一个姓（「转 500 给王」）：不是含糊，是没说完，同样必须先问。
+REASON_INCOMPLETE_PAYEE: Final[str] = "incomplete_payee"
 
 #: 成对引号：里面的内容是「用户转述的一句话」，不是指令。
 QUOTE_PAIRS: Final[tuple[tuple[str, str], ...]] = (
@@ -138,6 +140,14 @@ _NOT_A_PERSON: Final[tuple[str, ...]] = (
 #: 金额/收款人尾部可能粘上的动词或量词，匹配后先削掉再当名字。
 _TRIM_CHARS: Final[str] = "转给汇付打款钱元块万亿千百 \t"
 
+#: 只有一个姓（「转 500 给王」）：这不是一个能付款的收款人，是一个还没说全的名字。
+#: 亲属称谓例外：单个字就能唯一指向通讯录里的「妈妈」「我爸」，不该反问。
+_SINGLE_CHAR_OK: Final[frozenset[str]] = frozenset("爸妈哥姐弟妹姨舅叔婶爷奶姑")
+
+#: 用户自己给了卡号后四位时，同名靠尾号就能分开，不需要再问一次。
+#: 只认「尾号/卡号 + 四位」的写法：裸四位数字可能是金额（转 1000 给王）。
+_CARD_TAIL_RE: Final[re.Pattern[str]] = re.compile(r"(?:尾号|后四位|末四位|卡号)\s*\d{4}")
+
 MULTI_PAYEE_QUESTION: Final[str] = (
     "这句话里有不止一个收款人（{parties}）。请一次说一笔：先告诉我转给谁、转多少，"
     "我逐笔确认；没说清之前不会转。"
@@ -160,6 +170,10 @@ VAGUE_PAYEE_QUESTION: Final[str] = (
 )
 SPLIT_QUESTION: Final[str] = (
     "这笔钱要在几个人之间分？请分别说清每个人多少钱，或拆成两笔，我逐笔确认。"
+)
+INCOMPLETE_PAYEE_QUESTION: Final[str] = (
+    "「{name}」只有一个姓，我没法确定是哪一位收款人。请给全名，或者补上卡号后四位，"
+    "我先查一下同名再让你确认；没说清之前不会转。"
 )
 
 
@@ -334,6 +348,21 @@ def inspect(text: str) -> Finding:
             evidence=spoken[:60],
         )
 
+    # 「转 500 给王」：模型有时候会把一个姓当成收款人交上来，运行时 resolve_payee 当然
+    # 查不到，但那时图已经建出来了。原话层就该问清楚——用户多打两个字，比系统建一条
+    # 注定失败的转账链便宜得多。亲属单字（妈/爸/哥）能唯一指向通讯录条目，不算不完整；
+    # 用户自己给了卡号尾号时也不需要再问。
+    if not _CARD_TAIL_RE.search(spoken):
+        for name in names:
+            if len(name) == 1 and name not in _SINGLE_CHAR_OK:
+                return Finding(
+                    ambiguous=True,
+                    reason=REASON_INCOMPLETE_PAYEE,
+                    question=INCOMPLETE_PAYEE_QUESTION.format(name=name),
+                    parties=tuple(parties),
+                    evidence=spoken[:60],
+                )
+
     amount_match = _MULTI_AMOUNT_RE.search(spoken)
     if amount_match is not None:
         # 「转 300 或者 500 都行」：这不是两个收款人，是金额没定。
@@ -420,6 +449,8 @@ __all__ = [
     "REASON_CONDITIONAL",
     "REASON_VAGUE_PAYEE",
     "VAGUE_PAYEE_QUESTION",
+    "REASON_INCOMPLETE_PAYEE",
+    "INCOMPLETE_PAYEE_QUESTION",
     "after_correction",
     "has_live_payment",
     "REASON_MULTI_AMOUNT",

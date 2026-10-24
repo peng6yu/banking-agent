@@ -388,17 +388,28 @@ def _fallback_amount(text: str) -> int:
     return 0
 
 
+#: 提到这些词的句子是「先卖出/赎回，再转出」的多步业务，兜底解析不能只手接转账那半句。
+WEALTH_CHAIN_MARKERS: Final[tuple[str, ...]] = (
+    "赎回", "卖出", "卖掉", "卖了", "卖出份额", "基金", "份额", "理财",
+)
+
+
 def _fallback_transfer(text: str) -> IntentResult | None:
     """兜底里的「确定性转账句」：动词 + 收款人 + 金额都在原话里。
 
     刻意很窄：
-    - 原话被 payment_guard 判为歧义（多收款人/多笔/分摊）时一律不接，交给它反问；
+    - 原话被 payment_guard 判为歧义（多收款人/多笔/分摊/收款人只有一个姓）时一律不接；
+    - 提到赎回/卖出基金理财的句子一律不接：那是「先卖出再转账」的跨场景链，兜底
+      只看得懂前半句的转账动词，接下来就会把「卖基金」整段丢掉、直接当成一笔纯转账
+      （A/B 里 B 组 C048「把货币基金卖了转3000给我妈」就是这么漏的）；
     - 抽不出人名或金额就不接，不猜、不沿用上一轮；
     - 置信度 0.55 只是刚过 CONFIDENCE_FLOOR，审计里 source=fallback 一眼可辨。
     收款人仍然要经过 resolve_payee 在同名候选里消歧，这里只负责把话听懂。
     """
     finding = payment_guard.inspect(text)
     if finding.ambiguous:
+        return None
+    if any(marker in text for marker in WEALTH_CHAIN_MARKERS):
         return None
     if not payment_guard.has_live_payment(text):
         return None
