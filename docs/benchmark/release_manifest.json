@@ -1,10 +1,10 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-10-24T23:34:56+08:00",
+  "generated_at": "2026-10-25T19:51:42+08:00",
   "git": {
-    "head": "6124667eef19d4093768421c0e4256d67789578e",
-    "head_short": "6124667",
-    "subject": "fix(docs): 最后一轮文档收口——AA/沙箱/生日授权/AIR 状态/A-B 预检",
+    "head": "827b7cc7334f78304ee9285b930505f67c48d9b0",
+    "head_short": "827b7cc",
+    "subject": "feat(assist): 说一句就办——提醒/储蓄快路、点选澄清、总览就地批准",
     "branch": "main",
     "dirty": false,
     "changed_paths": 0
@@ -86,10 +86,10 @@
       "handoffs"
     ],
     "audit_event_types": 61,
-    "api_paths": 39,
+    "api_paths": 40,
     "policy_rules": 13,
     "intent_templates": 9,
-    "test_files": 88,
+    "test_files": 91,
     "knowledge": {
       "version": "2c4fbe8d4be2906c",
       "terms": 40,
@@ -103,10 +103,10 @@
   },
   "tests": {
     "command": ".venv/bin/python -m pytest -q",
-    "passed": 1415,
+    "passed": 1464,
     "failed": 0,
     "skipped": 4,
-    "duration_s": 196.86,
+    "duration_s": 37.5,
     "log": "tmp/pytest_final.log",
     "parsed": true
   },
