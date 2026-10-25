@@ -1,10 +1,10 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-10-25T22:21:17+08:00",
+  "generated_at": "2026-10-25T23:03:20+08:00",
   "git": {
-    "head": "f62119b3eaa74bc5007eb01a7dbaf90ccdf2e902",
-    "head_short": "f62119b",
-    "subject": "fix(subs): 「确实是我订的」也退出待办——定性两向生效并可撤回",
+    "head": "2d8de852cbb0bb7a8a10d03e62e0d8abb01605ee",
+    "head_short": "2d8de85",
+    "subject": "feat: 逐笔核实 + 会话记忆 + 手动记一笔",
     "branch": "main",
     "dirty": false,
     "changed_paths": 0
@@ -52,7 +52,7 @@
         "assess_suitability"
       ]
     },
-    "db_tables": 31,
+    "db_tables": 32,
     "db_table_names": [
       "users",
       "accounts",
@@ -84,13 +84,14 @@
       "plan_budgets",
       "plan_authorizations",
       "handoffs",
-      "subscription_verdicts"
+      "subscription_verdicts",
+      "chat_turns"
     ],
-    "audit_event_types": 63,
-    "api_paths": 42,
+    "audit_event_types": 64,
+    "api_paths": 45,
     "policy_rules": 13,
     "intent_templates": 9,
-    "test_files": 92,
+    "test_files": 95,
     "knowledge": {
       "version": "2c4fbe8d4be2906c",
       "terms": 40,
@@ -104,11 +105,11 @@
   },
   "tests": {
     "command": ".venv/bin/python -m pytest -q",
-    "passed": 1476,
+    "passed": 1521,
     "failed": 0,
     "skipped": 4,
-    "duration_s": 48.76,
-    "log": "tmp/pytest_r7.log",
+    "duration_s": 55.62,
+    "log": "tmp/pytest_r9.log",
     "parsed": true
   },
   "redteam": {
