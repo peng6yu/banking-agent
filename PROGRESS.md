@@ -373,3 +373,43 @@
 ### 遗留
 - 场景 3 仍无产品横向对比表（只有适当性 + 列表 + 申赎）；候选为下一步。
 - 43 条红队仍为自研用例集；外部样本复测未做。
+
+## v2.2.0 快路口语轮：说一句就办（提醒 / 储蓄 / 点选澄清 / 总览就地批准）  2026-10-25
+
+> 起因：v2.1 之后按真实使用路径走了一遍前端，发现三处「模型答得对、用户还要再动手」的断点：①建立提醒和记储蓄必须先自己填表单；②缺槽位时只被追问一句，得自己把金额/收款人/卡号敲进对话；③总览页的待处理授权只能「去确认」，跨会话还得自己找。本轮只补这三个断点，不动资金链路、不动判级。
+
+### 一、识别即执行快路（新模块）
+- [x] 新增 `app/planner/assist.py`（intent=`assist`）：`detect(text, session_id)` → `handle()`，**不建 DAG、不动钱**——储蓄只改计划的 `saved_fen`，提醒只落一条 `plans` 步骤（`kind='reminder'`）。
+- [x] 词表口径：`REMINDER_MARKERS`（提醒/记得/别忘/叫我/到点/闹钟）配合 `REMINDER_EXCLUDES`（生日/转账/汇款/付款/支付/申购/赎回/还款），避免把「提醒我明天还款」当提醒建单；`SAVINGS_MARKERS` 不含单字「储蓄」，且 detect 先把「储蓄卡 + 余额/账单」「转账」「这个月花了多少」判给查余额/查账单/转账，锁住「储蓄卡 ≠ 储蓄目标」。
+- [x] `create_reminder()` 支持一次性 + daily/weekly/monthly；`active_reminders(conn, user_id)` 供读侧列表（只取 steps 里 `kind=='reminder'` 且 plan 活跃的那一步）。
+- [x] 修复本轮暴露的真 bug：取消提醒分支原用 `plan["id"]`，而 `_active_reminders` 返回的主键叫 `plan_id` → `KeyError: 'id'`；改为 `plans.update(conn, str(plan["plan_id"]), user_id=user_id, status="cancelled")`。
+
+### 二、循环提醒的到点语义
+- [x] 新增 `app/reminder_time.py`：`REPEATS={daily,weekly,monthly}`、`label()`、`next_after()`、`next_from_payload()`；按**本地日历**算下一次，月 31 日在短月 clamp 到月末（2026-01-31 → 2026-02-28）。
+- [x] `app/plans.py::_run_step` 的 reminder 分支：循环提醒响过一次**不置 done**，用 `next_from_payload` 把 state 改回 `pending`、前移 `due_ms`；审计 `plan.step_done` 带 `repeat` / `next_due`。一次性提醒照旧只响一次。
+
+### 三、API 与读侧
+- [x] `POST /api/reminders`（`schemas.ReminderCreate`：`text` 1–40、`due_ms`、`repeat` none/daily/weekly/monthly、`hour`=9、`minute`=0、`day`、`weekday`）；返回 `{ok, plan, due_ms, due_text, repeat, repeat_label}`，坏入参统一 400 `VALIDATION`。
+- [x] `GET /api/business/plans` 新增 `reminders` 块（`items[].state_label`、`count`、`empty_reason`），与既有 `alerts` 并存；状态文案 `REMINDER_STATE_LABELS`（等待到点/正在提醒/已提醒/提醒失败/已跳过）。
+
+### 四、前端补齐（web/index.html）
+- [x] `done` 事件的 `choices` → 可点 chips（去重、最多 8 条、点一下等于替用户发那句话，服务端重新解析，选项不带权限）；澄清轮的 `done` 也带 `choices`，来源 key：`amount_fen / payee_name / payee_names / card_tail / product_code / subscription_name / due_ms / date_hint`。
+- [x] 总览待处理授权块重写：`can_confirm_here` 且未过期时给「批准执行 / 拒绝」并在原地调用；否则保留「去确认 / 去完成验证」并说明原因（过期 / 需要人脸短信 / 这一轮已结束）。`confirmAction` 增第 5 参 `sid`，因为总览的卡属于**别的会话**，必须带它自己的 `session_id`。
+- [x] 计划页新增提醒卡：表单（文案/到点/重复）+ 列表（重复文案、下次时间、状态、计划号、「结束这条提醒」）。周期提醒提交时只传 `hour/minute/weekday/day` 不传 `due_ms`，避免用户挑了过去的日期立刻触发。
+
+### 五、验收（全部 exit 0）
+- [x] pytest：**1464 passed / 4 skipped，37.50s**（2026-10-25 全量；10-24 基线 1419 收集 = 1415 + 4 skip）。
+- [x] 新增 40 条用例：`tests/test_assist_fastpath.py` 26、`tests/test_reminder_time.py` 8、`tests/test_reminder_api.py` 11（含月末 clamp、循环提醒 re-arm 后仍 pending 且审计带 repeat、一次性响过后从活跃列表消失、取消提醒不动余额）；另在 detect 参数表补 5 条「储蓄卡 ≠ 储蓄目标」回归。
+- [x] 红队 **43/43**、e2e `--offline` **13/13**、前端自检 **66/66**、内联 JS `node --check` 通过。
+- [x] 数字对账：1419 → 1468 收集 = +40 新用例 + 5 条回归 + 4 条 `test_imports` 参数化（两个新模块 × ALLOWED/LAYERS 两张表）。
+
+### 六、文档与单一事实源
+- [x] `docs/02`：登记 `app/planner/assist.py`、`app/reminder_time.py`、三个新测试文件；`docs/07`：§7.5 补 `POST /api/reminders`，§7.6 补 `done` 的 assist 字段与「choices 的语义」，§7.7 改 `confirmAction(id, approve, factor, proofs, sid)` 并补提醒三函数，硬性要求补「缺槽位必须给可点 chips ≤8」「总览可原地批准/拒绝，服务端仍重新裁决」。
+- [x] `docs/10` §10.2 补 `app/reminder_time.py` 与 `app/planner/assist.py` 两行必测点。
+- [x] 14 个文件的规模数字批量对齐（1415→1464、88→91、39→40、196.86s→37.50s、日期→2026-10-25），`release_manifest.json` 重新生成；PROGRESS 只追加不改写历史。
+
+### 遗留（照实说）
+- `tests/test_imports.py::_exists` 存在既有缺陷：`APP_DIR` 已是 `repo/app`，函数却又拼 `"app/<mod>"`，导致 `from app.planner import assist` 这类**子模块**依赖永远识别不到、恒为 False。本轮只补登记未修缺陷——修它会一次性改变整张依赖表的判定，留作单独一轮。
+- 提醒只到「页内提醒」，未接系统通知/短信；储蓄目标只是记录，不产生任何资金动作（这是设计，不是缺口）。
+- 真实短信/人脸渠道仍未接（沿用 v2.0 的桩），未推送远程仓库。
+

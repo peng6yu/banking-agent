@@ -28,7 +28,7 @@ from app import audit, db, funds, plans, proactive, subscriptions, suitability
 from app.api.routes import require_api_token
 from app.clock import now_ms
 from app.money import fen_to_yuan_str
-from app.planner import ticker
+from app.planner import assist, ticker
 from app.tools import bill, queries
 from app.tools.base import ToolContext, primary_account
 from app.tools.bill import ANOMALY_KINDS
@@ -51,6 +51,14 @@ TASK_STATE_LABELS: Final[dict[str, str]] = {
     "failed": "已失败",
     "cancelled": "已取消",
     "manual": "需要人工处理",
+}
+#: 提醒步骤的状态 -> 用户能看懂的说法（计划步骤的 state 与交易状态的词不一样）
+REMINDER_STATE_LABELS: Final[dict[str, str]] = {
+    "pending": "等待到点",
+    "running": "正在提醒",
+    "done": "已提醒",
+    "failed": "提醒失败",
+    "skipped": "已跳过",
 }
 #: 预约转账的行状态 -> 用户能看懂的说法
 SCHEDULED_STATE_LABELS: Final[dict[str, str]] = {
@@ -391,8 +399,9 @@ def _pending_confirmations(
     sql = (
         "SELECT c.id AS confirmation_id, c.session_id, c.run_id, c.node_id,"
         " c.action_json, c.status, c.created_ms, c.expires_ms,"
-        " r.status AS run_status"
+        " r.status AS run_status, n.decision_json"
         " FROM confirmations c LEFT JOIN dag_runs r ON r.id = c.run_id"
+        " LEFT JOIN dag_nodes n ON n.run_id = c.run_id AND n.node_id = c.node_id"
         " WHERE c.status = 'pending'"
     )
     args: list[Any] = []
@@ -410,6 +419,11 @@ def _pending_confirmations(
         except (TypeError, ValueError):
             action = {}
         params = action.get("params") if isinstance(action.get("params"), dict) else {}
+        try:
+            decision = json.loads(str(row["decision_json"] or "{}"))
+        except (TypeError, ValueError):
+            decision = {}
+        required_factors = [str(item) for item in (decision.get("required_factors") or [])]
         expires_ms = int(row["expires_ms"])
         expired = expires_ms <= stamp
         items.append(
@@ -434,6 +448,11 @@ def _pending_confirmations(
                 # 进程重启后，内存里的执行器已经没了：这时卡片还在库里，
                 # 但它已经不可能被"点一下"推进，必须如实说是过期/失效。
                 "stale": expired or str(row["run_status"] or "") not in ("running", "waiting"),
+                "level": str(decision.get("level") or "yellow"),
+                "required_factors": required_factors,
+                "can_confirm_here": not expired
+                and str(row["run_status"] or "") in ("running", "waiting")
+                and not required_factors,
                 "state_label": "已过期，需要重新发起" if expired else "等待确认",
             }
         )
@@ -953,6 +972,7 @@ def plans_view(conn: sqlite3.Connection) -> dict[str, Any]:
     scheduled = _scheduled_tasks(conn, user_id)
     pending = _pending_confirmations(conn)
     alerts = _alerts(conn, user_id, limit=20)
+    reminders = assist.active_reminders(conn, user_id)
     runs = _monitor_runs(conn)
     charges = subscriptions.upcoming(conn, str(account["id"]))
     persisted = plans.list_plans(conn, user_id=user_id, limit=10)
@@ -984,6 +1004,15 @@ def plans_view(conn: sqlite3.Connection) -> dict[str, Any]:
         },
         "pending_authorizations": pending,
         "alerts": alerts,
+        # 提醒和「提醒类预警」不是一回事：这里是用户自己建、会到点触发的提醒。
+        "reminders": {
+            "items": [
+                {**item, "state_label": REMINDER_STATE_LABELS.get(item["state"], item["state"])}
+                for item in reminders
+            ],
+            "count": len(reminders),
+            "empty_reason": None if reminders else "还没有提醒。可以在下面直接建一条，也可以跟助手说「提醒我明天上午 9 点开会」。",
+        },
         # 近期可能发生的支出：已知代扣的下次扣费日期，打开页面时算，不推送。
         "upcoming_charges": charges,
         "monitor_runs": {

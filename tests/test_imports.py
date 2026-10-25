@@ -42,6 +42,8 @@ LAYERS: dict[str, int] = {
     # 协作回放桩（MOCK_MODE=script）：模型层的离线替身，和 app.llm 一样在最底层
     "app.script_mode": 0,
     "app.security.envelope": 0,
+    # 提醒时间：纯日历计算（下次到点/文案），只依赖标准库
+    "app.reminder_time": 0,
     "app.security.api_auth": 1,
     "app.security.breaker": 1,
     "app.security.injection": 1,
@@ -100,6 +102,8 @@ LAYERS: dict[str, int] = {
     "app.planner.due": 4,
     "app.planner.split_plan": 4,
     "app.planner.ticker": 4,
+    # 识别即执行（提醒/储蓄）：不建 DAG、不动钱，只落计划与提醒
+    "app.planner.assist": 4,
     "app.api.routes": 5,
     # 只读业务视图（2026-10-23 六区信息架构）：与路由同层，可复用路由的鉴权依赖
     "app.api.business": 5,
@@ -141,6 +145,8 @@ ALLOWED: dict[str, frozenset[str]] = {
         "app.proactive",
         "app.security",
         "app.suitability",
+        # 缺失槽位的可点选项要按主账户取候选（amount_fen / payee_name …）
+        "app.tools.base",
         "app.tools.registry",
         "app.tools.scheduled",
     }),
@@ -274,6 +280,14 @@ ALLOWED: dict[str, frozenset[str]] = {
         "app.security",
         "app.tools",
     }),
+    # 识别即执行：只读账户、建计划/提醒，钱一律走原有的确认与令牌路径
+    "app.planner.assist": frozenset({
+        "app.audit",
+        "app.money",
+        "app.plans",
+        "app.proactive",
+        "app.reminder_time",
+    }),
     "app.planner.state": frozenset({
         "app.clock",
         "app.ids",
@@ -335,6 +349,8 @@ ALLOWED: dict[str, frozenset[str]] = {
         "app.models",
         "app.money",
     }),
+    # 提醒时间：纯函数，没有 app 内依赖
+    "app.reminder_time": frozenset(),
     "app.script_mode": frozenset({
         "app.money",
     }),

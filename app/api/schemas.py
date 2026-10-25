@@ -160,6 +160,20 @@ class PlanCreate(BaseModel):
     meta: dict = Field(default_factory=dict)
 
 
+class ReminderCreate(BaseModel):
+    """POST /api/reminders 的入参：一条独立提醒，可一次性也可循环。"""
+
+    model_config = ConfigDict(extra="forbid", title="新建提醒")
+
+    text: str = Field(min_length=1, max_length=40)
+    due_ms: int | None = Field(default=None, ge=0)
+    repeat: Literal["none", "daily", "weekly", "monthly"] = "none"
+    hour: int = Field(default=9, ge=0, le=23)
+    minute: int = Field(default=0, ge=0, le=59)
+    day: int | None = Field(default=None, ge=1, le=31)
+    weekday: int | None = Field(default=None, ge=0, le=6)
+
+
 class PlanUpdate(BaseModel):
     """PATCH /api/plans/{plan_id} 的入参：只改传了的字段。"""
 

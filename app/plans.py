@@ -24,7 +24,7 @@ import json
 from datetime import datetime
 from typing import Any, Final
 
-from app import audit, clock, db, ids, proactive
+from app import audit, clock, db, ids, proactive, reminder_time
 
 PLAN_STATUSES: Final[tuple[str, ...]] = ("active", "paused", "completed", "cancelled", "failed")
 STEP_KINDS: Final[tuple[str, ...]] = ("check", "action", "reminder")
@@ -421,15 +421,35 @@ def _run_step(conn, row: Any, now: int) -> dict[str, Any]:
             suggestion=text,
             now=now,
         )
+        # 循环提醒：响过一次不算完成，算完下一次时间继续挂着，直到用户取消。
+        next_due = reminder_time.next_from_payload(payload, now)
+        if next_due is None:
+            conn.execute(
+                "UPDATE plan_steps SET state='done', attempts=attempts+1, last_error='', updated_ms=?"
+                " WHERE id = ?",
+                (now, step_id),
+            )
+            audit.append(
+                conn, "plan.step_done", {"plan_id": plan_id, "step_id": step_id, "alert_id": alert_id}
+            )
+            return {"outcome": "done", "detail": {"alert_id": alert_id}}
         conn.execute(
-            "UPDATE plan_steps SET state='done', attempts=attempts+1, last_error='', updated_ms=?"
-            " WHERE id = ?",
-            (now, step_id),
+            "UPDATE plan_steps SET state='pending', attempts=attempts+1, due_ms=?, last_error='',"
+            " updated_ms=? WHERE id = ?",
+            (next_due, now, step_id),
         )
         audit.append(
-            conn, "plan.step_done", {"plan_id": plan_id, "step_id": step_id, "alert_id": alert_id}
+            conn,
+            "plan.step_done",
+            {
+                "plan_id": plan_id,
+                "step_id": step_id,
+                "alert_id": alert_id,
+                "repeat": payload.get("repeat"),
+                "next_due": next_due,
+            },
         )
-        return {"outcome": "done", "detail": {"alert_id": alert_id}}
+        return {"outcome": "done", "detail": {"alert_id": alert_id, "next_due": next_due}}
     # action：后台绝不动钱，只交回用户。
     alert_id = proactive.create_alert(
         conn,

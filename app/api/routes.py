@@ -39,6 +39,7 @@ from app.api.schemas import (
     PlanCreate,
     PlanRunRequest,
     PlanUpdate,
+    ReminderCreate,
     ResetRequest,
     SavingsGoalCreate,
     ScheduledChallengeRequest,
@@ -54,10 +55,11 @@ from app.models import Action, ChatRequest, ConfirmRequest, Decision, FactorChal
 from app.money import fen_to_yuan_str
 from app.planner import dag as planner_dag
 from app.planner import events as planner_events
-from app.planner import executor, intent, payment_guard, recover, ticker
+from app.planner import assist, executor, intent, payment_guard, recover, ticker
 from app.planner.clarify import augment as augment_clarification
 from app.planner.clarify import forget as forget_clarification
 from app.security import api_auth, factors
+from app.tools.base import primary_account
 from app.tools.registry import TOOL_NAMES, tool_schemas
 
 log = logging.getLogger(__name__)
@@ -341,7 +343,8 @@ async def chat(request: ChatRequest) -> StreamingResponse:
     parse_text = resumed_text or request.text
     if resumed_text is None:
         forget_clarification(session_id)
-    parsed = await _parse(session_id, parse_text)
+    # 储蓄目标和提醒是确定性操作，先走快路：模型不用猜槽位，用户也不用一轮轮回答。
+    parsed = _assist_parse(session_id, parse_text) or await _parse(session_id, parse_text)
     return StreamingResponse(
         # supersede：这句话是在回答上一轮的反问。答完之后那一轮就该结束，
         # 不能继续挂成「没走完的写操作」把这一轮也挡掉。
@@ -676,6 +679,33 @@ async def list_savings_goals(status: str | None = None, limit: int = 20) -> dict
     return {"ok": True, "goals": goals, "count": len(goals)}
 
 
+@router.post("/api/reminders")
+async def create_reminder(request: ReminderCreate) -> dict[str, Any]:
+    """建一条提醒：页面上的表单和聊天里的自然语言走同一个落库函数。"""
+    with _conn() as conn, db.tx(conn):
+        user_id = proactive.default_user_id(conn)
+        created = await asyncio.to_thread(
+            assist.create_reminder,
+            conn,
+            text=request.text,
+            user_id=user_id,
+            due_ms=request.due_ms,
+            repeat=request.repeat,
+            hour=request.hour,
+            minute=request.minute,
+            day=request.day,
+            weekday=request.weekday,
+        )
+    return {
+        "ok": True,
+        "plan": created["plan"],
+        "due_ms": created["due_ms"],
+        "due_text": created["due_text"],
+        "repeat": created["repeat"],
+        "repeat_label": created["repeat_label"],
+    }
+
+
 @router.patch("/api/savings/goals/{goal_id}")
 async def update_savings_goal(goal_id: str, request: SavingsGoalUpdate) -> dict[str, Any]:
     """调整目标：只改传了的字段，按新参数重算计划并写审计。"""
@@ -913,6 +943,142 @@ async def index() -> Any:
     return {"service": "银行 AI 智能体", "health": "/api/health"}
 
 
+def _assist_parse(session_id: str, text: str) -> intent.IntentResult | None:
+    """命中储蓄/提醒关键词就构造一个 assist 结果；没命中返回 None 走模型。"""
+    if assist.detect(text) is None:
+        return None
+    parsed = intent.IntentResult(
+        intent="assist",
+        slots={"assist_text": text},
+        confidence=1.0,
+        source="assist",
+    )
+    _audit_intent(session_id, text, parsed)
+    return parsed
+
+
+async def _emit_assist(
+    session_id: str,
+    parsed: intent.IntentResult,
+    queue: asyncio.Queue[Any],
+    *,
+    user_text: str,
+) -> None:
+    """assist 快路：同步算完再一次性发 done，不建图、不动钱。"""
+    text = user_text or str(parsed.slots.get("assist_text") or "")
+    try:
+        with _conn() as conn:
+            result = await asyncio.to_thread(assist.handle, conn, text)
+    except BankError as exc:
+        result = {"summary": exc.user_text, "choices": [], "action": "assist_error", "data": {}}
+    except Exception:  # noqa: BLE001 - 快路失败退回一句人话，别让整轮会话断掉
+        log.exception("api.chat.assist_failed session=%s", session_id)
+        result = {
+            "summary": "这个操作没做成，换个说法再试一次？",
+            "choices": [],
+            "action": "assist_error",
+            "data": {},
+        }
+    if not result:
+        result = {"summary": "没太理解这句，可以换个说法。", "choices": [], "action": "assist_none", "data": {}}
+    summary = str(result.get("summary") or "")
+    _remember(session_id, "assistant", summary)
+    await queue.put(
+        (
+            "done",
+            {
+                "summary": summary,
+                "intent": "assist",
+                "action": result.get("action"),
+                "choices": result.get("choices") or [],
+                "data": result.get("data") or {},
+            },
+        )
+    )
+    await queue.put((_SENTINEL, {}))
+
+
+def _choices_for(parsed: intent.IntentResult) -> list[dict[str, str]]:
+    """反问时带上可点的选项：能查数据库的就不让用户手打。"""
+    if not parsed.missing:
+        return []
+    choices: list[dict[str, str]] = []
+    seen: set[str] = set()
+
+    def add(label: str, value: str) -> None:
+        value = str(value).strip()
+        if value and value not in seen:
+            seen.add(value)
+            choices.append({"label": label, "value": value})
+
+    try:
+        with _conn() as conn:
+            user_id = proactive.default_user_id(conn)
+            account = primary_account(conn)
+            account_id = str(account["id"])
+            for slot in parsed.missing:
+                if slot == "amount_fen":
+                    for amount in ("100", "500", "1000", "2000"):
+                        add(f"{amount} 元", f"{amount} 元")
+                elif slot == "payee_name":
+                    rows = conn.execute(
+                        "SELECT name, bank, card_tail FROM payees ORDER BY id LIMIT 8"
+                    ).fetchall()
+                    for row in rows:
+                        tail = str(row["card_tail"] or "")
+                        add(f"{row['name']}（{row['bank']} 尾号 {tail}）", str(row["name"]))
+                elif slot == "payee_names":
+                    rows = conn.execute(
+                        "SELECT name, bank, card_tail FROM payees ORDER BY id LIMIT 8"
+                    ).fetchall()
+                    for row in rows:
+                        add(str(row["name"]), str(row["name"]))
+                elif slot == "card_tail":
+                    rows = conn.execute(
+                        "SELECT c.tail, c.kind, c.status FROM cards c"
+                        " JOIN accounts a ON a.id = c.account_id WHERE a.user_id = ?"
+                        " ORDER BY CASE c.status WHEN 'active' THEN 0 ELSE 1 END, c.id",
+                        (user_id,),
+                    ).fetchall()
+                    kind_label = {"physical": "实体卡", "virtual": "虚拟卡"}
+                    for row in rows:
+                        tail = str(row["tail"])
+                        add(
+                            f"尾号 {tail}（{kind_label.get(str(row['kind']), str(row['kind']))}）",
+                            f"尾号{tail}",
+                        )
+                elif slot == "product_code":
+                    rows = conn.execute(
+                        "SELECT p.name, p.code FROM fund_holdings h"
+                        " JOIN fund_products p ON p.code = h.product_code WHERE h.user_id = ?",
+                        (user_id,),
+                    ).fetchall()
+                    if not rows:
+                        rows = conn.execute(
+                            "SELECT name, code FROM fund_products ORDER BY risk_level, code LIMIT 6"
+                        ).fetchall()
+                    for row in rows:
+                        add(str(row["name"]), str(row["name"]))
+                elif slot == "subscription_name":
+                    rows = conn.execute(
+                        "SELECT merchant FROM subs WHERE account_id = ? AND status = 'active'"
+                        " ORDER BY merchant LIMIT 8",
+                        (account_id,),
+                    ).fetchall()
+                    for row in rows:
+                        add(str(row["merchant"]), f"停掉 {row['merchant']} 的订阅")
+                elif slot in ("due_ms", "date_hint"):
+                    for label, value in (
+                        ("明天 09:00", "明天 09:00"),
+                        ("下周一 09:00", "下周一 09:00"),
+                        ("下个月 1 号 09:00", "下个月 1 号 09:00"),
+                    ):
+                        add(label, value)
+    except Exception:  # noqa: BLE001 - 选项只是锦上添花，查不到就退回纯文字反问
+        log.warning("api.chat.choices_failed", exc_info=True)
+    return choices[:8]
+
+
 async def _parse(session_id: str, text: str) -> intent.IntentResult:
     """解析意图并写审计；模型不可用时把 LLMError 原样抛给处理器。"""
     try:
@@ -961,9 +1127,20 @@ async def _events(
             parsed.ok = False
     await queue.put(("start", {"session_id": session_id, "now_ms": clock.now_ms()}))
     await queue.put(("intent", parsed.to_event() | {"session_id": session_id}))
-    if parsed.question:
+    if parsed.intent == "assist":
+        await _emit_assist(session_id, parsed, queue, user_text=user_text)
+    elif parsed.question:
         _remember(session_id, "assistant", parsed.question)
-        await queue.put(("done", {"summary": parsed.question, "question": parsed.question}))
+        await queue.put(
+            (
+                "done",
+                {
+                    "summary": parsed.question,
+                    "question": parsed.question,
+                    "choices": await asyncio.to_thread(_choices_for, parsed),
+                },
+            )
+        )
         await queue.put((_SENTINEL, {}))
     else:
         _start_run(session_id, parsed, queue, user_text=user_text, supersede=supersede)

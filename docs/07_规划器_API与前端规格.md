@@ -322,6 +322,7 @@ for node in topo_sort(dag):
 | GET | `/api/tools` | — | 工具清单 | 左栏「我能做什么」 |
 | GET | `/api/health` | — | `{ok, model, db}` | 存活探针 |
 | POST | `/api/scheduled/run` | — | `{ok, executed, items}` | 立刻执行一次到点的定时转账（**答辩演示用**，后台节拍每 30 秒也会跑） |
+| POST | `/api/reminders` | `ReminderCreate`（`text` 1–40、`due_ms`、`repeat` none/daily/weekly/monthly、`hour` 默认 9、`minute` 默认 0、`day`、`weekday`） | `{ok, plan, due_ms, due_text, repeat, repeat_label}` | 计划页表单建一条提醒（只提醒、不动钱）；日历复发由 `app/reminder_time.py` 算，计划步到点后回 pending |
 | POST | `/api/demo/reset` | — | `{ok}` | 重置演示数据 |
 | GET | `/` | — | `index.html` | 静态页 |
 
@@ -348,10 +349,12 @@ for node in topo_sort(dag):
 | `confirm` | `confirmation_id, action_text, expires_in_s` | 需要确认 |
 | `factor` | `confirmation_id, required[]` | 需要多因子 |
 | `tool` | `node_id, ok, summary` | 工具执行完 |
-| `done` | `summary, balance_after_fen` | 全部完成 |
+| `done` | `summary, balance_after_fen`；识别即执行（`intent=assist`）额外带 `intent, action, choices[], data`；澄清轮带 `choices[]` | 全部完成（assist 快路不建 DAG，直接 done） |
 | `error` | `code, user_text` | 任何失败 |
 
 格式严格按 SSE：`event: {name}\ndata: {json}\n\n`。
+
+**`choices` 的语义**（2026-10-25）：`done` 事件里的 `choices` 是服务端按缺失槽位从库里生成的**可点选项**（`amount_fen` / `payee_name` / `payee_names` / `card_tail` / `product_code` / `subscription_name` / `due_ms` / `date_hint`，最多 8 条）。前端把它渲染成 chips，点一下等于替用户把那句话发出去——用户不必手打；服务端照旧重新解析与裁决，选项本身不带任何权限。
 
 **操作说明（SSE 是长连接）**：`confirm` / `factor` 事件到达时这条流**不会结束**——执行器正等着用户点头。必须保持连接、**在流还开着的时候** `POST /api/confirm` 回灌确认（黄灯）或回灌因子（红灯）；整轮跑完之后会话才从 `executor.RUNS` 摘除，此后回灌会拿到 400「会话已结束或不存在」。命令行客户端要另开一个请求去 POST 确认；前端不受影响。
 
@@ -379,6 +382,8 @@ for node in topo_sort(dag):
 | 配色：绿 `#16a34a`、黄 `#d97706`、红 `#dc2626` | 三色必须先声夺人 |
 | 每个事件到达后 100ms 内更新对应面板 | 「实时」是创新分 |
 | 确认按钮必须显式写清金额和收款人 | 防误触 |
+| 缺槽位的澄清必须给可点 chips（≤8 条），点一下直接发送 | 答辩现场不必手打长句，也避免打错被反问 |
+| 总览「待处理授权」可原地批准/拒绝（仅当 `can_confirm_here` 且未过期），不可原地时说明原因 | 服务端仍会按当下重新裁决，按钮不是后门 |
 | 审计面板每来一条加一行，显示 `seq` 与短哈希前 8 位 | 可验证感 |
 
 ### 前端函数约定
@@ -388,7 +393,9 @@ for node in topo_sort(dag):
 | `sendMessage()` | 发起 /api/chat，开流，分发事件 |
 | `handleEvent(name, data)` | 按 7.6 表更新 DOM |
 | `renderIntent(data)` / `renderPlan(data)` / `renderPolicy(data)` / `renderFactor(data)` / `renderAudit(row)` | 各面板渲染 |
-| `confirmAction(id, approve, factor)` | POST /api/confirm |
+| `confirmAction(id, approve, factor, proofs, sid)` | POST /api/confirm；`sid` 是发起该轮确认的会话（总览页的待确认卡属于别的会话，必须带它自己的 `session_id`） |
+| `bxRenderReminders(block)` / `bxBindReminderForm()` / `bxSubmitReminder()` | 计划页的提醒列表与表单：表单只调 `POST /api/reminders`；列表读 `GET /api/business/plans` 的 `reminders` 段，「结束这条提醒」= `PATCH /api/plans/{id} {status:'cancelled'}` |
+| `bxDueParts(value)` | `datetime-local` → 本地时区 `{ms,hour,minute,weekday,day}`，`weekday` 与 `reminder_time` 的 0=周一 对齐 |
 | `escapeHtml(s)` | **所有来自后端的文本都要过一遍**，防 XSS |
 
 ## 7.8 前端禁止事项

@@ -776,7 +776,32 @@
 
       <div class="card"><div class="card-head"><h3>跨场景计划（落库，可跨天推进）</h3><span class="spacer"></span><span class="tag" id="plan-persist-tag">—</span></div><div id="plan-persist"></div><div class="card-note" id="plan-persist-note"></div></div>
 
-      <div class="card"><div class="card-head"><h3>提醒</h3><span class="spacer"></span><span class="tag" id="plan-alert-tag">—</span></div><div id="plan-alerts"></div></div>
+      <div class="card"><div class="card-head"><h3>提醒</h3><span class="spacer"></span><span class="tag" id="plan-alert-tag">—</span></div>
+        <form id="plan-reminder-form" class="pf-form" autocomplete="off">
+          <label class="pf-field"><span class="field-label">提醒我</span>
+            <input id="plan-reminder-text" class="pf-in" type="text" maxlength="40" placeholder="例如：明天上午 9 点开会" />
+          </label>
+          <div class="pf-row">
+            <label class="pf-field"><span class="field-label">时间</span>
+              <input id="plan-reminder-due" class="pf-in" type="datetime-local" />
+            </label>
+            <label class="pf-field"><span class="field-label">重复</span>
+              <select id="plan-reminder-repeat" class="pf-in">
+                <option value="none">一次性</option>
+                <option value="daily">每天</option>
+                <option value="weekly">每周</option>
+                <option value="monthly">每月</option>
+              </select>
+            </label>
+          </div>
+          <div class="pf-row">
+            <button id="plan-reminder-submit" class="btn btn-green" type="submit">建这条提醒</button>
+          </div>
+          <div class="card-note">时间按本机时区解释；重复提醒到点只提醒、不动钱。建好以后在下面的列表里可以点「结束」。不填时间按明天 09:00 算。</div>
+        </form>
+        <div id="plan-reminders"></div>
+        <div id="plan-alerts"></div>
+      </div>
 
       <details class="panel lv-unknown" id="panel-proactive">
         <summary class="panel-head"><h2>主动财务演练（模拟数据）</h2><span class="spacer"></span>
@@ -1662,6 +1687,26 @@
     panelBadge('panel-policy', clar ? '等待补充信息' : policyLevelLabel() + ' · 已完成');
     if (clar) { setPanelLevel('panel-policy', 'yellow'); }
     if (clar && clar.kind === 'payee') { bxRenderPayeePicker(clar); }
+    /* 反问必须给可点的选项：后端已经把金额/收款人/卡/产品这些槽位从库里查出来了，
+       再让用户照着抄一遍，等于把结构化数据又变回自然语言。 */
+    const choices = Array.isArray(data.choices) ? data.choices : [];
+    const usable = choices.filter(function (item) {
+      return item && typeof item === 'object' && (item.value || item.label);
+    }).slice(0, 8);
+    if (usable.length) {
+      appendNode(el('div', 'card-note', '点一个直接发送（不用自己打字）：'));
+      const chips = el('div', 'cap-chips');
+      usable.forEach(function (item) {
+        const label = textOf(item.label || item.value);
+        const value = textOf(item.value || item.label);
+        const chip = el('button', 'cap-chip action', label);
+        chip.type = 'button';
+        chip.title = '点击发送：' + value;
+        chip.addEventListener('click', function () { bxAsk(value); });
+        chips.appendChild(chip);
+      });
+      appendNode(chips);
+    }
   }
 
   function renderError(data) {
@@ -1743,7 +1788,7 @@
     }
   }
 
-  async function confirmAction(confirmationId, approve, factor, proofs) {
+  async function confirmAction(confirmationId, approve, factor, proofs, sid) {
     if (!confirmationId) {
       appendBubble('sys', '这条确认没有确认号，无法提交。');
       return;
@@ -1753,7 +1798,7 @@
       return;
     }
     const body = {
-      session_id: sessionId,
+      session_id: sid || sessionId,
       confirmation_id: confirmationId,
       approve: approve === true,
       factor: factor ? String(factor) : null
@@ -3227,18 +3272,58 @@
         const list = el('div', 'list');
         pendingItems.forEach(function (item) {
           const expired = textOf(item.state_label).indexOf('过期') !== -1 || item.expired === true;
-          const row = bxRow(
+          const cid = textOf(item.confirmation_id);
+          const ownerSid = textOf(item.session_id);
+          const level = textOf(item.level);
+          const factors = bxArr(item.required_factors);
+          const canHere = item.can_confirm_here === true && !expired;
+          const facts = [textOf(item.state_label)];
+          if (level) { facts.push(levelText(level)); }
+          if (factors.length) {
+            facts.push('需要验证：' + factors.map(function (key) {
+              return BX_FACTOR_TEXT[textOf(key)] || textOf(key);
+            }).join('/'));
+          }
+          if (item.stale) { facts.push('会话已失效'); }
+          list.appendChild(bxRow(
             (textOf(item.payee_name) || '操作') + ' · ' + (textOf(item.amount_yuan) || BX_NA) + ' 元',
-            textOf(item.created_text) + ' 发起 · ' + textOf(item.state_label),
-            item.stale ? '会话已失效' : ''
-          );
-          list.appendChild(row);
+            textOf(item.created_text) + ' 发起 · ' + facts.join(' · '),
+            ''
+          ));
           const bar = el('div', 'anomaly-actions');
-          const btn = el('button', 'btn btn-mini', expired ? '已过期，需要重新发起' : '去确认');
-          btn.type = 'button';
-          btn.disabled = expired;
-          btn.addEventListener('click', function () { bxAsk('我有一个待确认的操作，继续处理'); });
-          bar.appendChild(btn);
+          if (canHere && cid) {
+            /* 只有后端明确说「这一步在页面就能批」才放批准按钮。
+               需要人脸/短信验证、或者上一轮已经结束的，放上去就是点了会失败的假入口。 */
+            const ok = el('button', 'btn btn-mini btn-green', '批准执行');
+            ok.type = 'button';
+            ok.title = '批准这一次授权；批准后仍由服务端重新裁决再执行，全程留痕。';
+            ok.addEventListener('click', function () {
+              ok.disabled = true;
+              Promise.resolve(confirmAction(cid, true, null, null, ownerSid)).then(function () {
+                bxRefresh();
+              }, function () { ok.disabled = false; });
+            });
+            const no = el('button', 'btn btn-mini btn-red', '拒绝');
+            no.type = 'button';
+            no.addEventListener('click', function () {
+              no.disabled = true;
+              Promise.resolve(confirmAction(cid, false, null, null, ownerSid)).then(function () {
+                bxRefresh();
+              }, function () { no.disabled = false; });
+            });
+            bar.appendChild(ok);
+            bar.appendChild(no);
+          } else {
+            const btn = el('button', 'btn btn-mini',
+              expired ? '已过期，需要重新发起' : (factors.length ? '去完成验证' : '去确认'));
+            btn.type = 'button';
+            btn.disabled = expired;
+            btn.addEventListener('click', function () { bxAsk('我有一个待确认的操作，继续处理'); });
+            bar.appendChild(btn);
+            bar.appendChild(el('span', 'card-note', expired
+              ? '这条已经过期，批准入口失效，需要重新发起一笔。'
+              : (factors.length ? '这一步要过人脸/短信验证，不能在首页直接批准。' : '这一轮已经结束，批准不了。')));
+          }
           list.appendChild(bar);
         });
         pendingHost.appendChild(list);
@@ -3681,6 +3766,108 @@
     bxRenderUpcoming($('plan-upcoming'), data.upcoming_charges);
     bxRenderPersistedPlans(data.plans);
     bxRenderMonitorRuns(data.monitor_runs);
+    bxBindReminderForm();
+    bxRenderReminders(data.reminders);
+  }
+
+  const BX_REPEAT_TEXT = { none: '一次性', daily: '每天', weekly: '每周', monthly: '每月' };
+
+  /* datetime-local 的值是「本地时间字符串」，new Date() 解析它用的是浏览器本地时区，
+     和后端 reminder_time 按本地日历算是同一套，不会出现差 8 小时的提醒。 */
+  function bxDueParts(value) {
+    if (!value) { return null; }
+    const at = new Date(value);
+    if (isNaN(at.getTime())) { return null; }
+    return { ms: at.getTime(), hour: at.getHours(), minute: at.getMinutes(), weekday: (at.getDay() + 6) % 7, day: at.getDate() };
+  }
+
+  function bxBindReminderForm() {
+    const form = $('plan-reminder-form');
+    if (!form || form.dataset.bound === '1') { return; }
+    form.dataset.bound = '1';
+    form.addEventListener('submit', function (event) {
+      event.preventDefault();
+      bxSubmitReminder();
+    });
+  }
+
+  function bxSubmitReminder() {
+    const text = textOf($('plan-reminder-text').value).trim();
+    const btn = $('plan-reminder-submit');
+    if (!btn) { return; }
+    if (!text) {
+      appendBubble('system', '先写一句「提醒我什么」，例如「提醒我明天上午 9 点开会」。');
+      $('plan-reminder-text').focus();
+      return;
+    }
+    const repeat = textOf($('plan-reminder-repeat').value) || 'none';
+    const due = bxDueParts($('plan-reminder-due').value);
+    const body = { text: text, repeat: repeat };
+    if (due) {
+      body.hour = due.hour;
+      body.minute = due.minute;
+      body.weekday = due.weekday;
+      body.day = due.day;
+      /* 一次性提醒直接给绝对时间；重复提醒只给「几点/周几/几号」，让后端从当前时间算下一次，
+         否则用户选了一个已经过去的日期，就会立刻触发出一次莫名其妙的提醒。 */
+      if (repeat === 'none') { body.due_ms = due.ms; }
+    }
+    btn.disabled = true;
+    bxSend('/api/reminders', 'POST', body).then(function (res) {
+      const data = bxIsObj(res) ? res : {};
+      appendBubble('system', '提醒已建：' + textOf(data.repeat_label) + ' · 下次 ' + textOf(data.due_text) +
+        '（不动钱，到点只提醒你回来确认）。', 'plan');
+      $('plan-reminder-text').value = '';
+      $('plan-reminder-due').value = '';
+      btn.disabled = false;
+      bxRefresh();
+    }).catch(function (err) {
+      btn.disabled = false;
+      appendBubble('system', '建提醒失败：' + errorText(err));
+    });
+  }
+
+  function bxRenderReminders(block) {
+    const host = $('plan-reminders');
+    if (!host) { return; }
+    host.replaceChildren();
+    const data = bxIsObj(block) ? block : {};
+    const items = bxArr(data.items);
+    if (items.length) { host.appendChild(el('div', 'card-note', '共 ' + items.length + ' 条提醒，到点只提醒、不动钱。')); }
+    if (!items.length) {
+      bxEmpty(host, '还没有提醒', textOf(data.empty_reason) || '在上面填一句、选个时间就能建；也可以直接跟助手说「提醒我…」。');
+      return;
+    }
+    const list = el('div', 'list');
+    items.forEach(function (item) {
+      const box = el('div', 'anomaly');
+      const head = el('div', 'anomaly-head');
+      head.appendChild(el('span', 'anomaly-title', textOf(item.title)));
+      head.appendChild(el('span', 'tag info', textOf(item.repeat_label) || BX_REPEAT_TEXT[textOf(item.repeat)] || '一次性'));
+      box.appendChild(head);
+      box.appendChild(el('div', 'card-note',
+        '下次 ' + (textOf(item.due_text) || BX_NA) + ' · ' + (textOf(item.state_label) || textOf(item.state)) +
+        ' · 计划号 ' + textOf(item.plan_id)));
+      const acts = el('div', 'anomaly-actions');
+      const end = el('button', 'btn btn-mini', '结束这条提醒');
+      end.type = 'button';
+      end.addEventListener('click', function () {
+        end.disabled = true;
+        bxSend('/api/plans/' + encodeURIComponent(textOf(item.plan_id)), 'PATCH', { status: 'cancelled' })
+          .then(function () {
+            appendBubble('system', '提醒已结束：' + textOf(item.title));
+            bxRefresh();
+          })
+          .catch(function (err) {
+            end.disabled = false;
+            appendBubble('system', '结束失败：' + errorText(err));
+          });
+      });
+      acts.appendChild(end);
+      box.appendChild(acts);
+      list.appendChild(box);
+    });
+    host.appendChild(list);
   }
 
   function bxToggleMonitor(goalId, enabled, btn) {
