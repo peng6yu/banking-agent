@@ -98,7 +98,7 @@ make run     # 启动日志会打印一条带 #token= 的地址，打开那一�
 | 26 | **同一会话只允许一轮未完成资金写**（`app/planner/conflict.py` + `run.conflict` 事件） | 后一轮会静默覆盖前一轮的 `RUNS`，用户以为还在等确认的那笔其实已经被顶掉 | `tests/test_run_conflict.py` 8 条（第二笔被拒并告诉你是哪一轮挡路、只读请求不拦、重启后仍能检测、列出全部未完成轮、取消上一轮后解锁、过期卡不会静默解锁、已完成轮不算冲突且不重复扣款、恢复已完成轮不重跑资金节点） |
 | 27 | **真实渠道闸门 + 模拟数据自报家门** | 关掉演示回显后没有真实短信/人脸渠道时会静默发不出码；理财的期限/流动性/费率三家都没数据 | `FACTOR_PROVIDER` 未声明真实渠道时 `issue()` 抛 `SystemBusy`（不落挑战、不写 `factor.challenge_issued`，HTTP 503）；理财每项 `duration_days/liquidity/fee = null` + `data_source: contest_simulation` + `comparison.supported: false`；`tests/test_real_channels.py` 6 条 |
 | 28 | **浏览器高风险旅程**（`scripts/ui_journeys.py`，真浏览器 + 真模型） | 六区截图只证明页面能打开，不证明任务能走完 | `docs/交付/browser_journeys.json`：7/7 pass——小额转账确认、高额双因子出账、AA 同名候选被阻止、生日计划建立+刷新恢复、储蓄提醒处理后落库、J6 点候选、J7 点拒绝；`demo_db_unchanged: true`（测试库与演示库隔离） |
-| 29 | **单一事实源 `docs/benchmark/release_manifest.json`** | README / 进度文件 / 验收报告 / PPT 各写一套数字，改一处忘一处 | `scripts/release_manifest.py` 直接从代码与运行结果取数（当时为历史基线：tools 35、tables 27、events 49、API 30；本轮整改后为 tools 35、tables 31、events 62、API 41）；文档与 PPT 一律引用它 |
+| 29 | **单一事实源 `docs/benchmark/release_manifest.json`** | README / 进度文件 / 验收报告 / PPT 各写一套数字，改一处忘一处 | `scripts/release_manifest.py` 直接从代码与运行结果取数（当时为历史基线：tools 35、tables 27、events 49、API 30；本轮整改后为 tools 35、tables 31、events 63、API 41）；文档与 PPT 一律引用它 |
 | 30 | **多进程抢同一批预约转账的压测** | 租约以前只有单进程测试：两个 uvicorn worker 同时到点会不会各扣一次，没有证据 | `tests/lease_worker.py` + `tests/test_multiprocess_lease.py` 3 条：4 进程抢 1 行只出一次账、2 进程各跑一轮 ticker 也只出一次、3 进程抢 5 行正好 5 笔 |
 | 31 | **点击级旅程 J6/J7** | 之前 5 条旅程是流程级：直接调接口，没证明「页面上真点一下」也会同步改服务端 | J6 点候选列表里尾号 6620 那一位，断言确认卡与服务端 pending 卡片的 payee.card_tail 都是 6620、金额 500、余额未动；J7 点拒绝，断言 confirm.rejected、无 transfer.initiated、转账节点不是 done、余额不变；整套 7 条全 pass |
 | 32 | **回答澄清时正式结束提问那一轮**（`supersede_answered_clarifications` + `run.superseded` 事件） | J6 首跑就撞上：点了候选、后端也把原句拼回来了，却被自己的冲突闸门拦成 SESSION_RUN_CONFLICT——提问中的那一轮把下一句当成「第二轮资金写」 | 只在**没有待签确认卡**的轮次上生效（等签字不等于等澄清，不能替用户取消），把 busy 节点标 skipped、run 标 cancelled、写 run.superseded；`tests/test_run_conflict.py` 9 条 |
@@ -117,7 +117,7 @@ make run     # 启动日志会打印一条带 #token= 的地址，打开那一�
 | 4 | **生日计划一次性预约授权**（P1） | 新增 `plan_authorizations`：绑定 `plan_version` + 账户 + 项目 + 金额，创建计划时用户显式勾选才保存；到点执行前重判，仅**仍合法的黄色**可用预授权自动执行，升级为红色或参数变化必须暂停并要求强验证/用户确认；取消计划即撤销授权，后台不再启动付款 | `tests/test_birthday_authorization.py`、`tests/test_birthday_api_authorization.py`（4 条：预留改变 available 不改 balance、授权行绑定计划版本、到期窗口前后、红日不自动扣） |
 | 5 | **沙箱条款的合规说明**（P1） | 审查完整调用链后确认主 Agent **不执行任意模型生成代码**（无 `eval`/`exec`，模型输出只进结构化参数）；`scripts/prove_no_exec_surface.py` 实测 75 文件 / 25,383 行、代码执行面 0 命中、出网 3 处（仅 `app/llm.py`）、动态 SQL 13 处逐条人工复核、离线 `subprocess` 9 处全部在测试/脚本侧；这是「消除执行面」的替代设计，**不是已部署的容器沙箱**，未宣称已实现沙箱 | `docs/security_sandbox.md`（149 行，含逐跳调用链 file:line 与剩余风险）、`tests/test_no_exec_surface.py`（14 条） |
 | 6 | **A/B 配对统计与浏览器回归**（P1） | 8 轮完整真实 80 例（mock=false）做配对统计：逐轮 intent B−A 为 −1.25 / +2.50 / 0 / +2.50 / +5.00（MiniMax）与 +5.00 / −2.50 / +8.75（DeepSeek），**符号翻转**；同配置 A 组复跑极差 6.25pp / 11.25pp；仅一轮的 +8.75pp 配对 bootstrap CI[+2.50,+16.25] 不含 0，但属单轮单次采样；**稳定成立的是知识引用（B 41–42/51 vs A=0），不宣称知识层稳定提升准确率** | `docs/benchmark/ab_paired_stats.md`、`scripts/ab_stats.py`；浏览器 7 条旅程由当前 `scripts/ui_journeys.py` 实际执行、失败 0（j3 单独用真模型后端，J4/J5 为 API 驱动流程级），见 `docs/交付/browser_journeys.json` 与 `docs/benchmark/browser_journey_audit.md` |
-| 7 | **交付材料统一** | 重新生成 `docs/benchmark/release_manifest.json`（从代码与运行日志取数），README / 验收报告 / 优先级 / 提交物对照表 / PPT 大纲 / 演示方案 / PROGRESS 全部引用同一份事实；旧数字一律标「历史基线」不删除 | 本轮最终验证：**pytest 1468 passed / 4 skipped**、红队 **43/43**、e2e **13/13**、浏览器旅程 **7/7**（全部 exit 0） |
+| 7 | **交付材料统一** | 重新生成 `docs/benchmark/release_manifest.json`（从代码与运行日志取数），README / 验收报告 / 优先级 / 提交物对照表 / PPT 大纲 / 演示方案 / PROGRESS 全部引用同一份事实；旧数字一律标「历史基线」不删除 | 本轮最终验证：**pytest 1476 passed / 4 skipped**、红队 **43/43**、e2e **13/13**、浏览器旅程 **7/7**（全部 exit 0） |
 
 本轮规模（实测）：测试文件 **88**（`tests/test_*.py`；`tests/` 下 `.py` 文件共 93 个，含 5 个夹具/辅助文件）、数据库表 **30**、工具 **35**（只读 13 / 写 22）、审计事件 **61**、权限规则 **13**、API 路径 **39**。
 
@@ -331,7 +331,7 @@ curl -s http://127.0.0.1:8000/api/audit/verify
 ### 单元与集成测试（实测全绿，用例数持续增补）
 
 ```bash
-python3.12 -m pytest -q tests/            # 1468 passed, 4 skipped（2026-10-25 功能体检轮复跑；历史基线为 1336 passed / 4 skipped）
+python3.12 -m pytest -q tests/            # 1476 passed, 4 skipped（2026-10-25 功能体检轮复跑；历史基线为 1336 passed / 4 skipped）
 ```
 
 > **数字口径**：本 README 里的工具数、表数、审计事件数、测试通过数与 A/B 轮次，
@@ -405,9 +405,9 @@ python3.12 -m app.smoke                    # 实测 4/4 PASS，主脑延迟约 1
 | `app/policy/` | 裁决引擎与 13 条规则 R01–R13（纯函数，无网络无模型；R13 为可选的绝对日上限，默认不启用） |
 | `app/security/` | 入口访问令牌、能力令牌、签名信封、注入扫描、熔断器 |
 | `app/tools/` | 35 个工具：查人、查余额、账单、卡片、订阅、转账、资金冻结 + 7 个主动财务（只读/需确认，无动钱语义） |
-| `app/api/` | 会话/确认/审计等 41 条 API 路径（38 条 `/api/*` + 根路径 `/`），含人工接管队列 `handoffs_api.py`；另有只读业务视图 `business.py`（overview / bill / management / plans / executions 五个 GET，六个区域的唯一数据来源） |
+| `app/api/` | 会话/确认/审计等 42 条 API 路径（38 条 `/api/*` + 根路径 `/`），含人工接管队列 `handoffs_api.py`；另有只读业务视图 `business.py`（overview / bill / management / plans / executions 五个 GET，六个区域的唯一数据来源） |
 | `web/index.html` | 单文件前端（原生 JS，无框架、无 CDN、零外链） |
-| `tests/` | pytest 用例集（**1468 passed / 4 skipped**，2026-10-25 功能体检轮复跑；历史基线 1336）+ 43 条红队 YAML + `tests/eval/` 80 例 A/B 评估集（10-24 共 8 轮真实结果已入库，统计见 `docs/benchmark/ab_paired_stats.md`） |
+| `tests/` | pytest 用例集（**1476 passed / 4 skipped**，2026-10-25 功能体检轮复跑；历史基线 1336）+ 43 条红队 YAML + `tests/eval/` 80 例 A/B 评估集（10-24 共 8 轮真实结果已入库，统计见 `docs/benchmark/ab_paired_stats.md`） |
 | `scripts/` | 种子脚本、前端合规检查器、真实 Chromium 冒烟(`browser_smoke.py`)、六区+主线截图(`ui_screenshots.py`) |
 | `docs/` | 交接规格书 00—10（改造前基线，写代码前必读）+ 11—15 改造设计与验收 + 答辩与演示交付件 |
 | `规划/` | 前期选型与模型实测记录 |
@@ -421,7 +421,7 @@ python3.12 -m app.smoke                    # 实测 4/4 PASS，主脑延迟约 1
 | `make setup` | 一键配置新电脑（.venv + 依赖 + .env + 选模型 + 建库 + 自检） | ✅ 幂等；`ARGS="--dry-run"` 可预演 |
 | `make run` | 启动服务（--reload） | ✅ |
 | `make seed` | 建库 + 种子（幂等） | ✅ |
-| `make test` | pytest 全跑 | ✅ 全绿（1468 passed / 4 skipped，2026-10-25 功能体检轮实测；历史基线 1336） |
+| `make test` | pytest 全跑 | ✅ 全绿（1476 passed / 4 skipped，2026-10-25 功能体检轮实测；历史基线 1336） |
 | `make smoke` | 模型连通性自检 | ✅ 4/4 |
 | `make cov` | 覆盖率（未装 pytest-cov 时自动退回纯跑） | ✅ |
 | `make reset` | `POST /api/demo/reset` 演示前清场 | ✅ |
@@ -491,7 +491,7 @@ docs/03_数据库与种子数据.md       ← 31 张表 DDL（改造前 27 + 本
 docs/04_核心模块实现规格.md       ← 逐函数分支表
 docs/05_安全层实现规格.md         ← 12 条规则 R01–R12 + 令牌七步 ★最重要（历史规格；现 13 条，见 rules.py）
 docs/06_工具层与场景实现规格.md   ← 历史规格 19 工具；当前 35 个，以 /api/tools 为准
-docs/07_规划器_API与前端规格.md   ← 历史规格 10 端点；当前 41 个 API 路径
+docs/07_规划器_API与前端规格.md   ← 历史规格 10 端点；当前 42 个 API 路径
 docs/08_编码规范.md               ← 硬性编码要求
 docs/09_工作区与Git规范.md        ← 分支/提交/推送
 docs/10_测试与验收清单.md         ← 43 条红队 + 里程碑验收

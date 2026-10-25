@@ -69,7 +69,7 @@ docs/交付/截图/信息架构/browser_report.json 由 scripts/ui_screenshots.p
 
 - journeys.report 指向 docs/交付/browser_journeys.json，status=pass，items 是 j1/j2/j4/j5/j6/j7/j3 全 pass，demo_db_unchanged=true —— 与归档 JSON（20:38 那轮 7/7）逐字段一致。
 - 生成脚本 scripts/release_manifest.py:207-215 是读 journey JSON 现算的，不是手填；limits 里的「浏览器旅程」行已从硬编码的「5 条流程级」改为「7 条（j1/j2/j4/j5/j6/j7 + j3）」，并注明 J1/J2/J6/J7 点击级、J4/J5 API 驱动流程级，与归档一致。
-- 17:35 那版清单的陈旧计数（tables 27 / events 49 / pytest 1336 / 旅程 5 条）已随本轮提交收口；现在的清单与代码事实一致（tools 35 / tables 31 / events 62 / rules 13 / paths 41 / pytest 1468 / 旅程 7）。
+- 17:35 那版清单的陈旧计数（tables 27 / events 49 / pytest 1336 / 旅程 5 条）已随本轮提交收口；现在的清单与代码事实一致（tools 35 / tables 31 / events 63 / rules 13 / paths 42 / pytest 1476 / 旅程 7）。
 
 ## 5. j3 服务端核验的具体证据与边界
 
@@ -86,7 +86,7 @@ docs/交付/截图/信息架构/browser_report.json 由 scripts/ui_screenshots.p
 | docs/提交物对照表.md:293 | 「scripts/ui_journeys.py（真模型 + playwright）」 | 六条走 MOCK_MODE=script，只有 j3 真模型 | **已改**（本轮）：j3 真模型，其余六条确定性桩 + 真浏览器；J1/J2/J6/J7 点击级，J4/J5 API 驱动流程级 |
 | docs/交付/比赛演示方案.md:279 | 「在真模型 + 真浏览器下跑出」 | 同上 | **已改**（本轮）：改为「Playwright 真浏览器 7/7；j3 单独 MOCK_MODE=false，其余 MOCK_MODE=script」 |
 | docs/benchmark/final_acceptance_report.md:24 | 「7 条旅程…用 DeepSeek 复跑 PASS」 | 六条不经过模型；DeepSeek 只影响 j3 | 缩窄到 j3，或注明桩模式 |
-| scripts/release_manifest.py / release_manifest.json | 「5 条流程级」（17:35 版） | 实际 7 条，同一 JSON items 也是 7 条 | **已修**：脚本改 7 条并注明点击级/流程级；清单于 20:57 重生成（tables 31 / events 62 / pytest 1468 / 旅程 7） |
+| scripts/release_manifest.py / release_manifest.json | 「5 条流程级」（17:35 版） | 实际 7 条，同一 JSON items 也是 7 条 | **已修**：脚本改 7 条并注明点击级/流程级；清单于 20:57 重生成（tables 31 / events 63 / pytest 1476 / 旅程 7） |
 | docs/交付/比赛演示方案.md:360 | 「27 张截图（12 视图 + 7 主线 + 8 旅程）」 | 实际 29 张：12 信息架构 + 7 主线 + 10 旅程 | **已改**（本轮，29 张） |
 
 本轮同时修正的邻近说法：docs/提交物对照表.md 原 :302「7 条里只有 J6/J7 是点击级」已过时——j1/j2 是聊天输入 + 点按钮，j3 是聊天输入 + 服务端断言，j4/j5 才是纯 API 驱动；现统一为「J1/J2/J6/J7 点击级，J3 聊天输入 + 服务端状态硬断言，J4/J5 API 驱动流程级」。
@@ -101,7 +101,7 @@ docs/交付/截图/信息架构/browser_report.json 由 scripts/ui_screenshots.p
 
 没有新增旅程、没有给低风险按钮加 E2E、没有重建 j3：已有的七条就是能跑的那七条，缺的从来不是旅程数量，而是文档口径与脚本事实对齐。
 
-同一轮还更新了四份交付文档的数字与口径（不改代码）：docs/提交物对照表.md（1468 条测试、工具 35/规则 13/表 30/审计 61、R07 分级线语义、旅程口径）、docs/答辩PPT大纲.md（1415、R07、人工接管、沙箱说明、A/B 限制）、docs/交付/比赛演示方案.md（1415、29 张截图、31 张表、R07 演示话术、r3 数据）、本文件（20:38 归档证据与已修边界）。
+同一轮还更新了四份交付文档的数字与口径（不改代码）：docs/提交物对照表.md（1476 条测试、工具 35/规则 13/表 30/审计 61、R07 分级线语义、旅程口径）、docs/答辩PPT大纲.md（1415、R07、人工接管、沙箱说明、A/B 限制）、docs/交付/比赛演示方案.md（1415、29 张截图、31 张表、R07 演示话术、r3 数据）、本文件（20:38 归档证据与已修边界）。
 
 ## 8. 未重跑声明与重跑条件
 

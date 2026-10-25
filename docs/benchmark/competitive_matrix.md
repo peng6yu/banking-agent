@@ -174,13 +174,13 @@
 ### 2.4 本项目（基线，供对照）
 
 - 【官方确认】定位：银行敢让它真动钱的 Agent；三段论为「不可信区（模型只产申请）→ 裁决区（纯函数策略引擎出绿/黄/红 + 能力令牌）→ 执行区（只认令牌）」（`README.md`）。
-- 【官方确认】工具 35 个（`app/tools/registry.py`、`app/tools/tool_specs.py:1`）、策略规则 13 条 R01–R13（`app/policy/rules.py`，求值顺序以 `RULES` 为准）、意图模板 9 个（`app/planner/dag.py`）、数据库 31 张表、审计事件 62 类（`app/audit.py:24`，append-only + 禁 UPDATE/DELETE 触发器）。
+- 【官方确认】工具 35 个（`app/tools/registry.py`、`app/tools/tool_specs.py:1`）、策略规则 13 条 R01–R13（`app/policy/rules.py`，求值顺序以 `RULES` 为准）、意图模板 9 个（`app/planner/dag.py`）、数据库 31 张表、审计事件 63 类（`app/audit.py:24`，append-only + 禁 UPDATE/DELETE 触发器）。
 - 【官方确认】三色阈值：单笔与日累计同为 1000 元，SINGLE_LIMIT_FEN = DAILY_RISK_THRESHOLD_FEN = 100_000（`app/policy/rules.py:19-24`，`DAILY_LIMIT_FEN` 仅为历史别名）。语义是**分级线而非拒绝线**：当日累计会越过 1000 元 → R07 红 + face/sms，验证通过后真实出账；硬拒绝只来自显式配置的 `ABSOLUTE_DAILY_CAP_FEN`（R13，默认 `None`）。
 - 【官方确认】能力令牌：HMAC-SHA256，DEFAULT_TTL_MS = 120_000，七步校验（结构→签名→过期→nonce 防重放→工具→参数哈希→账户/金额），第 4 步即消耗 nonce，后续失败令牌直接作废（`app/security/token.py`）。
 - 【官方确认】意图解析不是纯模板：LLM 通过单次工具调用产出结构化意图，前置换一根确定性拒答（验证码、密钥、系统提示词、改登录密码、加收款人、删审计日志等直接拒绝），模型两次不给结果时退到术语表兜底并标记 source=fallback（`app/planner/intent.py:261-345`、`app/llm.py` 的多厂商降级）。
 - 【官方确认】规划：意图 + 槽位 → 9 个模板生成 DAG → 4 道结构校验（ID 重复、依赖悬空、工具在册、无环）→ 拓扑序执行，支持中断/接管/回退（`app/planner/`）。
 - 【官方确认】主动财务：储蓄目标、监测规则、提醒、运行日志（`app/proactive.py`，4 张表 + 7 个工具 + 7 个端点），**手动触发**，不声称 7×24。
-- 【官方确认】测试台账（2026-10-25 终测）：单测 **1468 passed / 4 skipped**（历史基线：2026-10-24 早先 1336、2026-10-23 快照 1131），红队 43 条 PASS 43 / FAIL 0，e2e 13 步 PASS 13，浏览器旅程 7 条失败 0（7 条旅程截图 10 张：j2/j4/j5 各 2 张），前端检查 66/66。
+- 【官方确认】测试台账（2026-10-25 终测）：单测 **1476 passed / 4 skipped**（历史基线：2026-10-24 早先 1336、2026-10-23 快照 1131），红队 43 条 PASS 43 / FAIL 0，e2e 13 步 PASS 13，浏览器旅程 7 条失败 0（7 条旅程截图 10 张：j2/j4/j5 各 2 张），前端检查 66/66。
 - 【官方确认】已知限制：单用户、无 RBAC、无真实认证服务对接、仅 Web 单渠道（`README.md`）。场景 6 现在**已有**持久计划 + 到点触发 + 一次性授权（`plans`/`plan_steps`/`plan_budgets`/`plan_authorizations`，`app/planner/ticker.py` 驱动）；仍不宣称的是真实银行侧冻结、跨进程分布式调度与坐席平台。
 
 ## 3. 三个清单
@@ -267,7 +267,7 @@
 - `app/planner/intent.py:261-345` — 意图解析、拒答前置、兜底
 - `app/llm.py` — 多厂商降级适配器
 - `app/planner/dag.py:39` — 9 个意图模板
-- `app/audit.py:24` — 62 类审计事件
+- `app/audit.py:24` — 63 类审计事件
 - `app/proactive.py` — 主动财务（手动触发）
 - `docs/benchmark/revolut_air_research.md` — 既有的 Revolut 证据台账（A1–A17 / B1–B15）
 

@@ -99,6 +99,8 @@ EVENT_TYPES: Final[frozenset[str]] = frozenset(
         # 疑似订阅的用户定性：只有用户自己说「是我订的 / 不是我订的」才落这条，
         # 推断永远不自动转正，也不自动消失。
         "subscription.verdict",
+        # 撤回定性：用户点错了或者商户改了收费方式，可以把结论撤掉让它重新待办
+        "subscription.verdict_cleared",
         # 跨场景计划：计划与步骤的生命周期
         "plan.created",
         "plan.updated",

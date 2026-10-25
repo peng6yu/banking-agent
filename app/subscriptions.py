@@ -172,8 +172,9 @@ def detect_recurring(
 ) -> dict[str, Any]:
     """按商户分组找周期性支出，返回候选清单（永不改库）。
 
-    user_id 只用来过滤用户已经明确定性为「不是我订的」的商户：那条推断
-    已被本人否决，再端上来只是噪声。
+    user_id 只用来过滤用户已经给出结论的商户：不论他说「不是我订的」还是
+    「确实是我订的」，这条推断都已经不再待办——退订误报和确认订阅都算处理
+    完了，继续挂在这里只会让列表永远清不掉。
     """
     as_of = int(as_of if as_of is not None else time.time() * 1000)
     since = _month_start(as_of, lookback_months)
@@ -185,18 +186,18 @@ def detect_recurring(
             continue
         groups.setdefault(str(row["counterparty"]), []).append(row)
 
-    dismissed = (
+    settled = (
         {
             merchant
             for merchant, item in verdicts(conn, str(user_id)).items()
-            if item.get("verdict") == VERDICT_NOT_SUBSCRIPTION
+            if item.get("verdict") in VERDICT_ACTIONS
         }
         if user_id
         else set()
     )
     candidates: list[dict[str, Any]] = []
     for merchant in sorted(groups):
-        if merchant in dismissed:
+        if merchant in settled:
             continue
         rows = groups[merchant]
         if len(rows) < MIN_OCCURRENCES:
@@ -321,6 +322,29 @@ def record_verdict(
     }
 
 
+def clear_verdict(conn, *, user_id: str, merchant: str) -> dict[str, Any]:
+    """撤掉之前的定性，让这条重新回到「疑似订阅」待办（同时写审计）。
+
+    定性是用户自己下的，就必须能自己收回：点错了、或者商户后来改成了年费，
+    都不该被一条旧结论永久钉住。
+    """
+    name = str(merchant or "").strip()
+    if not name:
+        raise ValidationError("要指明是哪家商户", merchant=merchant)
+    with db.tx(conn):
+        cur = conn.execute(
+            "DELETE FROM subscription_verdicts WHERE user_id = ? AND merchant = ?",
+            (str(user_id), name),
+        )
+        removed = int(cur.rowcount or 0)
+        audit.append(
+            conn,
+            "subscription.verdict_cleared",
+            {"user_id": str(user_id), "merchant": name, "removed": removed},
+        )
+    return {"merchant": name, "cleared": bool(removed)}
+
+
 __all__ = [
     "CONFIDENCE_LABELS",
     "INFERRED_NOTE",
@@ -332,6 +356,7 @@ __all__ = [
     "VERDICT_CONFIRMED",
     "VERDICT_LABELS",
     "VERDICT_NOT_SUBSCRIPTION",
+    "clear_verdict",
     "detect_recurring",
     "record_verdict",
     "upcoming",

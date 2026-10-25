@@ -456,3 +456,45 @@
 - 管理页工具按钮的话术仍不带对象（如「冻结」「挂失」用通用话术，靠卡片上下文补全），未逐张改写成「冻结尾号 4417 这张卡」。
 - `tests/test_imports.py::_exists` 的路径拼接缺陷仍未修（`APP_DIR` 已是 `repo/app`，函数又拼 `app/<mod>`，子模块依赖恒判 False）；本轮只登记不修。
 - 真实短信/人脸仍是桩；提醒未接系统通知；本轮未 push 远程。
+
+## v2.4.0 订阅定性口径修正  2026-10-25
+
+**起因**：用户在业务管理页点了「确实是我订的」，卡片上出现了 tag「你的结论：确实是我订的」，但它仍然挂在「疑似订阅」待办里没消失（用户原话：「点击是我定的这个待办不会消失啊」）。
+
+**根因**：`subscriptions.detect_recurring` 只过滤了 `verdict == not_subscription`（当初把 confirmed 当成「保留着给用户看一眼」），产品口径应是「两种定性都算处理完」——误报是处理完，确认也是处理完，留着只会让待办永远清不掉。
+
+### 一、后端
+- [x] `app/subscriptions.py`：`detect_recurring` 的过滤改成 `if item.get("verdict") in VERDICT_ACTIONS`（局部变量 `dismissed` → `settled`），两种结论都让商户退出推断列表；docstring 同步口径。
+- [x] `app/subscriptions.py` 新增 `clear_verdict(conn, *, user_id, merchant)`：撤回定性（`DELETE FROM subscription_verdicts`），空商户抛 `ValidationError`，返回 `{merchant, cleared}`，落 `subscription.verdict_cleared` 审计；`__all__` 补该项。
+- [x] `app/audit.py`：`EVENT_TYPES` 增 `subscription.verdict_cleared`（闭集 62 → **63** 类）。
+- [x] `app/api/schemas.py`：新增 `SubscriptionVerdictClearRequest`（`merchant` 1–60，`extra=forbid`）。
+- [x] `app/api/routes.py`：新增 `POST /api/subscriptions/verdict/clear` → `{ok, merchant, cleared}`（API 路径 41 → **42**）。
+- [x] `app/api/business.py`：`management_view` 的 `inferred` 增 `confirmed_count` / `settled_count` / `settled[]`（每条带「重新当成疑似」动作 `subscription_verdict_clear`），保留 `dismissed_count`。
+
+### 二、前端（web/index.html）
+- [x] `bxRenderInferred` 重写：先 `replaceChildren()`；待办为空时也渲染「疑似订阅（从流水推断，0 个）」+「没有待处理的疑似订阅：N 条你已经定过性」，不再整块消失让人以为坏了。
+- [x] 删掉永不命中的「你的结论」tag 分支（定性后已不在 items 里），改在末尾新增「已定性的商户（N 条）」块：每行 `merchant` + `verdict_label` + 时间 + 「重新当成疑似」按钮。
+- [x] `bxSubscriptionVerdict` 成功气泡按 `verdict` 分文案：confirmed 明说「已经从待办拿掉了，不替你退订、也不变成代扣」，并指路撤回入口。
+- [x] 新增 `bxSubscriptionVerdictClear(merchant)`（`POST /api/subscriptions/verdict/clear` → 按 `cleared` 出气泡 → `bxCacheDrop()` + `bxRefresh()`），`bxRunAction` 开头加 `subscription_verdict_clear` 分支。
+
+### 三、测试
+- [x] 新增 `tests/test_subscriptions_verdict.py`（8 条）：两种定性各自从 `detect_recurring` 消失、全部定性后待办为空而 `verdicts` 仍在、撤回后重新出现且二次 `cleared:false`、`management_view` 的 `settled`/`confirmed_count`/`actions` 形状、非法入参抛 `ValidationError`、两条审计事件顺序 + `audit.verify_chain`、HTTP 往返（verdict → count-1 → clear → 复原）。
+- [x] 踩坑记录：`tests/tool_fixtures.bank` 只 `db.connect(tmp_path/...)`、**不 monkeypatch `db.DEFAULT_DB_PATH`**，所以走 HTTP 的用例默认读写真实 `data/bank.db`；测试里用 `PRAGMA database_list` 取到路径再 monkeypatch 才隔离干净（`tests/tool_fixtures.USER_ID` 是 `u_test`）。
+
+### 四、验收（全部 exit 0）
+- [x] pytest 全量：**1476 passed / 4 skipped，48.76s**（`tmp/pytest_r7.log`；v2.3.0 的 1468 基线 + 本轮 8 条新用例）。
+- [x] `ls tests/test_*.py | wc -l` = **92**；`scripts/check_frontend.py` **66/66**；抽 `<script>` 后 `node --check` 通过。
+- [x] 真浏览器（8112 真模型 + `data/api_token`）逐条点过：管理页 3 条疑似订阅 → 点百度网盘「确实是我订的」→ 头部变 2 个、离队进「已定性的商户（1 条）」→ 点「重新当成疑似」复原 3 条 → 三条全部定性 → 「疑似订阅（从流水推断，0 个）」+「没有待处理的疑似订阅：3 条你已经定过性」+ 三条撤回按钮（截图 `tmp/shot_subs_settled.png`）。验证完 `make reseed` 恢复种子态。
+- [x] 规模对账：API 路径 **42**、审计事件 **63** 类、表 **31**、`tests/test_*.py` **92**。
+
+### 五、文档与单一事实源
+- [x] 批量改数：1468→**1476**、61.53s→**48.76s**、API 41→**42**、审计事件 62→**63**、测试文件 91→**92**（README、docs/{00,02,03,07,10,13,15,技术文档,安全自评报告,答辩PPT大纲,提交物对照表}、docs/交付/{比赛演示方案,交付说明,build_ppt.py}、docs/benchmark/*、docs/audit/feature_matrix.md）；v2.2.0/v2.3.0 章节里的历史数字保持原样不改写。
+- [x] `docs/03` `subscription_verdicts` 行、`docs/10` 必测点按新口径重写（两种结论都退出待办、`settled` 可撤回、两条审计）。
+- [x] `docs/07` §7.5 补 `POST /api/subscriptions/verdict` 与 `/clear`，§7.7 补 `bxSubscriptionVerdict` / `bxSubscriptionVerdictClear` 与 `settled` 段；`docs/02` 测试登记表追 `tests/test_subscriptions_verdict.py`(8)。
+- [x] `release_manifest.json` 重生成；`build_ppt.py` 的 chips 数字随批量脚本更新后重建 PPT。
+
+### 遗留（照实说）
+- 预约转账的「补验证」按钮仍只在后端字段与接口层，计划页那一行只有「让助手撤销这笔预约」。
+- 管理页工具按钮话术仍不带对象（「冻结」「挂失」靠卡片上下文补全）。
+- `tests/test_imports.py::_exists` 路径拼接缺陷未修（子模块依赖恒判 False）。
+- 真实短信/人脸仍是桩；提醒未接系统通知；本轮未 push 远程。

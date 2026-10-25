@@ -977,6 +977,23 @@ def management_view(conn: sqlite3.Connection) -> dict[str, Any]:
         for value in verdict_map.values()
         if value.get("verdict") == subscriptions.VERDICT_NOT_SUBSCRIPTION
     )
+    inferred["confirmed_count"] = sum(
+        1
+        for value in verdict_map.values()
+        if value.get("verdict") == subscriptions.VERDICT_CONFIRMED
+    )
+    inferred["settled_count"] = len(verdict_map)
+    # 定性过的条目虽然不再算待办，但必须能被收回：点错了、商户改了收费方式，
+    # 都该有「重新当成疑似」的一步，否则一条旧结论会永久生效。
+    inferred["settled"] = [
+        {**value, "actions": [{
+            "kind": "subscription_verdict_clear",
+            "merchant": value["merchant"],
+            "label": "重新当成疑似",
+            "style": "ghost",
+        }]}
+        for value in verdict_map.values()
+    ]
     upcoming = subscriptions.upcoming(conn, account_id)
     scheduled = _scheduled_tasks(conn, user_id, limit=5)
     holdings_summary = {

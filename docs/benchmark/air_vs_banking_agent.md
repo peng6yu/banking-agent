@@ -2,7 +2,7 @@
 
 > **用途**：2026 深圳国际金融科技大赛「人工智能赛道 · 银行 AI 智能体」阶段 0.3 / 0.4 交付物。把 Revolut AIR 的公开能力逐维度拆成可执行的改造项，回答三件事：差在哪、值不值得补、补完怎么验收。
 > **对标对象**：Revolut AIR（AI by Revolut），证据全部复用 `docs/benchmark/revolut_air_research.md` 的台账编号（A1–A17 / B1–B15 / F1–F7）与四档证据状态，**不新增来源、不升级证据等级**。
-> **本项目证据口径**：代码路径 + 测试。基线数字来自 `docs/改造实施基线.md`（改造前基线：**904 passed / 4 skipped**）；本文写作时（2026-10-23）一度处于并行改造中间态（916/935 passed），**已收口**。最终交付状态：**1468 passed / 4 skipped**（`.venv/bin/python -m pytest -q`，61.53s，2026-10-25 终态复跑；历史基线 **1336 passed / 4 skipped**，19.94s）、前端静态检查 **66/66**、红队 **PASS 43 / FAIL 0**、集成联调 **13/13**（`scripts.e2e --offline`）、浏览器旅程 **7 条 / 失败 0**、A/B 评估 **80 例**（详见 `docs/benchmark/final_acceptance_report.md`）。中间态数字只作过程记录，不作交付依据。
+> **本项目证据口径**：代码路径 + 测试。基线数字来自 `docs/改造实施基线.md`（改造前基线：**904 passed / 4 skipped**）；本文写作时（2026-10-23）一度处于并行改造中间态（916/935 passed），**已收口**。最终交付状态：**1476 passed / 4 skipped**（`.venv/bin/python -m pytest -q`，48.76s，2026-10-25 终态复跑；历史基线 **1336 passed / 4 skipped**，19.94s）、前端静态检查 **66/66**、红队 **PASS 43 / FAIL 0**、集成联调 **13/13**（`scripts.e2e --offline`）、浏览器旅程 **7 条 / 失败 0**、A/B 评估 **80 例**（详见 `docs/benchmark/final_acceptance_report.md`）。中间态数字只作过程记录，不作交付依据。
 > **硬约束**：本矩阵不改代码；所有"本项目"结论都能回指真实文件；拿不准的一律写「待核实」，不用常识补齐。
 
 ---
@@ -61,7 +61,7 @@
 | D10 安全确认 | G10 | 官方证实（分级表未核实） | 已实现（R01–R13 + 令牌七步 + 用户维度日累计分级） | P0（已有） | 8–12（P2 部分） |
 | D11 隐私与数据最小化 | G11 | 官方证实（三条承诺） | 已实现（信封 + 审计不落原文） | P1 | 1–2 |
 | D12 可解释与来源引用 | G12 | 部分官方证实；"为什么"未核实 | 部分（审计已落知识 ids；explain 仍硬编码） | P0 | 3–5 |
-| D13 评估与可观测性 | G13 | B1（原页未打开） | 已补强（1468 测试 + 80 例评估集 + 43 红队 + 哈希链；仍无延迟/token/成本指标与人工抽样） | P0 | 3–5 |
+| D13 评估与可观测性 | G13 | B1（原页未打开） | 已补强（1476 测试 + 80 例评估集 + 43 红队 + 哈希链；仍无延迟/token/成本指标与人工抽样） | P0 | 3–5 |
 | D14 领域知识与术语 | G14 | B1 + A6 | 已完成（5 个 YAML 齐、kb_bridge 已接 intent/dag/审计；version 2c4fbe8d4be2906c） | P0 | 8–12 |
 | D15 中断/回退/人工接管 | G15 | 仅"转人工"官方证实 | 部分→收窄版已实现（取消/超时/冲正 + 本地人工接管队列 + 断点恢复；无 RBAC/坐席对接） | P0（已有）/P2（仅剩坐席对接） | 5–8 |
 
@@ -257,7 +257,7 @@
 |---|---|
 | ① AIR 公开能力 | 官方未公开评测方法；B1 称有多 Agent 平台、guardrails、evals、monitoring、标注与 QA/QC 流程、集中式 AI 网关 |
 | ② AIR 依据与证据状态 | B1（**可信公开技术资料证实，原页未打开**）；具体指标/阈值/数据集规模**尚未核实** |
-| ③ 本项目真实实现状态 | **已补强**：`tests/eval/` 80 例中文评估集 + 可复现脚本 + A/B 报告（真模型，6 项指标：intent/slot/clarify/dag/knowledge_citation/unauthorized）；全量 **1468 passed / 4 skipped**（2026-10-25 终态复跑，61.53s；历史基线 1336）、91 个测试文件（`tests/test_*.py`）、43 条红队 **PASS 43 / FAIL 0**、前端 66 项、哈希链审计可验证。**仍无**延迟/token/成本指标与人工质量抽样 |
+| ③ 本项目真实实现状态 | **已补强**：`tests/eval/` 80 例中文评估集 + 可复现脚本 + A/B 报告（真模型，6 项指标：intent/slot/clarify/dag/knowledge_citation/unauthorized）；全量 **1476 passed / 4 skipped**（2026-10-25 终态复跑，48.76s；历史基线 1336）、92 个测试文件（`tests/test_*.py`）、43 条红队 **PASS 43 / FAIL 0**、前端 66 项、哈希链审计可验证。**仍无**延迟/token/成本指标与人工质量抽样 |
 | ④ 代码位置与测试证据 | `tests/`、`tests/eval/{intent_cases.yaml,run_eval.py,evaluation_report.md,test_eval_harness.py}`、`scripts/redteam.py`、`scripts/check_frontend.py`、`app/api/routes.py /api/audit/verify` |
 | ⑤ 能力缺口 | **G13 收窄**：80 例评估集 + 8 轮 A/B 已入库；仍无延迟/token/成本指标、人工质量抽样与 CI 阈值；每轮单次采样不能谈显著性 |
 | ⑥ 可借鉴设计 | E7：小步引入 evals + 标注集，不建平台；指标只做三项（意图准确率、工具成功率、P95 延迟） |
@@ -272,7 +272,7 @@
 |---|---|
 | ① AIR 公开能力 | 直连内部知识库与产品生态，能回答产品/条款类问题；未见术语表或法规知识库的公开细节 |
 | ② AIR 依据与证据状态 | B1（**可信公开技术资料证实，原页未打开**）；A6（AI 透明度）——**官方资料明确证实**；知识库结构**尚未核实** |
-| ③ 本项目真实实现状态 | **已完成**：`app/knowledge/` 6 个模块 + 5 个 YAML（terms 40 / entities 25 / relations 22 / intents 11 / workflows 10 / sources 34），`app/planner/kb_bridge.py` 接入 intent + dag + routes，`knowledge.retrieved` 审计落库；知识集成测试 7 条失败已收口，全量 1468 passed（历史基线 1336）；加载失败降级为「空知识 + warning + 追问」并有专门测试 |
+| ③ 本项目真实实现状态 | **已完成**：`app/knowledge/` 6 个模块 + 5 个 YAML（terms 40 / entities 25 / relations 22 / intents 11 / workflows 10 / sources 34），`app/planner/kb_bridge.py` 接入 intent + dag + routes，`knowledge.retrieved` 审计落库；知识集成测试 7 条失败已收口，全量 1476 passed（历史基线 1336）；加载失败降级为「空知识 + warning + 追问」并有专门测试 |
 | ④ 代码位置与测试证据 | `app/knowledge/loader.py`、`retrieve.py`（docstring 明确"不引入向量检索"）、`app/planner/kb_bridge.py`、`app/api/routes.py:_audit_knowledge`；测试 `tests/test_knowledge_{loader,normalize,retrieve,integration}.py`、`tests/test_security_knowledge.py`；43 条红队已复跑 PASS 43 / FAIL 0 |
 | ⑤ 能力缺口 | **G14 已关闭**（原缺口：缺 4 个数据文件、缺接线、缺审计与降级策略）；残余：知识仅参与「问不问/填什么/怎么解释」，不进模型上下文（受 SYSTEM_PROMPT 逐字测试约束），语义泛化仍靠别名表 |
 | ⑥ 可借鉴设计 | E5 知识库+产品生态直连；知识是**数据不是指令**（基线原则），冲突时降级并审计；检索用结构化/关键词即可，**不上向量库** |
@@ -287,7 +287,7 @@
 |---|---|
 | ① AIR 公开能力 | 有转人工/live agent 的表述（法律声明中出现）；任务取消、步骤回退、人工接管的产品化细节未公开 |
 | ② AIR 依据与证据状态 | A6——"转人工"**官方资料明确证实**（仅限声明语境）；取消/回退/接管机制**尚未核实** |
-| ③ 本项目真实实现状态 | 部分→**收窄版已实现（2026-10-24）**：`/api/cancel` 取消进行中请求；确认超时（`tests/test_confirm_timeout.py`）；两阶段资金 hold 超时释放；`reverse_transfer` 冲正 + 审计；熔断降级；执行器失败降级（`executor`）。**本轮补齐**：本地人工接管队列（`handoffs` 表（30 表之一，含活跃单部分唯一索引）+ `app/handoffs.py` + `app/api/handoffs_api.py`，状态闭集 `pending/claimed/need_info/rejected/cancelled/resumed/failed`，8 个受保护端点）；`runner._settle` 收款人歧义（`PAYEE_AMBIGUOUS/PAYEE_NOT_FOUND`）时自动建 `pending` 单；领取用条件 `UPDATE ... WHERE id=? AND status='pending'`（并发只有一个赢家，另一个 `HANDOFF_ALREADY_CLAIMED`）；`resume` 前重查新轮次/确认卡有效期/计划一次性授权/账户/余额，再走 `executor._drive` 断点续跑（不重跑 `done/failed/skipped` 节点）；失败置 `failed` + 审计 `handoff.resume_failed`，绝不把 run 标成功。**已覆盖**：用户回答澄清时旧单自动关闭（`executor` → `conflict.supersede_answered_clarifications` → `handoffs.close_for_run`，审计 `handoff.cancelled`/`closed_by=run.superseded`）；**仍无**：多操作员 RBAC/工单分派/通知/Web 操作台、与真实坐席系统对接、用户既不作答也不取消时的超时/巡检关单 |
+| ③ 本项目真实实现状态 | 部分→**收窄版已实现（2026-10-24）**：`/api/cancel` 取消进行中请求；确认超时（`tests/test_confirm_timeout.py`）；两阶段资金 hold 超时释放；`reverse_transfer` 冲正 + 审计；熔断降级；执行器失败降级（`executor`）。**本轮补齐**：本地人工接管队列（`handoffs` 表（31 表之一，含活跃单部分唯一索引）+ `app/handoffs.py` + `app/api/handoffs_api.py`，状态闭集 `pending/claimed/need_info/rejected/cancelled/resumed/failed`，8 个受保护端点）；`runner._settle` 收款人歧义（`PAYEE_AMBIGUOUS/PAYEE_NOT_FOUND`）时自动建 `pending` 单；领取用条件 `UPDATE ... WHERE id=? AND status='pending'`（并发只有一个赢家，另一个 `HANDOFF_ALREADY_CLAIMED`）；`resume` 前重查新轮次/确认卡有效期/计划一次性授权/账户/余额，再走 `executor._drive` 断点续跑（不重跑 `done/failed/skipped` 节点）；失败置 `failed` + 审计 `handoff.resume_failed`，绝不把 run 标成功。**已覆盖**：用户回答澄清时旧单自动关闭（`executor` → `conflict.supersede_answered_clarifications` → `handoffs.close_for_run`，审计 `handoff.cancelled`/`closed_by=run.superseded`）；**仍无**：多操作员 RBAC/工单分派/通知/Web 操作台、与真实坐席系统对接、用户既不作答也不取消时的超时/巡检关单 |
 | ④ 代码位置与测试证据 | `app/api/routes.py`（cancel 端点）、`app/tools/funds.py`、`app/tools/reverse.py`、`app/policy/breaker.py`、`app/planner/recover.py`；人工接管：`app/handoffs.py`（1017 行）、`app/api/handoffs_api.py`（124 行）、`app/planner/runner.py`（建单入口）；测试 `test_reverse.py`、`test_confirm_timeout.py`、`test_breaker.py`、`test_funds.py`、`tests/test_handoff.py`（13 条，2026-10-25 实测 `13 passed`，2.37s） |
 | ⑤ 能力缺口 | **G15 收窄版已落实**：本地队列 + 断点恢复可用；剩余缺口是"接坐席系统/工单号 + 多操作员 RBAC + 分派/通知/操作台"，以及用户既不作答也不取消时的超时/巡检关单（用户补答自动关单已实现，见 ③） |
 | ⑥ 可借鉴设计 | 赛题 3.3 明确要求"中断/回退/人工接管"；最小实现=转人工卡片（生成 ticket_id + 原因 + 上下文快照）+ DAG 断点表 |

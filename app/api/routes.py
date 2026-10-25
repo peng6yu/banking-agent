@@ -47,6 +47,7 @@ from app.api.schemas import (
     ScheduledVerifyRequest,
     SavingsGoalUpdate,
     SimulatedExpenseRequest,
+    SubscriptionVerdictClearRequest,
     SubscriptionVerdictRequest,
     SuitabilityAssessRequest,
 )
@@ -714,7 +715,8 @@ async def subscription_verdict(request: SubscriptionVerdictRequest) -> dict[str,
     """给一条疑似订阅定性（不是我订的 / 确实是我订的）。
 
     只改 subscription_verdicts 一行并写审计：不动钱、不建计划、也不替用户
-    去商户退订。定性为「不是我订的」之后，这条推断不会再出现在管理页。
+    去商户退订。两种结论都会让这条推断从管理页的「疑似订阅」待办里消失——
+    「不是我订的」是误报，「确实是我订的」是确认，都不该继续挂着当待办。
     """
     with _conn() as conn:
         user_id = proactive.default_user_id(conn)
@@ -726,6 +728,19 @@ async def subscription_verdict(request: SubscriptionVerdictRequest) -> dict[str,
             note=request.note,
         )
     return {"ok": True, "verdict": verdict}
+
+
+@router.post("/api/subscriptions/verdict/clear")
+async def subscription_verdict_clear(request: SubscriptionVerdictClearRequest) -> dict[str, Any]:
+    """撤掉某条疑似订阅的定性，让它重新变回待办。
+
+    同样是只改一行 + 写审计：如果流水仍然满足周期性条件，这条会立刻回到管理
+    页的「疑似订阅」里；已经不满足的就自然不再出现。
+    """
+    with _conn() as conn:
+        user_id = proactive.default_user_id(conn)
+        result = subscriptions.clear_verdict(conn, user_id=user_id, merchant=request.merchant)
+    return {"ok": True, **result}
 
 
 @router.patch("/api/savings/goals/{goal_id}")

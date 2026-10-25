@@ -255,11 +255,23 @@ class ScheduledVerifyRequest(BaseModel):
     proofs: list[FactorProof] | None = None
 
 
+class SubscriptionVerdictClearRequest(BaseModel):
+    """POST /api/subscriptions/verdict/clear 的入参：撤掉之前的定性。
+
+    撤掉之后这条商户重新按流水推断，若仍满足周期性条件就回到「疑似订阅」待办。
+    """
+
+    model_config = ConfigDict(extra="forbid", title="撤回疑似订阅定性")
+
+    merchant: str = Field(min_length=1, max_length=60)
+
+
 class SubscriptionVerdictRequest(BaseModel):
     """POST /api/subscriptions/verdict 的入参：用户对一条疑似订阅定性。
 
-    只有两种结论：不是我订的（以后不再当候选端上来）/ 确实是我订的（留痕，
-    但也不会自动变成银行侧代扣）。推断永远不自动改写这个结论。
+    两种结论都算「处理完了」：不是我订的（误报）/ 确实是我订的（确认）。两种
+    都会让这条从待办里消失——继续挂着只会让列表永远清不掉。确认不等于银行侧
+    代扣，推断永远不自动改写这个结论；点错了可以调 clear 撤掉重来。
     """
 
     model_config = ConfigDict(extra="forbid", title="疑似订阅定性")
@@ -288,6 +300,7 @@ __all__ = [
     "SavingsGoalCreate",
     "SavingsGoalUpdate",
     "SimulatedExpenseRequest",
+    "SubscriptionVerdictClearRequest",
     "SubscriptionVerdictRequest",
     "SuitabilityAssessRequest",
 ]

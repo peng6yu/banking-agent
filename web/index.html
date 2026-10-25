@@ -3550,8 +3550,25 @@
     if (!name) { return Promise.resolve(); }
     return bxSend('/api/subscriptions/verdict', 'POST', { merchant: name, verdict: verdict })
       .then(function (res) {
-        const label = textOf((bxIsObj(res) && bxIsObj(res.verdict)) ? res.verdict.verdict_label : '');
-        appendBubble('sys', '已记下：' + name + ' —— ' + (label || verdict) + '。这条不会再来打扰你（想反悔可以在管理页重新核实）。', 'money');
+        const label = textOf((bxIsObj(res) && bxIsObj(res.verdict)) ? res.verdict.verdict_label : '') || verdict;
+        const tail = verdict === 'confirmed'
+          ? '它已经从「疑似订阅」待办里拿掉了。这条只是留个定性，不会替你去商户退订，也不会变成银行侧代扣。'
+          : '它已经从「疑似订阅」待办里拿掉了，以后不再拿这条来问你。';
+        appendBubble('sys', '已记下：' + name + ' —— ' + label + '。' + tail + '点错了可以在管理页「已定性的商户」里点「重新当成疑似」。', 'money');
+        bxCacheDrop();
+        return bxRefresh();
+      });
+  }
+
+  function bxSubscriptionVerdictClear(merchant) {
+    const name = textOf(merchant);
+    if (!name) { return Promise.resolve(); }
+    return bxSend('/api/subscriptions/verdict/clear', 'POST', { merchant: name })
+      .then(function (res) {
+        const back = bxIsObj(res) && res.cleared === true;
+        appendBubble('sys', back
+          ? '已撤回对「' + name + '」的定性。它重新回到「疑似订阅」待办里，你也可以再说一句「不是订阅」。'
+          : '「' + name + '」本来就没有定性记录，现在仍是它原本的样子。', 'money');
         bxCacheDrop();
         return bxRefresh();
       });
@@ -3563,6 +3580,12 @@
     if (kind === 'subscription_verdict') {
       bxSubscriptionVerdict(act.merchant, textOf(act.verdict)).catch(function (err) {
         appendBubble('sys', '这条结论没能记下来：' + errorText(err), 'error');
+      });
+      return;
+    }
+    if (kind === 'subscription_verdict_clear') {
+      bxSubscriptionVerdictClear(act.merchant).catch(function (err) {
+        appendBubble('sys', '这条结论没能撤回：' + errorText(err), 'error');
       });
       return;
     }
@@ -4993,13 +5016,16 @@
     if (!host) { return; }
     const data = bxIsObj(payload) ? payload : {};
     const items = bxArr(data.items);
-    if (!items.length) {
-      bxEmpty(host, '没有推断出周期性扣款',
-        textOf(data.note) || '近 6 个月没有商户满足「至少 3 次、间隔稳定、金额稳定」的条件。');
-      return;
-    }
+    const settled = bxArr(data.settled).filter(function (row) { return bxIsObj(row); });
     host.replaceChildren();
-    host.appendChild(el('div', 'card-sub', '疑似订阅（从流水推断，' + bxCount(data.count, ' 个') + '）'));
+    if (!items.length) {
+      host.appendChild(el('div', 'card-sub', '疑似订阅（从流水推断，' + bxCount(0, ' 个') + '）'));
+      host.appendChild(el('div', 'card-note', settled.length
+        ? '没有待处理的疑似订阅：' + bxCount(settled.length, ' 条') + '你已经定过性，列在下面，随时可以收回来。'
+        : (textOf(data.note) || '近 6 个月没有商户满足「至少 3 次、间隔稳定、金额稳定」的条件。')));
+    } else {
+      host.appendChild(el('div', 'card-sub', '疑似订阅（从流水推断，' + bxCount(data.count, ' 个') + '）'));
+    }
     items.forEach(function (item) {
       const box = el('div', 'anomaly');
       const head = el('div', 'anomaly-head');
@@ -5014,11 +5040,8 @@
       if (item.uncertainty) { box.appendChild(el('div', 'card-note', '不确定性：' + textOf(item.uncertainty))); }
       const txIds = bxArr(item.evidence).map(function (row) { return textOf(row.transaction_id); }).filter(Boolean);
       if (txIds.length) { box.appendChild(el('div', 'card-note', '依据流水：' + txIds.join('、'))); }
-      /* 推断本身只读，但用户必须能把它关掉：说一句「不是我订的」，
-         这条以后就不再出现在这里；说「是我订的」则留个痕。 */
-      if (bxIsObj(item.verdict) && textOf(item.verdict.verdict_label)) {
-        head.appendChild(el('span', 'tag info', '你的结论：' + textOf(item.verdict.verdict_label)));
-      }
+      /* 推断本身只读，但用户必须能把它关掉：两种定性都会让这条离开待办，
+         定性过的会落到下面的「已定性的商户」里，随时可以收回来。 */
       const acts = bxArr(item.actions).filter(function (act) { return bxIsObj(act); });
       if (acts.length) {
         const bar = el('div', 'anomaly-actions');
@@ -5033,8 +5056,29 @@
       }
       host.appendChild(box);
     });
-    if (Number(data.dismissed_count) > 0) {
-      host.appendChild(el('div', 'card-note', '另有 ' + bxCount(data.dismissed_count, ' 条') + '你已判定「不是我订的」，不再列出。'));
+    if (settled.length) {
+      host.appendChild(el('div', 'card-sub', '已定性的商户（' + bxCount(settled.length, ' 条') + '）'));
+      host.appendChild(el('div', 'card-note', '这些已经不在待办里。点「重新当成疑似」会把结论撤掉，让流水重新推断。'));
+      settled.forEach(function (row) {
+        const line = el('div', 'anomaly');
+        const head = el('div', 'anomaly-head');
+        head.appendChild(el('span', 'anomaly-title', textOf(row.merchant)));
+        head.appendChild(el('span', 'tag info', textOf(row.verdict_label)));
+        if (textOf(row.updated_text)) { head.appendChild(el('span', 'tag', textOf(row.updated_text))); }
+        line.appendChild(head);
+        const acts = bxArr(row.actions).filter(function (act) { return bxIsObj(act); });
+        if (acts.length) {
+          const bar = el('div', 'anomaly-actions');
+          acts.forEach(function (act) {
+            const btn = el('button', 'btn btn-mini', textOf(act.label) || '撤回');
+            btn.type = 'button';
+            btn.addEventListener('click', function () { bxRunAction(act); });
+            bar.appendChild(btn);
+          });
+          line.appendChild(bar);
+        }
+        host.appendChild(line);
+      });
     }
     host.appendChild(el('div', 'card-note', textOf(data.note) + ' ' + textOf(data.boundary)));
   }

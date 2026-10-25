@@ -323,6 +323,8 @@ for node in topo_sort(dag):
 | GET | `/api/health` | — | `{ok, model, db}` | 存活探针 |
 | POST | `/api/scheduled/run` | — | `{ok, executed, items}` | 立刻执行一次到点的定时转账（**答辩演示用**，后台节拍每 30 秒也会跑） |
 | POST | `/api/reminders` | `ReminderCreate`（`text` 1–40、`due_ms`、`repeat` none/daily/weekly/monthly、`hour` 默认 9、`minute` 默认 0、`day`、`weekday`） | `{ok, plan, due_ms, due_text, repeat, repeat_label}` | 计划页表单建一条提醒（只提醒、不动钱）；日历复发由 `app/reminder_time.py` 算，计划步到点后回 pending |
+| POST | `/api/subscriptions/verdict` | `SubscriptionVerdictRequest`（`merchant` 1–60、`verdict` not_subscription / confirmed、`note` 0–200） | `{ok, verdict}` | 用户给「疑似订阅」定性；**两种结论都让该商户退出待办**（只提醒、不动钱、不建计划、不替用户退订） |
+| POST | `/api/subscriptions/verdict/clear` | `SubscriptionVerdictClearRequest`（`merchant` 1–60） | `{ok, merchant, cleared}` | 撤回定性，让流水的推断重新生效（`cleared:false` 表示本来就没定性过） |
 | POST | `/api/demo/reset` | — | `{ok}` | 重置演示数据 |
 | GET | `/` | — | `index.html` | 静态页 |
 
@@ -400,6 +402,8 @@ for node in topo_sort(dag):
 | `confirmAction(id, approve, factor, proofs, sid)` | POST /api/confirm；`sid` 是发起该轮确认的会话（总览页的待确认卡属于别的会话，必须带它自己的 `session_id`） |
 | `bxRenderReminders(block)` / `bxBindReminderForm()` / `bxSubmitReminder()` | 计划页的提醒列表与表单：表单只调 `POST /api/reminders`；列表读 `GET /api/business/plans` 的 `reminders` 段，「结束这条提醒」= `PATCH /api/plans/{id} {status:'cancelled'}` |
 | `bxDueParts(value)` | `datetime-local` → 本地时区 `{ms,hour,minute,weekday,day}`，`weekday` 与 `reminder_time` 的 0=周一 对齐 |
+| `bxSubscriptionVerdict(merchant, verdict)` / `bxSubscriptionVerdictClear(merchant)` | 疑似订阅定性：`POST /api/subscriptions/verdict` 与 `/clear`；气泡按结论分文案（confirmed 明说「已从待办拿掉」并给撤回入口），成功后 `bxCacheDrop()` + `bxRefresh()` |
+| `bxRenderInferred(block)` 的 `settled` 段 | 已定性的商户不再进 `items`（服务端 `detect_recurring` 就过滤掉了），改由 `data.settled` 列出，每行带「重新当成疑似」按钮（`bxRunAction` kind `subscription_verdict_clear`） |
 | `bxInlineFactor(box, cid, sid, onDone)` | 就地补验证：拉 `POST /api/factor/challenge` 渲染口令行 → 带 `proofs` 调 `confirmAction(cid, true, null, proofs, sid)`；用于总览待处理授权 |
 | `bxRenderHandoffs(host, block, tagId)` / `bxHandoffCard(item)` / `bxHandoffPost(item, action, note)` | 人工接管队列：领取 / 要求补充信息（`note` 必填）/ 拒绝（不动钱）/ 取消这一轮，写审计的操作者是 `BX_OPERATOR` |
 | `bxBindBirthdayForm()` / `bxSubmitBirthdayPlan()` / `bxRenderBirthdayResult(plan)` | 生日计划：`POST /api/plans/birthday` 建单，卡片渲染预算/可支配/预留/到点与逐项状态 |

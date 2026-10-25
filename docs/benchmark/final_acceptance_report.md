@@ -6,7 +6,7 @@
 > **报告生成时（2026-10-24 20:10）尚未 push 远程**；后续文档/PPT 与清单收口提交已推送至公开 GitHub（`origin/main`）。发布清单在干净工作区上生成。
 > 本报告里的每个数字都来自本次实际执行，命令见 §3；与 `release_manifest.json` 冲突时以清单为准。
 > 2026-10-24 晚间的文档/PPT 收口提交（`6124667` / `df8c2d0` 等）只改文档与 PPT，未重跑全量测试。
-> **2026-10-25 两轮复跑**：19:46 的「快路口语轮」新增 45 条用例（assist 快路 26 / reminder_time 8 / reminder_api 11）后全量 **1464 passed / 4 skipped，37.50s**（日志 `tmp/pytest_final.log` / `tmp/redteam_final.log` / `tmp/e2e_final.log`，19:46–19:47）；21:51 的「功能体检轮」再补 4 条用例（生日付款补验证 2 条、同名计划/提醒点选 2 条）后全量 **1468 passed / 4 skipped，61.53s**（日志 `tmp/pytest_round6.log`），红队 43/43、e2e 13/13、前端 66/66 全部 exit 0。本报告 §3 的数字即最新一次复跑结果，原 2026-10-24 的 1415 口径降为历史基线。
+> **2026-10-25 两轮复跑**：19:46 的「快路口语轮」新增 45 条用例（assist 快路 26 / reminder_time 8 / reminder_api 11）后全量 **1464 passed / 4 skipped，37.50s**（日志 `tmp/pytest_final.log` / `tmp/redteam_final.log` / `tmp/e2e_final.log`，19:46–19:47）；21:51 的「功能体检轮」再补 4 条用例（生日付款补验证 2 条、同名计划/提醒点选 2 条）后全量 **1476 passed / 4 skipped，48.76s**（日志 `tmp/pytest_round6.log`），红队 43/43、e2e 13/13、前端 66/66 全部 exit 0。本报告 §3 的数字即最新一次复跑结果，原 2026-10-24 的 1415 口径降为历史基线。
 > 历史轮次数字（1336 passed / 33 工具 / 22 表 / 29 事件 / 62 测试文件）保留在 §11，标注为**历史基线**。
 
 ---
@@ -47,7 +47,7 @@
 
 | # | 命令 | 结果 |
 |---|---|---|
-| 1 | `.venv/bin/python -m pytest -q tests/` | **1468 passed, 4 skipped, 1 warning**（61.53s，2026-10-25 21:51 复跑，`tmp/pytest_round6.log`）；4 个 skip 是浏览器冒烟默认关闭 |
+| 1 | `.venv/bin/python -m pytest -q tests/` | **1476 passed, 4 skipped, 1 warning**（48.76s，2026-10-25 21:51 复跑，`tmp/pytest_round6.log`）；4 个 skip 是浏览器冒烟默认关闭 |
 | 2 | `RUN_BROWSER_SMOKE=1 .venv/bin/python -m pytest tests/test_browser_smoke.py -q` | **4 passed**（固定模型） |
 | 3 | `.venv/bin/python scripts/check_frontend.py` | **前端检查通过：66/66** |
 | 4 | `.venv/bin/python -m scripts.redteam` | **43 条：PASS 43 / FAIL 0** |
@@ -168,7 +168,7 @@
 | 4 | `tests/eval/`（80 例、runner、报告、配对统计） | 部分实现 | 8 轮真实配对统计；方向反复，不宣称提升；未补跑 |
 | 5 | `app/proactive.py`、`app/tools/proactive.py`、7 个工具、6 个 API + 模拟支出端点、前端面板 | 部分实现 | 监测闭环完整；后台节拍单进程、默认 30 秒、只推进显式开启目标；只写提醒不动钱 |
 | 6 | `docs/14_安全回归报告.md`、`tests/test_security_*.py`、`tests/test_payment_guard.py` | 已完成并通过验证 | 红队 43/43；知识层 13 条、主动服务 11 条、guard 44 条；执行层未授权写 0 |
-| 7 | 本报告、`docs/15_竞赛总报告.md`、`docs/13_竞赛演示手册.md`、README、`docs/提交物对照表.md`、PPT | 已完成并通过验证 | 本轮重新生成；数字统一为 1468/4、43/43、13/13、7/7、30 表/35 工具/61 事件/13 规则/41 路由/91 测试文件（`tests/test_*.py`）；报告生成时未 push，后续已推送公开仓库 |
+| 7 | 本报告、`docs/15_竞赛总报告.md`、`docs/13_竞赛演示手册.md`、README、`docs/提交物对照表.md`、PPT | 已完成并通过验证 | 本轮重新生成；数字统一为 1476/4、43/43、13/13、7/7、31 表/35 工具/63 事件/13 规则/42 路由/92 测试文件（`tests/test_*.py`）；报告生成时未 push，后续已推送公开仓库 |
 
 ### 六大赛场验收
 
@@ -295,7 +295,7 @@ python3.12 scripts/ab_stats.py --results tests/eval/results --iters 10000 --seed
 
 | 指标 | 历史基线（2026-10-23 / 上一轮） | 本轮实测（2026-10-25） |
 |---|---|---|
-| pytest | 1336 passed / 4 skipped | **1468 passed / 4 skipped** |
+| pytest | 1336 passed / 4 skipped | **1476 passed / 4 skipped** |
 | 工具 | 33 | **35** |
 | 数据表 | 22 | **30** |
 | 审计事件类型 | 29 | **61** |
