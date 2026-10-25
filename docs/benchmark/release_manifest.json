@@ -1,10 +1,10 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-10-25T19:51:42+08:00",
+  "generated_at": "2026-10-25T22:02:05+08:00",
   "git": {
-    "head": "827b7cc7334f78304ee9285b930505f67c48d9b0",
-    "head_short": "827b7cc",
-    "subject": "feat(assist): 说一句就办——提醒/储蓄快路、点选澄清、总览就地批准",
+    "head": "59e6cf489904cc54be37e1aac863f4f557f8c41b",
+    "head_short": "59e6cf4",
+    "subject": "feat(ux): 功能体检轮——选项对齐问句、计划/提醒可建可结束、疑似对象给批准空间",
     "branch": "main",
     "dirty": false,
     "changed_paths": 0
@@ -52,7 +52,7 @@
         "assess_suitability"
       ]
     },
-    "db_tables": 30,
+    "db_tables": 31,
     "db_table_names": [
       "users",
       "accounts",
@@ -83,10 +83,11 @@
       "plan_steps",
       "plan_budgets",
       "plan_authorizations",
-      "handoffs"
+      "handoffs",
+      "subscription_verdicts"
     ],
-    "audit_event_types": 61,
-    "api_paths": 40,
+    "audit_event_types": 62,
+    "api_paths": 41,
     "policy_rules": 13,
     "intent_templates": 9,
     "test_files": 91,
@@ -103,11 +104,11 @@
   },
   "tests": {
     "command": ".venv/bin/python -m pytest -q",
-    "passed": 1464,
+    "passed": 1468,
     "failed": 0,
     "skipped": 4,
-    "duration_s": 37.5,
-    "log": "tmp/pytest_final.log",
+    "duration_s": 61.53,
+    "log": "tmp/pytest_round6.log",
     "parsed": true
   },
   "redteam": {
@@ -115,13 +116,13 @@
     "cases_run": 43,
     "pass": 43,
     "fail": 0,
-    "log": "tmp/redteam_final.log"
+    "log": "tmp/redteam_round6.log"
   },
   "e2e": {
     "command": ".venv/bin/python scripts/e2e.py --offline",
     "pass": 13,
     "total": 13,
-    "log": "tmp/e2e_final.log"
+    "log": "tmp/e2e_round6.log"
   },
   "ab": {
     "rounds": [

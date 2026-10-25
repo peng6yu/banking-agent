@@ -98,7 +98,7 @@ make run     # 启动日志会打印一条带 #token= 的地址，打开那一�
 | 26 | **同一会话只允许一轮未完成资金写**（`app/planner/conflict.py` + `run.conflict` 事件） | 后一轮会静默覆盖前一轮的 `RUNS`，用户以为还在等确认的那笔其实已经被顶掉 | `tests/test_run_conflict.py` 8 条（第二笔被拒并告诉你是哪一轮挡路、只读请求不拦、重启后仍能检测、列出全部未完成轮、取消上一轮后解锁、过期卡不会静默解锁、已完成轮不算冲突且不重复扣款、恢复已完成轮不重跑资金节点） |
 | 27 | **真实渠道闸门 + 模拟数据自报家门** | 关掉演示回显后没有真实短信/人脸渠道时会静默发不出码；理财的期限/流动性/费率三家都没数据 | `FACTOR_PROVIDER` 未声明真实渠道时 `issue()` 抛 `SystemBusy`（不落挑战、不写 `factor.challenge_issued`，HTTP 503）；理财每项 `duration_days/liquidity/fee = null` + `data_source: contest_simulation` + `comparison.supported: false`；`tests/test_real_channels.py` 6 条 |
 | 28 | **浏览器高风险旅程**（`scripts/ui_journeys.py`，真浏览器 + 真模型） | 六区截图只证明页面能打开，不证明任务能走完 | `docs/交付/browser_journeys.json`：7/7 pass——小额转账确认、高额双因子出账、AA 同名候选被阻止、生日计划建立+刷新恢复、储蓄提醒处理后落库、J6 点候选、J7 点拒绝；`demo_db_unchanged: true`（测试库与演示库隔离） |
-| 29 | **单一事实源 `docs/benchmark/release_manifest.json`** | README / 进度文件 / 验收报告 / PPT 各写一套数字，改一处忘一处 | `scripts/release_manifest.py` 直接从代码与运行结果取数（当时为历史基线：tools 35、tables 27、events 49、API 30；本轮整改后为 tools 35、tables 30、events 61、API 41）；文档与 PPT 一律引用它 |
+| 29 | **单一事实源 `docs/benchmark/release_manifest.json`** | README / 进度文件 / 验收报告 / PPT 各写一套数字，改一处忘一处 | `scripts/release_manifest.py` 直接从代码与运行结果取数（当时为历史基线：tools 35、tables 27、events 49、API 30；本轮整改后为 tools 35、tables 31、events 62、API 41）；文档与 PPT 一律引用它 |
 | 30 | **多进程抢同一批预约转账的压测** | 租约以前只有单进程测试：两个 uvicorn worker 同时到点会不会各扣一次，没有证据 | `tests/lease_worker.py` + `tests/test_multiprocess_lease.py` 3 条：4 进程抢 1 行只出一次账、2 进程各跑一轮 ticker 也只出一次、3 进程抢 5 行正好 5 笔 |
 | 31 | **点击级旅程 J6/J7** | 之前 5 条旅程是流程级：直接调接口，没证明「页面上真点一下」也会同步改服务端 | J6 点候选列表里尾号 6620 那一位，断言确认卡与服务端 pending 卡片的 payee.card_tail 都是 6620、金额 500、余额未动；J7 点拒绝，断言 confirm.rejected、无 transfer.initiated、转账节点不是 done、余额不变；整套 7 条全 pass |
 | 32 | **回答澄清时正式结束提问那一轮**（`supersede_answered_clarifications` + `run.superseded` 事件） | J6 首跑就撞上：点了候选、后端也把原句拼回来了，却被自己的冲突闸门拦成 SESSION_RUN_CONFLICT——提问中的那一轮把下一句当成「第二轮资金写」 | 只在**没有待签确认卡**的轮次上生效（等签字不等于等澄清，不能替用户取消），把 busy 节点标 skipped、run 标 cancelled、写 run.superseded；`tests/test_run_conflict.py` 9 条 |
@@ -487,7 +487,7 @@ python3.12 -m app.smoke                    # 实测 4/4 PASS，主脑延迟约 1
 docs/00_总纲.md                  ← 十条铁律 + 里程碑 DoD
 docs/01_架构与数据流.md           ← 三段论与不变量
 docs/02_目录结构与文件职责.md     ← 每个文件干什么
-docs/03_数据库与种子数据.md       ← 30 张表 DDL（改造前 27 + 本轮 3：daily_user_limits / plan_authorizations / handoffs；以 app/db.py 的 TABLE_NAMES 为准）
+docs/03_数据库与种子数据.md       ← 31 张表 DDL（改造前 27 + 本轮 3：daily_user_limits / plan_authorizations / handoffs；以 app/db.py 的 TABLE_NAMES 为准）
 docs/04_核心模块实现规格.md       ← 逐函数分支表
 docs/05_安全层实现规格.md         ← 12 条规则 R01–R12 + 令牌七步 ★最重要（历史规格；现 13 条，见 rules.py）
 docs/06_工具层与场景实现规格.md   ← 历史规格 19 工具；当前 35 个，以 /api/tools 为准
