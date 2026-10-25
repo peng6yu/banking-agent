@@ -162,6 +162,88 @@ def _candidate(rows: list[Any]) -> dict[str, Any] | None:
     }
 
 
+#: 流水渠道的中文说法：逐笔核对时要说清楚每一笔是怎么进账的。
+CHANNEL_LABELS: Final[dict[str, str]] = {
+    "app": "手机银行",
+    "auto": "自动扣款",
+    "bank": "柜面",
+    "credit": "信用卡",
+    "debit": "借记卡",
+    "manual": "手动补录",
+    "overseas": "境外",
+    "pos": "刷卡",
+    "simulated": "演示注入",
+}
+
+
+def merchant_transactions(
+    conn,
+    account_id: str,
+    merchant: str,
+    *,
+    lookback_months: int = LOOKBACK_MONTHS,
+    as_of: int | None = None,
+    limit: int = 12,
+) -> list[dict[str, Any]]:
+    """某个商户的逐笔支出流水（只读）。
+
+    为什么单独一个函数：用户问"帮我核实一下这几笔"时，用户要看的是**每一笔**
+    的日期、金额、备注原文，而不是一句"3 笔、间隔 30 天、金额基本一致"的结论。
+    结论是推断，逐笔是事实；两者必须分开呈现，用户才能自己判断。
+
+    这里不做任何周期性判断（那是 detect_recurring 的事），也不看用户定性过
+    什么——定性只影响"要不要继续当成待办"，不影响"这笔流水确实存在"。
+    """
+    name = str(merchant or "").strip()
+    if not name:
+        raise ValidationError("要看哪个商户的流水？")
+    at = int(as_of) if as_of is not None else now_ms()
+    since = _month_start(at, lookback_months)
+    rows = [
+        row
+        for row in _rows(conn, account_id, since)
+        if str(row["counterparty"]) == name
+    ]
+    rows.sort(key=lambda row: (int(row["ts_ms"]), str(row["id"])), reverse=True)
+    out: list[dict[str, Any]] = []
+    for row in rows[: max(1, limit)]:
+        channel = str(row["channel"])
+        out.append(
+            {
+                "transaction_id": str(row["id"]),
+                "ts_ms": int(row["ts_ms"]),
+                "time_text": _time_text(int(row["ts_ms"])),
+                "amount_fen": int(row["amount_fen"]),
+                "amount_yuan": fen_to_yuan_str(int(row["amount_fen"])),
+                "category": str(row["category"]),
+                "channel": channel,
+                "channel_label": CHANNEL_LABELS.get(channel, channel),
+                "note": row["note"],
+            }
+        )
+    return out
+
+
+def merchants_with_transactions(
+    conn, account_id: str, *, lookback_months: int = LOOKBACK_MONTHS, as_of: int | None = None
+) -> list[dict[str, Any]]:
+    """窗口内出现过支出的商户名与笔数（只读）：用户只说了商户名时用来对名字。
+
+    只按流水说话，不掺杂"像不像订阅"——所以一个从没被推断成订阅的商户
+    （比如只在窗口里买了一本书）也能在这里被找到并逐笔核对。
+    """
+    at = int(as_of) if as_of is not None else now_ms()
+    since = _month_start(at, lookback_months)
+    counts: dict[str, int] = {}
+    for row in _rows(conn, account_id, since):
+        name = str(row["counterparty"])
+        counts[name] = counts.get(name, 0) + 1
+    return [
+        {"merchant": name, "count": count}
+        for name, count in sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))
+    ]
+
+
 def detect_recurring(
     conn,
     account_id: str,
@@ -356,8 +438,11 @@ __all__ = [
     "VERDICT_CONFIRMED",
     "VERDICT_LABELS",
     "VERDICT_NOT_SUBSCRIPTION",
+    "CHANNEL_LABELS",
     "clear_verdict",
     "detect_recurring",
+    "merchant_transactions",
+    "merchants_with_transactions",
     "record_verdict",
     "upcoming",
     "verdicts",

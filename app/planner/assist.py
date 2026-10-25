@@ -24,6 +24,7 @@ import app.audit as audit
 import app.plans as plans
 import app.proactive as proactive
 import app.reminder_time as reminder_time
+import app.subscriptions as subscriptions
 from app.money import fen_to_yuan_str
 
 # 命中提醒的动词；「生日」和「转账」不在此列：生日计划有独立链路，
@@ -56,6 +57,19 @@ _PLAN_LIST_RE: Final[re.Pattern[str]] = re.compile(
 _PLAN_CANCEL_RE: Final[re.Pattern[str]] = re.compile(
     r"(取消|停掉|结束|删掉|放弃|终止|不想要).{0,10}计划"
     r"|计划.{0,10}(取消|停掉|结束|删掉|放弃|终止|不要了)"
+)
+# 「帮我核实这几笔」不能只把同一句话再丢回模型：模型手里没有逐笔流水，
+# 只会回一句「这看起来像订阅」。所以核实要落到账上真实的每一笔上。
+_SUB_CHECK_MARKERS: Final[tuple[str, ...]] = (
+    "核实", "核对", "对一下", "查一下", "查查", "看看", "确认一下", "分析一下", "查查账",
+)
+_SUB_OBJECTS: Final[tuple[str, ...]] = ("订阅", "代扣", "扣款", "续费", "这几笔", "那几笔", "那笔")
+# 用户在聊天里直接下结论：两种都算处理完，和业务管理页的按钮同义。
+_SUB_NOT_RE: Final[re.Pattern[str]] = re.compile(r"不是我(?:订|定|买)的?|不是我订阅|没订过|不是我订的")
+_SUB_YES_RE: Final[re.Pattern[str]] = re.compile(r"是我(?:订|定|买)的?|确实是我|是我订阅|我订的")
+_SUB_LIST_RE: Final[re.Pattern[str]] = re.compile(
+    r"疑似订阅|(?:有哪些|几条|多少个|列出|所有|还有).{0,6}(?:订阅|代扣)"
+    r"|(?:订阅|代扣).{0,6}(?:有哪些|几条|列表)"
 )
 PLAN_STATUS_LABELS: Final[dict[str, str]] = {
     "active": "进行中",
@@ -182,7 +196,7 @@ _SAVINGS_AMOUNT_RE: Final[re.Pattern[str]] = re.compile(r"(?:存|攒)[^，。；
 
 
 def detect(text: str) -> str | None:
-    """返回 'reminder' / 'savings' / None；只做关键词判定，不碰数据库。"""
+    """返回 'reminder' / 'savings' / 'plan' / 'subscription' / None；只做关键词判定，不碰数据库。"""
     clean = _clean(text)
     if not clean:
         return None
@@ -191,6 +205,15 @@ def detect(text: str) -> str | None:
         word in clean for word in REMINDER_EXCLUDES
     ):
         return "reminder"
+    # 逐笔核实订阅：要有动作词 + 对象词，或者用户直接下结论（「不是我订的」）。
+    # 放在储蓄判断之前：这两句的用词不重叠，但「核实」比「存」更该优先。
+    if (
+        (any(word in clean for word in _SUB_CHECK_MARKERS) and any(word in clean for word in _SUB_OBJECTS))
+        or _SUB_NOT_RE.search(clean)
+        or _SUB_YES_RE.search(clean)
+        or _SUB_LIST_RE.search(clean)
+    ):
+        return "subscription"
     if any(word in clean for word in SAVINGS_EXCLUDES):
         return None
     goalish = bool(_SAVINGS_GOAL_RE.search(clean))
@@ -956,6 +979,223 @@ def _handle_plan(conn, text: str, user_id: str) -> dict[str, Any]:
     }
 
 
+# ------------------------------------------------------------------ 疑似订阅
+
+
+def _primary_account_id(conn) -> str:
+    """演示环境默认那张储蓄卡；没有卡返回空串，由调用方给出诚实空态。"""
+    row = conn.execute(
+        "SELECT id FROM accounts"
+        " ORDER BY CASE type WHEN 'debit' THEN 0 ELSE 1 END, id LIMIT 1"
+    ).fetchone()
+    return str(row["id"]) if row is not None else ""
+
+
+def _sub_choices(merchant: str) -> list[dict[str, str]]:
+    return [
+        {"label": "不是我订的", "value": f"「{merchant}」不是我订的"},
+        {"label": "确实是我订的", "value": f"「{merchant}」确实是我订的"},
+        {"label": "看看别的疑似订阅", "value": "我有哪些疑似订阅"},
+    ]
+
+
+def _verdict_of(clean: str) -> str | None:
+    if _SUB_NOT_RE.search(clean):
+        return subscriptions.VERDICT_NOT_SUBSCRIPTION
+    if _SUB_YES_RE.search(clean):
+        return subscriptions.VERDICT_CONFIRMED
+    return None
+
+
+def _match_merchant(clean: str, names: list[str]) -> str:
+    """从原话里认出商户名：长名字优先，避免「百度」吃掉「百度网盘」。"""
+    hits = [name for name in names if name and name in clean]
+    if not hits:
+        return ""
+    hits.sort(key=len, reverse=True)
+    return hits[0]
+
+
+def _handle_subscription(conn, text: str, user_id: str) -> dict[str, Any]:
+    """逐笔核实一条疑似订阅，或在聊天里直接给它定性。
+
+    和业务管理页的按钮同源：两个入口都只写 subscription_verdicts 这一行结论，
+    不动钱、不建计划、不替用户退订。区别只是这里会把每一笔流水的原文念出来，
+    让用户看得见「凭什么说它像订阅」。
+    """
+    clean = _clean(text)
+    account_id = _primary_account_id(conn)
+    if not account_id:
+        return {
+            "intent": "assist",
+            "action": "subscription_check",
+            "summary": "这个演示账户里还没有卡，没有流水可核对。",
+            "choices": [{"label": "看看总体情况", "value": "看看我的总览"}],
+            "data": {"candidates": []},
+        }
+
+    inferred = subscriptions.detect_recurring(conn, account_id, user_id=user_id)
+    candidates = list(inferred.get("items") or [])
+    names = [str(item.get("merchant") or "") for item in candidates]
+    seen_names = set(names)
+    for row in subscriptions.merchants_with_transactions(conn, account_id):
+        name = str(row.get("merchant") or "")
+        if name and name not in seen_names:
+            names.append(name)
+            seen_names.add(name)
+
+    merchant = _match_merchant(clean, names)
+    verdict = _verdict_of(clean)
+    is_candidate = merchant in {str(item.get("merchant") or "") for item in candidates}
+
+    # 只说了「不是我订的」而没带商户名：把上下文补上（只有一条候选时才敢补）。
+    if verdict and not merchant and len(candidates) == 1:
+        merchant = str(candidates[0].get("merchant") or "")
+        is_candidate = True
+
+    if verdict and not merchant:
+        if not candidates:
+            return {
+                "intent": "assist",
+                "action": "subscription_check",
+                "summary": "账上没找到像订阅的周期性扣款，这句话我没记到任何一条上——你指的是哪个商户？",
+                "choices": [
+                    {"label": "看看这个月的支出", "value": "看看我这个月花了多少"},
+                ],
+                "data": {"candidates": []},
+            }
+        return {
+            "intent": "assist",
+            "action": "subscription_verdict_choose",
+            "summary": "你有好几条疑似订阅，这句结论要记在哪一条上？",
+            "choices": [
+                {"label": f"「{item['merchant']}」", "value": f"「{item['merchant']}」" + ("不是我订的" if verdict == subscriptions.VERDICT_NOT_SUBSCRIPTION else "确实是我订的")}
+                for item in candidates[:8]
+            ],
+            "data": {"candidates": candidates},
+        }
+
+    # 认不出商户：把候选列出来让用户点（每条候选都是一个商户，能点进去逐笔看）。
+    if not merchant:
+        if not candidates:
+            return {
+                "intent": "assist",
+                "action": "subscription_check",
+                "summary": "近 6 个月里我没找到符合「每月/每年、金额基本一致」的扣款。没有疑似订阅，也就没有要核实的对象——这不是我核实过了，是确实没有可核实的记录。",
+                "choices": [
+                    {"label": "看看这个月的支出", "value": "看看我这个月花了多少"},
+                    {"label": "看看我的账单", "value": "帮我看看账单"},
+                ],
+                "data": {"candidates": []},
+            }
+        return {
+            "intent": "assist",
+            "action": "subscription_check",
+            "summary": f"现在有 {len(candidates)} 条疑似订阅，要逐笔核对哪一条？点一条，我把每一笔的日期、金额、备注原文念给你听。",
+            "choices": [
+                {"label": f"核对「{item['merchant']}」（{item.get('occurrences')} 笔）", "value": f"帮我核实一下「{item['merchant']}」这几笔是不是订阅"}
+                for item in candidates[:8]
+            ],
+            "data": {"candidates": candidates},
+        }
+
+    # 用户下了结论：只写结论这一行，其余什么都不动。
+    if verdict:
+        current = subscriptions.verdicts(conn, user_id).get(merchant)
+        # 同一句话重复说：不再重写一遍结论（审计里也只有一条），但仍给下一步。
+        if current is not None and current.get("verdict") == verdict:
+            return {
+                "intent": "assist",
+                "action": "subscription_check",
+                "summary": (
+                    f"「{merchant}」你已经定过性了（{current.get('verdict_label')}），"
+                    "这次没有改；同一结论重复说不会重复记账。要不要我把它最近几笔念给你听？"
+                ),
+                "choices": [
+                    {"label": "逐笔看看这几笔", "value": f"帮我核实一下「{merchant}」这几笔是不是订阅"},
+                    {"label": "看看别的疑似订阅", "value": "我有哪些疑似订阅"},
+                ],
+                "data": {"merchant": merchant, "verdict": current},
+            }
+        # 从没被推断成订阅、也没定过性的商户：不硬写一条结论进去。
+        if current is None and not is_candidate:
+            return {
+                "intent": "assist",
+                "action": "subscription_check",
+                "summary": f"「{merchant}」并没有被我推断成疑似订阅（间隔或金额不规律），所以不用定性。要不要我把它最近几笔念给你听？",
+                "choices": [
+                    {"label": "逐笔看看这几笔", "value": f"帮我核实一下「{merchant}」这几笔是不是订阅"},
+                    {"label": "看看这个月的支出", "value": "看看我这个月花了多少"},
+                ],
+                "data": {"merchant": merchant},
+            }
+        recorded = subscriptions.record_verdict(conn, user_id=user_id, merchant=merchant, verdict=verdict)
+        label = subscriptions.VERDICT_LABELS.get(verdict, verdict)
+        if verdict == subscriptions.VERDICT_CONFIRMED:
+            extra = "这条已经从待办里拿掉了。我没有银行商户侧的接口，所以不会替你续费、也不会替你在商户那边退订——要不要续、怎么续，得你自己在商户那里办。"
+        else:
+            extra = "这条已经从待办里拿掉了，以后不再拿这几笔打扰你；点错了也可以在业务管理页点「重新当成疑似」收回。"
+        return {
+            "intent": "assist",
+            "action": "subscription_verdict",
+            "summary": f"已记下：「{merchant}」{label}。{extra}",
+            "choices": [
+                {"label": "逐笔看看这几笔", "value": f"帮我核实一下「{merchant}」这几笔是不是订阅"},
+                {"label": "看看别的疑似订阅", "value": "我有哪些疑似订阅"},
+            ],
+            "data": {"merchant": merchant, "verdict": recorded},
+        }
+
+    # 逐笔核实：事实（每一笔）在前，推断（像不像订阅）在后。
+    rows = subscriptions.merchant_transactions(conn, account_id, merchant)
+    if not rows:
+        return {
+            "intent": "assist",
+            "action": "subscription_check",
+            "summary": f"近 6 个月账上没有「{merchant}」的支出记录，可能是更早以前的扣款，或者是别的渠道付的。",
+            "choices": [{"label": "看看我的账单", "value": "帮我看看账单"}],
+            "data": {"merchant": merchant, "transactions": []},
+        }
+    lines: list[str] = []
+    for index, row in enumerate(rows, start=1):
+        note = str(row.get("note") or "").strip()
+        tail = f" · {note}" if note else ""
+        lines.append(
+            f"{index}) {row['time_text']} · {row['amount_yuan']} 元 · {row['category']}"
+            f" · {row['channel_label']}{tail}"
+        )
+    candidate = next(
+        (item for item in candidates if str(item.get("merchant") or "") == merchant), None
+    )
+    settled = subscriptions.verdicts(conn, user_id).get(merchant)
+    head = f"「{merchant}」近 6 个月一共 {len(rows)} 笔，逐笔是这样："
+    body = "；".join(lines) + "。"
+    if candidate is not None:
+        judge = (
+            f"推断：{candidate.get('period_label')}、间隔 {candidate.get('interval_days_min')}—"
+            f"{candidate.get('interval_days_max')} 天、把握度{candidate.get('confidence_label')}。"
+            f"{candidate.get('uncertainty')}"
+        )
+    elif settled is not None:
+        judge = (
+            f"你之前已经给它定过性（{settled.get('verdict_label')}），所以它不再挂在待办里；"
+            "这些流水本身还是能一笔笔看的。要反悔可以在业务管理页点「重新当成疑似」。"
+        )
+    else:
+        judge = "推断：这几笔不满足「每月/每年、金额基本一致」，所以我没把它算成疑似订阅。"
+    boundary = (
+        "这些是账上流水的原文（分类和备注是记账时写的），不是商户订单。"
+        "我没有银行官方接口，也拿不到商户侧订单，所以「是不是订阅」只能由你定："
+    )
+    return {
+        "intent": "assist",
+        "action": "subscription_check",
+        "summary": f"{head}{body}{judge}{boundary}",
+        "choices": _sub_choices(merchant),
+        "data": {"merchant": merchant, "transactions": rows, "candidate": candidate},
+    }
+
+
 def handle(conn, text: str, *, session_id: str | None = None) -> dict[str, Any] | None:
     """识别并执行；没命中返回 None，调用方继续走模型解析。"""
     kind = detect(text)
@@ -966,6 +1206,8 @@ def handle(conn, text: str, *, session_id: str | None = None) -> dict[str, Any] 
         return _handle_reminder(conn, text, user_id)
     if kind == "plan":
         return _handle_plan(conn, text, user_id)
+    if kind == "subscription":
+        return _handle_subscription(conn, text, user_id)
     return _handle_savings(conn, text, user_id)
 
 

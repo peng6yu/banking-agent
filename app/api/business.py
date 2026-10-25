@@ -966,8 +966,11 @@ def management_view(conn: sqlite3.Connection) -> dict[str, Any]:
                 "label": "确实是我订的",
             },
             {
-                "kind": "prompt",
-                "label": "让助手核实这几笔",
+                # 核实必须真核实：这句会走聊天快路，把每一笔流水的日期、金额、
+                # 备注原文念出来，而不是把同一句话再丢给模型猜一遍。
+                "kind": "subscription_check",
+                "merchant": merchant,
+                "label": "逐笔核对这几笔",
                 "prompt": f"帮我核实一下「{merchant}」这几笔是不是订阅",
             },
         ]

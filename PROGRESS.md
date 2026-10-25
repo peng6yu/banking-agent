@@ -498,3 +498,48 @@
 - 管理页工具按钮话术仍不带对象（「冻结」「挂失」靠卡片上下文补全）。
 - `tests/test_imports.py::_exists` 路径拼接缺陷未修（子模块依赖恒判 False）。
 - 真实短信/人脸仍是桩；提醒未接系统通知；本轮未 push 远程。
+
+---
+
+## v2.5.0 逐笔核实与会话记忆轮（2026-10-25）
+
+**起因（用户原话）**：「帮我核实一下…到底干了啥，要真的核实，而不是给个结论；要逐笔核实，不要一起核实；会话要有记忆，不该每问一句都像新会话，要能联想；还要有订单手动录入的入口。」
+
+### 1. 逐笔核实（真核实，不是给结论）
+
+- 后端 `app/subscriptions.py`：新增 `merchant_transactions(conn, account_id, merchant, *, lookback_months, as_of, limit=12)`（该商户逐笔：时间、金额、分类、渠道中文名、备注，按时间倒序）与 `merchants_with_transactions()`（用户只报商户名时对名字用）；`CHANNEL_LABELS` 把 app/auto/bank/overseas/pos… 翻成「手机银行/自动扣款/柜面/境外/刷卡」。只读，不动钱。
+- 快路 `app/planner/assist.py`：新增 `detect() → "subscription"`（「核实/核对/查一下… + 订阅/代扣/扣款/续费」或「有哪些订阅」；不动「我有哪些提醒」「查余额」）与 `_handle_subscription`：
+  - 只报商户名 → `action=subscription_check`，summary 逐条列每笔，附推断与「把握度中/间隔」，末尾写清「这些是账上流水原文，不是商户订单；我没有银行官方接口，也拿不到商户侧订单，所以『是不是订阅』只能由你定」；
+  - 「XX 不是我订的 / 确实是我订的」→ 走 `subscriptions.record_verdict`（同结论重复说不多写一行；改口覆盖）并回两个可点 chip；
+  - 无商户名 → 列疑似订阅候选，每条 chip「核对「X」（N 笔）」；空态诚实说「近 6 个月没找到每月/每年、金额基本一致的扣款」。
+- 管理页「逐笔核对这几笔」按钮从 `prompt` 改成 `kind=subscription_check`，点下去真的发那句核实请求；前端 `bxRunAction` 新增该分支 → `bxAsk(act.prompt)`。
+
+### 2. 会话记忆（重启后还接得上）
+
+- 新表 `chat_turns(session_id, seq, role CHECK IN ('user','assistant'), content, ts_ms)`，主键 `(session_id, seq)` + 时间索引；只留最近 200 轮（写入时剪枝），单条截断 4000 字。
+- 新模块 `app/chat_history.py`（第 1 层，只依赖 `app.db`/`app.clock`）：`append` / `recent` / `title` / `latest` / `clear`。**刻意不写 `sessions` 表**——那张表的行由 `planner.state.open_run` 建，它靠「新插入」判断要不要写 `session.start` 审计；记忆模块提前 INSERT 会让这个事件凭空消失（本轮真踩到，`tests/test_api.py` 抓到）。标题改为从第一条用户消息现算，最近会话从 `chat_turns` 的 `MAX(ts_ms)` 找。
+- `routes.py`：`_remember` 改为「内存 deque + 落库」两写，写库失败只 warning 不打断对话；`_turns` 内存空就回库读（服务重启后模型仍接得上话）；新增 `GET /api/chat/history`、`GET /api/chat/latest`。
+- 前端：`bxLoadChatHistory()` 在启动时（`bxRestoreSession()` 之前）回放上一段对话——有 sessionStorage 的 sid 就查 history，否则查 latest 并把 sid 写回；先出「这是上次的对话（标题，最近 N 轮，服务端存着）」再逐轮画气泡。刷新页面不再是一片空白。
+
+### 3. 订单手动录入（现金/刷卡单没进本行）
+
+- `POST /api/transactions/manual`（`ManualTransactionRequest`：merchant 1–40、amount_fen 1–1e8、direction out/in、category 默认「其他」、note 0–80）：只写本行 `transactions`（channel='manual'）与演示余额，**不对应任何真实支付**；同账户+方向+金额+商户+分类+备注且同一本地自然日重复提交 → 复用原流水（`idempotent:true`，不重复扣钱）；余额不足 409 `INSUFFICIENT_FUNDS` 且一分不动；写审计 `transaction.manual`（闭集 63→64）。
+- 前端账单页新增「手动记一笔」卡（商户/金额/支出或收入/分类/备注 + 提交），成功气泡写「只进本行流水与演示余额」+ 结果框写流水号/渠道/分类，同日重复会明说「这笔今天已经记过，没有重复记账」。
+
+### 4. 测试与验收
+
+- 新增 `tests/test_subscription_check.py`(13) `tests/test_chat_memory.py`(13) `tests/test_manual_transaction.py`(18)：逐笔明细与只读、两种定性退出待办、未知商户不写结论；记忆顺序/剪枝/重启仍在/`clear` 后 `sessions` 仍 0 行；补录扣加余额、同日幂等、改备注算新一笔、余额不足 409、7 种坏入参 400、计入账单合计、审计落链。
+- 全量 `.venv/bin/python -m pytest -q` → **1521 passed, 4 skipped, 1 warning in 55.62s**（`tmp/pytest_r9.log`，exit 0）；`tests/test_*.py` **95** 个；前端 `scripts/check_frontend.py` **66/66**，抽 `<script>` 后 `node --check` 通过。
+- 真浏览器（8112 真模型 + 真 `api_token`）实测三件事：管理页「逐笔核对这几笔」→ 聊天出现 3 笔逐条明细（15.00 元 · 订阅 · 自动扣款 · 自动续费）与两个定性 chip；硬刷新后历史气泡回显（「这是上次的对话（我有哪些提醒，最近 2 轮，服务端存着）」）；账单页手动记 23.50 元 → 余额 12,860.50 → 12,837.00、结果框写流水号，同日重复提交回「这笔今天已经记过，没有重复记账」且余额不变。截图 `tmp/shot_r9_chat.png`。
+
+### 5. 规模与文档
+
+- 规模：数据库表 **32** 张（+chat_turns）、审计事件 **64** 类（+transaction.manual）、API 路径 **45** 条（+manual/history/latest）、工具 35、规则 13、`tests/test_*.py` **95**。
+- 文档：`docs/02` 登记 `app/chat_history.py` 与三个测试文件；`docs/03` 加 `chat_turns` 行、表数量 32、事件闭集 64 并点明新增三类事件；`docs/07` §7.5 加三个端点（含幂等与「只进本行账」口径）、§7.7 加 `bxLoadChatHistory`/`bxBindManualForm`/`bxSubmitManualTransaction` 与 `subscription_check` 分支；`docs/10` §10.2 补三行必测点；README/验收报告/PPT/清单数字统一到 1521/4、55.62s、45 路由、32 表、64 事件、95 测试文件。
+
+### 6. 遗留
+
+1. 预约转账的补验证仍只有后端字段与接口，计划页那一行还没有「补验证并执行」按钮；
+2. 管理页工具按钮的话术仍不带对象（点了只发「我要转账」这类泛问）；
+3. `tests/test_imports.py::_exists` 的路径拼接缺陷未修（`APP_DIR` 已是 `repo/app`，函数又拼 `app/<mod>`，子模块依赖恒判 False）；
+4. 真实短信/人脸仍是桩；提醒未接系统通知；未 push 远程。

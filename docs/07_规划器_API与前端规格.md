@@ -325,6 +325,9 @@ for node in topo_sort(dag):
 | POST | `/api/reminders` | `ReminderCreate`（`text` 1–40、`due_ms`、`repeat` none/daily/weekly/monthly、`hour` 默认 9、`minute` 默认 0、`day`、`weekday`） | `{ok, plan, due_ms, due_text, repeat, repeat_label}` | 计划页表单建一条提醒（只提醒、不动钱）；日历复发由 `app/reminder_time.py` 算，计划步到点后回 pending |
 | POST | `/api/subscriptions/verdict` | `SubscriptionVerdictRequest`（`merchant` 1–60、`verdict` not_subscription / confirmed、`note` 0–200） | `{ok, verdict}` | 用户给「疑似订阅」定性；**两种结论都让该商户退出待办**（只提醒、不动钱、不建计划、不替用户退订） |
 | POST | `/api/subscriptions/verdict/clear` | `SubscriptionVerdictClearRequest`（`merchant` 1–60） | `{ok, merchant, cleared}` | 撤回定性，让流水的推断重新生效（`cleared:false` 表示本来就没定性过） |
+| POST | `/api/transactions/manual` | `ManualTransactionRequest`（`merchant` 1–40、`amount_fen` 1–1e8、`direction` out/in、`category` 默认「其他」、`note` 0–80） | `{ok, manual:true, notice, transaction, balance_after_fen, audit_seq, idempotent}` | 用户手动补录一笔流水（现金/刷卡单没进本行）：只写本行 `transactions` 与演示余额，不对应任何真实支付；同账户+方向+金额+商户+分类+备注且**同一本地自然日**重复提交复用原流水（`idempotent:true`，不重复扣钱） |
+| GET | `/api/chat/history?session_id=&limit=` | — | `{ok, session_id, found, title, turns[]}` | 某个会话最近几轮原文，刷新页面时把气泡画回来；`found:false` 表示这个会话没记忆 |
+| GET | `/api/chat/latest?limit=` | — | `{ok, session_id, turns[], last_ms, title}` | 最近一次真聊过的会话：首屏没存 `session_id` 时接着它，而不是新开一个空会话 |
 | POST | `/api/demo/reset` | — | `{ok}` | 重置演示数据 |
 | GET | `/` | — | `index.html` | 静态页 |
 
@@ -406,6 +409,9 @@ for node in topo_sort(dag):
 | `bxRenderInferred(block)` 的 `settled` 段 | 已定性的商户不再进 `items`（服务端 `detect_recurring` 就过滤掉了），改由 `data.settled` 列出，每行带「重新当成疑似」按钮（`bxRunAction` kind `subscription_verdict_clear`） |
 | `bxInlineFactor(box, cid, sid, onDone)` | 就地补验证：拉 `POST /api/factor/challenge` 渲染口令行 → 带 `proofs` 调 `confirmAction(cid, true, null, proofs, sid)`；用于总览待处理授权 |
 | `bxRenderHandoffs(host, block, tagId)` / `bxHandoffCard(item)` / `bxHandoffPost(item, action, note)` | 人工接管队列：领取 / 要求补充信息（`note` 必填）/ 拒绝（不动钱）/ 取消这一轮，写审计的操作者是 `BX_OPERATOR` |
+| `bxLoadChatHistory()` | 启动时按「有 `sessionStorage` 的 sid 就查 `/api/chat/history`，否则查 `/api/chat/latest`」把上一段对话的气泡画回来；先出「这是上次的对话（标题，最近 N 轮，服务端存着）」再逐轮回放，之后才跑 `bxRestoreSession()` |
+| `bxBindManualForm()` / `bxSubmitManualTransaction()` | 账单页「手动记一笔」表单：`POST /api/transactions/manual` → 气泡说明「只进本行流水与演示余额」+ 结果框写流水号/渠道/分类 → 清空输入并刷新账单；同日重复提交由服务端幂等，气泡会明说「这笔今天已经记过，没有重复记账」 |
+| `bxRunAction` 的 `subscription_check` 分支 | 管理页「逐笔核对这几笔」不是死文案：`bxAsk(act.prompt)` 真发一句「帮我核实一下「商户」这几笔是不是订阅」，由快路回逐笔明细 |
 | `bxBindBirthdayForm()` / `bxSubmitBirthdayPlan()` / `bxRenderBirthdayResult(plan)` | 生日计划：`POST /api/plans/birthday` 建单，卡片渲染预算/可支配/预留/到点与逐项状态 |
 | `bxPayBirthdayItem(planId, itemKey, btn, host)` / `bxBirthdayFactor(...)` / `bxReloadBirthdayResult(planId)` | 逐项付款：红档先拿 `waiting_factor` → 口令行 → 带 `proofs` 重发同一请求；成功后用 `GET /api/plans/{id}`（返回 `{ok, plan}`）重绘卡片，所以「已付款」与列表状态一致 |
 | `escapeHtml(s)` | **所有来自后端的文本都要过一遍**，防 XSS |

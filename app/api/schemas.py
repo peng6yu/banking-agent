@@ -255,6 +255,25 @@ class ScheduledVerifyRequest(BaseModel):
     proofs: list[FactorProof] | None = None
 
 
+class ManualTransactionRequest(BaseModel):
+    """POST /api/transactions/manual 的入参：用户自己补一笔流水。
+
+    为什么要有这个入口：演示环境（和多数真实部署）接不到银行的官方 API，
+    账单里到底有没有那笔消费只能由人补进来。补的是他自己的账，不是替谁下单，
+    所以：只写本行流水、只改演示余额、落一条 transaction.manual 审计，
+    不触发任何外部支付。
+    """
+
+    model_config = ConfigDict(extra="forbid", title="手动补录一笔流水")
+
+    merchant: str = Field(min_length=1, max_length=40)
+    amount_fen: int = Field(ge=1, le=100_000_000)
+    #: 支出记 'out'，收入记 'in'；默认支出，因为补的多数是「我买了什么」。
+    direction: Literal["out", "in"] = "out"
+    category: str = Field(default="其他", min_length=1, max_length=12)
+    note: str = Field(default="", max_length=80)
+
+
 class SubscriptionVerdictClearRequest(BaseModel):
     """POST /api/subscriptions/verdict/clear 的入参：撤掉之前的定性。
 
@@ -287,6 +306,7 @@ __all__ = [
     "BirthdayPayRequest",
     "BirthdayPlanCreate",
     "CancelRequest",
+    "ManualTransactionRequest",
     "MonitorRunRequest",
     "PlanCreate",
     "PlanRunRequest",

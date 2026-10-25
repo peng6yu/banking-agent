@@ -25,6 +25,7 @@ from fastapi import APIRouter, Depends, Request
 from fastapi.responses import FileResponse, StreamingResponse
 
 import app.birthday as birthday
+import app.chat_history as chat_history
 import app.plans as plans
 import app.proactive as proactive
 import app.subscriptions as subscriptions
@@ -36,6 +37,7 @@ from app.api.schemas import (
     BirthdayPayRequest,
     BirthdayPlanCreate,
     CancelRequest,
+    ManualTransactionRequest,
     MonitorRunRequest,
     PlanCreate,
     PlanRunRequest,
@@ -963,6 +965,205 @@ async def pay_birthday_item(
     )
 
 
+#: 手动补录单独一个渠道值：既方便幂等去重，也能一眼看出这行不是银行同步来的。
+MANUAL_CHANNEL: Final[str] = "manual"
+MANUAL_NOTICE: Final[str] = "这笔是你自己补录的，只进本行流水与演示余额，不对应任何真实支付。"
+
+
+def _manual_transaction_view(row: Any) -> dict[str, Any]:
+    """把一条手动补录的流水整理成前端好读的形状（永远带 manual=true）。"""
+    return {
+        "id": str(row["id"]),
+        "transaction_id": str(row["id"]),
+        "account_id": str(row["account_id"]),
+        "direction": str(row["direction"]),
+        "amount_fen": int(row["amount_fen"]),
+        "amount_yuan": fen_to_yuan_str(int(row["amount_fen"])),
+        "counterparty": str(row["counterparty"]),
+        "merchant": str(row["counterparty"]),
+        "category": str(row["category"]),
+        "note": str(row["note"]),
+        "ts_ms": int(row["ts_ms"]),
+        "balance_after_fen": int(row["balance_after_fen"]),
+        "channel": str(row["channel"]),
+        "manual": True,
+    }
+
+
+def _record_manual_transaction(conn: Any, request: Any) -> dict[str, Any]:
+    """用户自己补一笔流水：写 transactions + 同步演示余额，同一事务。
+
+    幂等口径和模拟注入一致：同账户 + 同方向 + 同金额 + 同商户 + 同分类 + 同备注，
+    且 channel='manual'、落在同一个本地自然日里，就当作同一次补录——返回已有
+    流水，不再扣/加一次钱（表单重复提交不该变成两笔）。
+    """
+    user_id = proactive.default_user_id(conn)
+    account = conn.execute(
+        "SELECT id, balance_fen FROM accounts WHERE user_id = ?"
+        " ORDER BY CASE type WHEN 'debit' THEN 0 ELSE 1 END, id LIMIT 1",
+        (user_id,),
+    ).fetchone()
+    if account is None:
+        raise ValidationError("账户不存在", reason="NO_ACCOUNTS")
+    account_id = str(account["id"])
+    balance_fen = int(account["balance_fen"])
+    merchant = str(request.merchant or "").strip()
+    if not merchant:
+        raise ValidationError("商户名不能是空白", field="merchant")
+    direction = str(request.direction or "out")
+    amount_fen = int(request.amount_fen)
+    category = str(request.category or "其他").strip() or "其他"
+    note = str(request.note or "").strip()
+    now = clock.now_ms()
+    day_start = proactive._period_day_start_ms(proactive.local_date(now))
+
+    existing = conn.execute(
+        "SELECT * FROM transactions WHERE account_id = ? AND direction = ?"
+        " AND amount_fen = ? AND counterparty = ? AND category = ? AND note = ?"
+        " AND channel = ? AND ts_ms >= ? AND ts_ms < ?"
+        " ORDER BY ts_ms DESC, id DESC LIMIT 1",
+        (
+            account_id,
+            direction,
+            amount_fen,
+            merchant,
+            category,
+            note,
+            MANUAL_CHANNEL,
+            day_start,
+            day_start + _DAY_MS,
+        ),
+    ).fetchone()
+    if existing is not None:
+        transaction = _manual_transaction_view(existing)
+        audit_seq = audit.append(
+            conn,
+            "transaction.manual",
+            {
+                "tool": "manual_transaction",
+                "ok": True,
+                "idempotent": True,
+                "account_id": account_id,
+                "transaction_id": transaction["id"],
+                "amount_fen": amount_fen,
+                "direction": direction,
+                "merchant": merchant,
+                "category": category,
+            },
+        )
+        return {
+            "transaction": transaction,
+            "balance_after_fen": int(existing["balance_after_fen"]),
+            "audit_seq": audit_seq,
+            "idempotent": True,
+        }
+
+    if direction == "out" and amount_fen > balance_fen:
+        raise InsufficientFunds(
+            "演示账户余额不足，这笔补录没有记上",
+            account_id=account_id,
+            balance_fen=balance_fen,
+            amount_fen=amount_fen,
+        )
+    balance_after_fen = balance_fen - amount_fen if direction == "out" else balance_fen + amount_fen
+    transaction_id = new_id("t")
+    conn.execute(
+        "INSERT INTO transactions (id, account_id, direction, amount_fen, counterparty,"
+        " category, note, ts_ms, balance_after_fen, hold_id, channel)"
+        " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?)",
+        (
+            transaction_id,
+            account_id,
+            direction,
+            amount_fen,
+            merchant,
+            category,
+            note,
+            now,
+            balance_after_fen,
+            MANUAL_CHANNEL,
+        ),
+    )
+    conn.execute("UPDATE accounts SET balance_fen = ? WHERE id = ?", (balance_after_fen, account_id))
+    audit_seq = audit.append(
+        conn,
+        "transaction.manual",
+        {
+            "tool": "manual_transaction",
+            "ok": True,
+            "idempotent": False,
+            "account_id": account_id,
+            "transaction_id": transaction_id,
+            "amount_fen": amount_fen,
+            "direction": direction,
+            "merchant": merchant,
+            "category": category,
+            "balance_after_fen": balance_after_fen,
+            "note": note,
+        },
+    )
+    return {
+        "transaction": {
+            "id": transaction_id,
+            "transaction_id": transaction_id,
+            "account_id": account_id,
+            "direction": direction,
+            "amount_fen": amount_fen,
+            "amount_yuan": fen_to_yuan_str(amount_fen),
+            "counterparty": merchant,
+            "merchant": merchant,
+            "category": category,
+            "note": note,
+            "ts_ms": now,
+            "balance_after_fen": balance_after_fen,
+            "channel": MANUAL_CHANNEL,
+            "manual": True,
+        },
+        "balance_after_fen": balance_after_fen,
+        "audit_seq": audit_seq,
+        "idempotent": False,
+    }
+
+
+@router.post("/api/transactions/manual")
+async def manual_transaction(request: ManualTransactionRequest) -> dict[str, Any]:
+    """手动补录一笔流水（接不了银行官方接口时的入口）。
+
+    只写本行流水、只动演示余额，落一条 transaction.manual 审计；不发起任何外部
+    支付、不建计划、不触发代扣。补录之后账单、月度统计与订阅推断都会把它算进去
+    （这正是「我买了什么，账上就该有」的意思）。
+    """
+    with _conn() as conn, db.tx(conn):
+        result = _record_manual_transaction(conn, request)
+    return {"ok": True, "manual": True, "notice": MANUAL_NOTICE, **result}
+
+
+@router.get("/api/chat/history")
+async def chat_history_turns(session_id: str = "", limit: int = 20) -> dict[str, Any]:
+    """某个会话最近几轮对话：刷新页面/换设备时把气泡画回来。"""
+    sid = str(session_id or "").strip()
+    if not sid:
+        return {"ok": True, "session_id": "", "found": False, "turns": [], "title": ""}
+    with _conn() as conn:
+        turns = chat_history.recent(conn, sid, limit=max(1, min(50, int(limit))))
+        head = chat_history.title(conn, sid)
+    return {
+        "ok": True,
+        "session_id": sid,
+        "found": bool(turns),
+        "title": head,
+        "turns": turns,
+    }
+
+
+@router.get("/api/chat/latest")
+async def chat_history_latest(limit: int = 20) -> dict[str, Any]:
+    """最近一次真的聊过的会话：首屏没存 session_id 时接着它，而不是新开一个。"""
+    with _conn() as conn:
+        data = chat_history.latest(conn, limit=max(1, min(50, int(limit))))
+    return {"ok": True, **data}
+
+
 @router.post("/api/proactive/simulate/expense")
 async def simulate_expense(request: SimulatedExpenseRequest) -> dict[str, Any]:
     """模拟数据注入（竞赛演示用）：插一条**模拟**支出并同步演示余额，不涉及任何真实支付。
@@ -1512,13 +1713,33 @@ class _conn:
         self._conn_obj.close()
 
 
-def _remember(session_id: str, role: str, content: str) -> None:
+def _remember(session_id: str | None, role: str, content: str) -> None:
+    """记一轮对话：内存里给模型当上下文，库里给用户和自己留底。
+
+    落库失败绝不能打断对话——记忆是加分项，不是主链路。
+    """
+    if not session_id:
+        return
     turns = _history.setdefault(session_id, deque(maxlen=HISTORY_PER_SESSION))
     turns.append({"role": role, "content": content})
+    try:
+        with _conn() as conn:
+            chat_history.append(conn, session_id, role, content)
+    except Exception:  # noqa: BLE001 - 记忆写不进去也要把这一轮答完
+        log.warning("api.chat.history_write_failed session=%s role=%s", session_id, role)
 
 
 def _turns(session_id: str) -> list[dict[str, str]]:
-    return list(_history.get(session_id, deque()))[-HISTORY_TURNS:]
+    """喂给模型的最近几轮：内存优先，服务重启后从库里捞回来。"""
+    turns = list(_history.get(session_id, deque()))[-HISTORY_TURNS:]
+    if turns:
+        return turns
+    try:
+        with _conn() as conn:
+            rows = chat_history.recent(conn, session_id, limit=HISTORY_TURNS)
+    except Exception:  # noqa: BLE001 - 读不到历史就当没有，不拦当前这一轮
+        return []
+    return [{"role": row["role"], "content": row["content"]} for row in rows]
 
 
 def _model_name() -> str:

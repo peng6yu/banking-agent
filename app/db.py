@@ -60,6 +60,7 @@ TABLE_NAMES: Final[tuple[str, ...]] = (
     "plan_authorizations",
     "handoffs",
     "subscription_verdicts",
+    "chat_turns",
 )
 
 SCHEMA_SQL: Final[str] = """
@@ -497,6 +498,19 @@ CREATE TABLE IF NOT EXISTS subscription_verdicts (
   updated_ms  INTEGER NOT NULL,
   PRIMARY KEY (user_id, merchant)
 );
+
+-- 会话记忆：每一轮对话按会话落库，服务重启也接得上。
+-- 为什么不用 dag_nodes 代替：一个会话里多数轮次根本不会建 DAG（查余额、问提醒、
+-- 定性订阅都是直答），只记 DAG 就等于只记住了「执行过的那几句」。
+CREATE TABLE IF NOT EXISTS chat_turns (
+  session_id TEXT NOT NULL,
+  seq        INTEGER NOT NULL,
+  role       TEXT NOT NULL CHECK (role IN ('user','assistant')),
+  content    TEXT NOT NULL,
+  ts_ms      INTEGER NOT NULL,
+  PRIMARY KEY (session_id, seq)
+);
+CREATE INDEX IF NOT EXISTS idx_chat_turns_time ON chat_turns(session_id, ts_ms);
 
 -- 审计只增不改：UPDATE/DELETE 一律由 SQLite 层拦掉（docs/03 3.2 第 7 张表）
 CREATE TRIGGER IF NOT EXISTS audit_no_update BEFORE UPDATE ON audit_log

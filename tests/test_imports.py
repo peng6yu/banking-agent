@@ -59,6 +59,8 @@ LAYERS: dict[str, int] = {
     "app.suitability": 2,
     # 订阅推断（阶段 6 P0-7）：从流水里找周期性扣款 + 续费窗口，纯读，只依赖金额格式化
     "app.subscriptions": 2,
+    # 会话记忆：把每一轮对话落库，只依赖数据层（重启后接得上话）
+    "app.chat_history": 1,
     # 跨场景计划（P1-9）：状态全在库里，后台节拍推进；action 步只提醒、不代扣
     "app.plans": 2,
     # 生日计划：建计划（账本级预算预留）+ 到期付款走确认/令牌，依赖规划层与工具白名单
@@ -146,6 +148,7 @@ ALLOWED: dict[str, frozenset[str]] = {
         "app.security",
         "app.subscriptions",
         "app.suitability",
+        "app.chat_history",
         # 缺失槽位的可点选项要按主账户取候选（amount_fen / payee_name …）
         "app.tools.base",
         "app.tools.registry",
@@ -288,6 +291,8 @@ ALLOWED: dict[str, frozenset[str]] = {
         "app.plans",
         "app.proactive",
         "app.reminder_time",
+        # 逐笔核实订阅要读该商户的每一笔流水（只读，推断仍在 subscriptions 里）
+        "app.subscriptions",
     }),
     "app.planner.state": frozenset({
         "app.clock",
@@ -416,6 +421,11 @@ ALLOWED: dict[str, frozenset[str]] = {
         "app.clock",
         "app.db",
         "app.money",
+    }),
+    # 会话记忆：只读写 chat_turns/sessions，不碰工具、不碰权限
+    "app.chat_history": frozenset({
+        "app.clock",
+        "app.db",
     }),
     "app.smoke": frozenset(),
     "app.tools": frozenset({

@@ -101,6 +101,8 @@ EVENT_TYPES: Final[frozenset[str]] = frozenset(
         "subscription.verdict",
         # 撤回定性：用户点错了或者商户改了收费方式，可以把结论撤掉让它重新待办
         "subscription.verdict_cleared",
+    # 用户自己补录的一笔流水（接不了银行接口时的唯一入口）；只写本行账。
+    "transaction.manual",
         # 跨场景计划：计划与步骤的生命周期
         "plan.created",
         "plan.updated",

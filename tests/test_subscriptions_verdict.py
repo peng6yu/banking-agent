@@ -128,7 +128,8 @@ def test_verdict_moves_from_pending_to_settled_in_management_view(subs) -> None:
     pending = {str(item["merchant"]): item for item in before["items"]}
     assert pending[target]["actions"][0]["label"] == "不是我订的"
     assert pending[target]["actions"][1]["label"] == "确实是我订的"
-    assert pending[target]["actions"][2]["kind"] == "prompt"
+    assert pending[target]["actions"][2]["kind"] == "subscription_check"
+    assert pending[target]["actions"][2]["label"] == "逐笔核对这几笔"
 
     subscriptions.record_verdict(
         subs, user_id=uid, merchant=target, verdict=subscriptions.VERDICT_CONFIRMED

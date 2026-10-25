@@ -756,6 +756,38 @@
       <div class="card"><div class="card-head"><h3>异常与依据</h3><span class="spacer"></span><span class="tag warn">发现异常 / 建议核实</span></div><div id="bill-anomalies"></div></div>
 
       <div class="card"><div class="card-head"><h3>相关流水</h3></div><div id="bill-tx"></div><div class="card-note" id="bill-note"></div></div>
+
+      <div class="card"><div class="card-head"><h3>手动记一笔</h3><span class="spacer"></span><span class="tag info">只进本行流水</span></div>
+        <form id="bill-manual-form" class="pf-form" autocomplete="off">
+          <div class="pf-row">
+            <label class="pf-field"><span class="field-label">商户 / 对手方</span>
+              <input id="bill-manual-merchant" class="pf-in" type="text" maxlength="40" placeholder="例如：楼下便利店" />
+            </label>
+            <label class="pf-field"><span class="field-label">金额（元）</span>
+              <input id="bill-manual-amount" class="pf-in" type="text" inputmode="decimal" placeholder="例如：23.50" />
+            </label>
+          </div>
+          <div class="pf-row">
+            <label class="pf-field"><span class="field-label">方向</span>
+              <select id="bill-manual-direction" class="pf-in">
+                <option value="out">支出（从余额扣）</option>
+                <option value="in">收入（加到余额）</option>
+              </select>
+            </label>
+            <label class="pf-field"><span class="field-label">分类</span>
+              <input id="bill-manual-category" class="pf-in" type="text" maxlength="12" value="其他" />
+            </label>
+          </div>
+          <label class="pf-field"><span class="field-label">备注（可选）</span>
+            <input id="bill-manual-note" class="pf-in" type="text" maxlength="80" placeholder="例如：现金买的，刷卡单没进本行" />
+          </label>
+          <div class="pf-row">
+            <button id="bill-manual-submit" class="btn btn-green" type="submit">记到本行流水</button>
+          </div>
+          <div class="card-note">这笔是你自己补录的：只写本行流水与演示余额，不对应任何真实支付，也不会替你向商户付款。同一天重复提交同一笔只会记一次。</div>
+        </form>
+        <div id="bill-manual-result"></div>
+      </div>
     </div>
   </section>
 
@@ -3589,6 +3621,11 @@
       });
       return;
     }
+    if (kind === 'subscription_check') {
+      const merchant = textOf(act.merchant);
+      bxAsk(textOf(act.prompt) || ('帮我核实一下「' + merchant + '」这几笔是不是订阅'));
+      return;
+    }
     if (kind === 'prompt' && act.prompt) { bxAsk(textOf(act.prompt)); return; }
     if (kind === 'inspect') {
       if (textOf(act.id) === 'open_subscriptions') { bxSetView('manage'); bxFlashCard('mg-subs'); return; }
@@ -3990,6 +4027,70 @@
       note.textContent = '这里只列规则命中的流水，不是完整对账单；导出完整流水不在本轮范围内。' +
         (data.summary ? ' ' + textOf(data.summary) : '');
     }
+  }
+
+
+  /* ----------------------------------------------------- 手动记一笔 */
+  function bxBindManualForm() {
+    const form = $('bill-manual-form');
+    if (!form || form.dataset.bound === '1') { return; }
+    form.dataset.bound = '1';
+    form.addEventListener('submit', function (event) {
+      event.preventDefault();
+      bxSubmitManualTransaction();
+    });
+  }
+
+  function bxSubmitManualTransaction() {
+    const btn = $('bill-manual-submit');
+    const result = $('bill-manual-result');
+    const merchant = textOf($('bill-manual-merchant') && $('bill-manual-merchant').value).trim();
+    const amountText = textOf($('bill-manual-amount') && $('bill-manual-amount').value).trim();
+    const direction = textOf($('bill-manual-direction') && $('bill-manual-direction').value) || 'out';
+    const category = textOf($('bill-manual-category') && $('bill-manual-category').value).trim() || '其他';
+    const note = textOf($('bill-manual-note') && $('bill-manual-note').value).trim();
+    const amountFen = bxYuanToFen(amountText);
+    if (result) { result.replaceChildren(); }
+    if (!merchant) {
+      appendBubble('sys', '先写这笔是跟谁发生的，例如「楼下便利店」。', 'manual');
+      return;
+    }
+    if (!amountFen) {
+      appendBubble('sys', '金额要写大于 0 的数，例如 23.50。', 'manual');
+      return;
+    }
+    if (btn) { btn.disabled = true; }
+    bxSend('/api/transactions/manual', 'POST', {
+      merchant: merchant, amount_fen: amountFen, direction: direction, category: category, note: note
+    }).then(function (res) {
+      const tx = bxIsObj(res && res.transaction) ? res.transaction : {};
+      const balance = bxNum(res && res.balance_after_fen);
+      if (btn) { btn.disabled = false; }
+      appendBubble('sys', '已记下：' + textOf(tx.counterparty) + ' ' + textOf(tx.amount_yuan) + ' 元（' +
+        (textOf(tx.direction) === 'in' ? '收入' : '支出') + '）' +
+        (balance === null ? '' : '，记完余额 ' + pfYuanFromFen(balance) + ' 元') +
+        (res && res.idempotent ? '。这笔今天已经记过，没有重复记账。' : '。'), 'manual');
+      if (res && res.notice) { appendBubble('sys', textOf(res.notice)); }
+      if (result) {
+        result.replaceChildren();
+        result.appendChild(el('div', 'card-note', '流水号 ' + textOf(tx.transaction_id) + ' · 渠道 manual · 分类 ' +
+          textOf(tx.category) + (tx.note ? ' · 备注 ' + textOf(tx.note) : '')));
+      }
+      ['bill-manual-merchant', 'bill-manual-amount', 'bill-manual-note'].forEach(function (id) {
+        const node = $(id);
+        if (node) { node.value = ''; }
+      });
+      bxCacheDrop();
+      return bxLoad('bill', true);
+    }).catch(function (err) {
+      if (btn) { btn.disabled = false; }
+      const why = errorText(err);
+      appendBubble('sys', '这笔没记上：' + why, 'error');
+      if (result) {
+        result.replaceChildren();
+        result.appendChild(el('div', 'card-note', '没记上：' + why));
+      }
+    });
   }
 
   /* --------------------------------------------------------- 计划与提醒 */
@@ -5393,6 +5494,34 @@
     appendNode(box);
   }
 
+  async function bxLoadChatHistory() {
+    /* 会话记忆：先把这个会话之前说过的话画回来，用户才知道「接着上次」不是一句空话。
+       没有存过 session_id 时问 /api/chat/latest，续上最近一次真聊过的会话。 */
+    const sid = bxStoredSession();
+    let data = null;
+    try {
+      data = await bxFetch(sid
+        ? '/api/chat/history?session_id=' + encodeURIComponent(sid)
+        : '/api/chat/latest');
+    } catch (err) {
+      return null;
+    }
+    if (!bxIsObj(data)) { return null; }
+    const turns = bxArr(data.turns);
+    if (!turns.length) { return null; }
+    const resumed = textOf(data.session_id);
+    if (resumed && !sessionId) {
+      sessionId = resumed;
+      bxRememberSession(resumed);
+    }
+    appendBubble('sys', '这是上次的对话（' + (textOf(data.title) || resumed) + '，最近 ' + turns.length +
+      ' 轮，服务端存着）。接着说就行。', 'history');
+    turns.forEach(function (turn) {
+      appendBubble(textOf(turn.role) === 'user' ? 'user' : 'agent', textOf(turn.content));
+    });
+    return data;
+  }
+
   async function bxRestoreSession() {
     const sid = bxStoredSession();
     if (!sid) { return null; }
@@ -5645,6 +5774,7 @@
     if (refresh) {
       refresh.addEventListener('click', function () { bxLoad('bill', true); });
     }
+    bxBindManualForm();
   }
 
 
@@ -5652,7 +5782,8 @@
     boot();
     bxBindNav();
     bxLoad('overview');
-    bxRestoreSession();
+    /* 先把历史对话画回来，再恢复执行状态面板：顺序反了会看到「已接着会话」在气泡上面。 */
+    bxLoadChatHistory().then(function () { return bxRestoreSession(); });
   }
 
   if (document.readyState === 'loading') {
