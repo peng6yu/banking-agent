@@ -19,6 +19,9 @@ from __future__ import annotations
 import time
 from typing import Any, Final
 
+import app.audit as audit
+import app.db as db
+from app.clock import ValidationError, now_ms
 from app.money import fen_to_yuan_str
 
 #: 一次推断看多少个月。窗口越长越容易识别，也越容易把"换工作后固定转账"算进来。
@@ -165,8 +168,13 @@ def detect_recurring(
     *,
     lookback_months: int = LOOKBACK_MONTHS,
     as_of: int | None = None,
+    user_id: str | None = None,
 ) -> dict[str, Any]:
-    """按商户分组找周期性支出，返回候选清单（永不改库）。"""
+    """按商户分组找周期性支出，返回候选清单（永不改库）。
+
+    user_id 只用来过滤用户已经明确定性为「不是我订的」的商户：那条推断
+    已被本人否决，再端上来只是噪声。
+    """
     as_of = int(as_of if as_of is not None else time.time() * 1000)
     since = _month_start(as_of, lookback_months)
     groups: dict[str, list[Any]] = {}
@@ -177,8 +185,19 @@ def detect_recurring(
             continue
         groups.setdefault(str(row["counterparty"]), []).append(row)
 
+    dismissed = (
+        {
+            merchant
+            for merchant, item in verdicts(conn, str(user_id)).items()
+            if item.get("verdict") == VERDICT_NOT_SUBSCRIPTION
+        }
+        if user_id
+        else set()
+    )
     candidates: list[dict[str, Any]] = []
     for merchant in sorted(groups):
+        if merchant in dismissed:
+            continue
         rows = groups[merchant]
         if len(rows) < MIN_OCCURRENCES:
             continue
@@ -233,6 +252,75 @@ def upcoming(
     }
 
 
+#: 用户对「疑似订阅」只能做两种定性。没有第三种：不能替用户在商户退订，
+#: 也不能把推断直接写成已确认。
+VERDICT_NOT_SUBSCRIPTION: Final[str] = "not_subscription"
+VERDICT_CONFIRMED: Final[str] = "confirmed"
+VERDICT_ACTIONS: Final[tuple[str, ...]] = (VERDICT_NOT_SUBSCRIPTION, VERDICT_CONFIRMED)
+VERDICT_LABELS: Final[dict[str, str]] = {
+    VERDICT_NOT_SUBSCRIPTION: "不是我订的",
+    VERDICT_CONFIRMED: "确实是我订的",
+}
+
+
+def verdicts(conn, user_id: str) -> dict[str, dict[str, Any]]:
+    """用户对疑似订阅的定性结论：merchant -> 结论（按用户隔离）。"""
+    rows = conn.execute(
+        "SELECT * FROM subscription_verdicts WHERE user_id = ? ORDER BY updated_ms DESC",
+        (str(user_id),),
+    ).fetchall()
+    return {
+        str(row["merchant"]): {
+            "merchant": str(row["merchant"]),
+            "verdict": str(row["verdict"]),
+            "verdict_label": VERDICT_LABELS.get(str(row["verdict"]), str(row["verdict"])),
+            "note": str(row["note"] or ""),
+            "updated_ms": int(row["updated_ms"]),
+            "updated_text": _time_text(int(row["updated_ms"])),
+        }
+        for row in rows
+    }
+
+
+def record_verdict(
+    conn, *, user_id: str, merchant: str, verdict: str, note: str = ""
+) -> dict[str, Any]:
+    """记下用户对一条疑似订阅的定性，返回结论视图（同时写审计）。
+
+    这**不是**取消订阅：确认是订阅只意味着以后不再当误报；真要退订只能停
+    银行侧代扣，商户那边的会员得用户自己去退（见 CANCEL_BOUNDARY_TEXT 所在
+    upcoming() 的 action 文案）。
+    """
+    act = str(verdict or "").strip().lower()
+    if act not in VERDICT_ACTIONS:
+        raise ValidationError("这个定性不认识", verdict=verdict, allowed=list(VERDICT_ACTIONS))
+    name = str(merchant or "").strip()
+    if not name:
+        raise ValidationError("要指明是哪家商户", merchant=merchant)
+    stamp = now_ms()
+    with db.tx(conn):
+        conn.execute(
+            "INSERT INTO subscription_verdicts (user_id, merchant, verdict, note, created_ms, updated_ms)"
+            " VALUES (?, ?, ?, ?, ?, ?)"
+            " ON CONFLICT(user_id, merchant) DO UPDATE SET"
+            " verdict = excluded.verdict, note = excluded.note, updated_ms = excluded.updated_ms",
+            (str(user_id), name, act, str(note or "")[:200], stamp, stamp),
+        )
+        audit.append(
+            conn,
+            "subscription.verdict",
+            {"user_id": str(user_id), "merchant": name, "verdict": act},
+        )
+    return {
+        "merchant": name,
+        "verdict": act,
+        "verdict_label": VERDICT_LABELS[act],
+        "note": str(note or "")[:200],
+        "updated_ms": stamp,
+        "updated_text": _time_text(stamp),
+    }
+
+
 __all__ = [
     "CONFIDENCE_LABELS",
     "INFERRED_NOTE",
@@ -240,6 +328,12 @@ __all__ = [
     "MIN_OCCURRENCES",
     "UPCOMING_DAYS",
     "UPCOMING_NOTE",
+    "VERDICT_ACTIONS",
+    "VERDICT_CONFIRMED",
+    "VERDICT_LABELS",
+    "VERDICT_NOT_SUBSCRIPTION",
     "detect_recurring",
+    "record_verdict",
     "upcoming",
+    "verdicts",
 ]

@@ -27,6 +27,7 @@ from fastapi.responses import FileResponse, StreamingResponse
 import app.birthday as birthday
 import app.plans as plans
 import app.proactive as proactive
+import app.subscriptions as subscriptions
 import app.suitability as suitability
 import app.tools.scheduled as scheduled
 from app import audit, clock, db
@@ -46,6 +47,7 @@ from app.api.schemas import (
     ScheduledVerifyRequest,
     SavingsGoalUpdate,
     SimulatedExpenseRequest,
+    SubscriptionVerdictRequest,
     SuitabilityAssessRequest,
 )
 from app.clock import BankError, InsufficientFunds, ValidationError
@@ -58,6 +60,7 @@ from app.planner import events as planner_events
 from app.planner import assist, executor, intent, payment_guard, recover, ticker
 from app.planner.clarify import augment as augment_clarification
 from app.planner.clarify import forget as forget_clarification
+from app.planner.clarify import remember_slots
 from app.security import api_auth, factors
 from app.tools.base import primary_account
 from app.tools.registry import TOOL_NAMES, tool_schemas
@@ -706,6 +709,25 @@ async def create_reminder(request: ReminderCreate) -> dict[str, Any]:
     }
 
 
+@router.post("/api/subscriptions/verdict")
+async def subscription_verdict(request: SubscriptionVerdictRequest) -> dict[str, Any]:
+    """给一条疑似订阅定性（不是我订的 / 确实是我订的）。
+
+    只改 subscription_verdicts 一行并写审计：不动钱、不建计划、也不替用户
+    去商户退订。定性为「不是我订的」之后，这条推断不会再出现在管理页。
+    """
+    with _conn() as conn:
+        user_id = proactive.default_user_id(conn)
+        verdict = subscriptions.record_verdict(
+            conn,
+            user_id=user_id,
+            merchant=request.merchant,
+            verdict=request.verdict,
+            note=request.note,
+        )
+    return {"ok": True, "verdict": verdict}
+
+
 @router.patch("/api/savings/goals/{goal_id}")
 async def update_savings_goal(goal_id: str, request: SavingsGoalUpdate) -> dict[str, Any]:
     """调整目标：只改传了的字段，按新参数重算计划并写审计。"""
@@ -825,9 +847,16 @@ async def list_plans(status: str | None = None, limit: int = 20) -> dict[str, An
 
 @router.get("/api/plans/{plan_id}")
 async def get_plan(plan_id: str) -> dict[str, Any]:
-    """单个计划 + 每一步的状态。"""
+    """单个计划 + 每一步的状态；生日计划连预算项和自动付款授权一起给。
+
+    以前这里一律走 plans.view_plan，生日计划的 items / budget / authorization
+    只存在于 birthday.plan_with_budgets 里、没有任何 HTTP 出口——页面上那一步
+    「付这一项」就永远没有数据可用。付款端点是唯一的真花钱入口，读口必须对齐。
+    """
     with _conn() as conn:
         found = plans.view_plan(conn, plan_id)
+        if found is not None and birthday.budgets(conn, plan_id):
+            found = birthday.plan_with_budgets(conn, plan_id) or found
     if found is None:
         raise NotFound()
     return {"ok": True, "plan": found}
@@ -907,7 +936,9 @@ async def pay_birthday_item(
     一分钱都不会动，预算退回 reserved 等用户补验证。
     """
     payload = request or BirthdayPayRequest()
-    session_id = payload.session_id or f"plan:{plan_id}:{item_key}"
+    # 缺省会话带 :pay 后缀：后台到点自动付款用的是 plan:{id}:{key}，两边不能共用
+    # 同一轮执行——否则用户这边的待验证确认卡会被后台调度「接手」。
+    session_id = payload.session_id or f"plan:{plan_id}:{item_key}:pay"
     return await birthday.pay_item(
         plan_id=plan_id,
         item_key=item_key,
@@ -998,10 +1029,83 @@ async def _emit_assist(
     await queue.put((_SENTINEL, {}))
 
 
+#: 反问句里问的是哪个槽位，就只给那个槽位的可点选项。多槽位意图（生日计划、理财申购）
+#: 如果按 missing 全量拼，用户会看到「给谁过生日」底下摆着金额——选项和问题对不上。
+_SLOT_QUESTION_HINTS: Final[tuple[tuple[str, tuple[str, ...]], ...]] = (
+    ("payee_names", ("哪几个人", "参与", "和谁", "谁一起")),
+    ("payee_name", ("给谁", "转给", "收款", "谁过生日", "送给谁", "哪个人", "谁来")),
+    ("amount_fen", ("多少", "金额", "预算", "几块")),
+    ("gift", ("送什么", "送啥", "礼物", "送点")),
+    ("product_code", ("哪只", "哪个基金", "哪个产品", "产品代码", "哪款")),
+    ("card_tail", ("哪张卡", "尾号", "哪张")),
+    ("subscription_name", ("哪个订阅", "哪个商户", "哪家")),
+    ("sub_name", ("哪个订阅", "哪个商户", "哪家")),
+    ("merchant", ("哪个商户", "在哪", "哪家")),
+    ("date_hint", ("哪天", "几号", "什么时候", "日期")),
+    ("due_ms", ("什么时候", "哪天", "几号", "时间")),
+    ("txn_ref", ("哪一笔", "哪条记录", "交易号")),
+)
+#: 完全没听懂时给的「照着说一句」清单。点了就等于是把这句话发给助手，
+#: 由服务端重新解析——选项不是权限，只是省得用户自己想措辞。
+_QUICK_CHOICES: Final[tuple[tuple[str, str], ...]] = (
+    ("查一下我的余额", "查一下我的余额"),
+    ("看看我这个月的账单", "看看我这个月的账单"),
+    ("我有哪些理财产品", "我有哪些理财产品"),
+    ("我有哪些订阅", "我有哪些订阅"),
+    ("我有哪些提醒", "我有哪些提醒"),
+    ("我的计划列表", "我的计划列表"),
+    ("我有哪些储蓄目标", "我有哪些储蓄目标"),
+    ("我有哪些卡", "我有哪些卡"),
+)
+_INTENT_EXAMPLES: Final[dict[str, str]] = {
+    "query_balance": "查一下我的余额",
+    "transfer": "转 100 给李静",
+    "bill_analysis": "看看我这个月的账单",
+    "subscription": "我有哪些订阅",
+    "birthday_plan": "帮我建个生日计划",
+    "invest": "我有哪些理财产品",
+    "card_manage": "我有哪些卡",
+    "schedule_transfer": "下周一转 100 给李静",
+    "split_bill": "我们三个人 AA 这顿饭",
+    "reversal": "冲正刚才那笔转账",
+}
+
+
+def _focused_slots(parsed: intent.IntentResult) -> list[str]:
+    """这一轮反问到底在问哪个槽位：先按问句原文精确对上标签，再按关键词兜底。"""
+    missing = [str(item) for item in (parsed.missing or [])]
+    if not missing:
+        return []
+    question = str(parsed.question or "").strip()
+    if question:
+        labels = dict(intent.MISSING_LABELS)
+        labels.update(intent.INTENT_MISSING_LABELS.get(str(parsed.intent), {}))
+        for slot in missing:
+            if labels.get(slot) == question:
+                return [slot]
+        for slot, words in _SLOT_QUESTION_HINTS:
+            if slot in missing and any(word in question for word in words):
+                return [slot]
+    return missing[:1]
+
+
+def _broad_choices(parsed: intent.IntentResult) -> list[dict[str, str]]:
+    """没听懂 / 置信度不够时的选项：一条照着说的例子 + 常用动作。"""
+    example = _INTENT_EXAMPLES.get(str(parsed.intent))
+    choices: list[dict[str, str]] = []
+    if example:
+        choices.append({"label": f"这样说：{example}", "value": example})
+    for label, value in _QUICK_CHOICES:
+        if value != example:
+            choices.append({"label": label, "value": value})
+    return choices[:8]
+
+
 def _choices_for(parsed: intent.IntentResult) -> list[dict[str, str]]:
     """反问时带上可点的选项：能查数据库的就不让用户手打。"""
-    if not parsed.missing:
-        return []
+    slots = _focused_slots(parsed)
+    if not slots:
+        return _broad_choices(parsed)
     choices: list[dict[str, str]] = []
     seen: set[str] = set()
 
@@ -1016,7 +1120,7 @@ def _choices_for(parsed: intent.IntentResult) -> list[dict[str, str]]:
             user_id = proactive.default_user_id(conn)
             account = primary_account(conn)
             account_id = str(account["id"])
-            for slot in parsed.missing:
+            for slot in slots:
                 if slot == "amount_fen":
                     for amount in ("100", "500", "1000", "2000"):
                         add(f"{amount} 元", f"{amount} 元")
@@ -1059,7 +1163,28 @@ def _choices_for(parsed: intent.IntentResult) -> list[dict[str, str]]:
                         ).fetchall()
                     for row in rows:
                         add(str(row["name"]), str(row["name"]))
-                elif slot == "subscription_name":
+                elif slot == "gift":
+                    # 生日送礼的 item 是自由文本；这里给几个常见答法，省得用户想措辞。
+                    for label, value in (
+                        ("鲜花和蛋糕", "鲜花和蛋糕"),
+                        ("只要鲜花", "鲜花"),
+                        ("只要蛋糕", "蛋糕"),
+                        ("一份小礼物", "小礼物"),
+                    ):
+                        add(label, value)
+                elif slot == "action":
+                    if str(parsed.intent) == "invest":
+                        for label, value in (("申购", "申购"), ("赎回", "赎回")):
+                            add(label, value)
+                    elif str(parsed.intent) == "card_manage":
+                        for label, value in (
+                            ("冻结这张卡", "冻结卡片"),
+                            ("解冻这张卡", "解冻卡片"),
+                            ("挂失这张卡", "挂失卡片"),
+                            ("调限额", "调整限额"),
+                        ):
+                            add(label, value)
+                elif slot in ("subscription_name", "sub_name"):
                     rows = conn.execute(
                         "SELECT merchant FROM subs WHERE account_id = ? AND status = 'active'"
                         " ORDER BY merchant LIMIT 8",
@@ -1067,11 +1192,18 @@ def _choices_for(parsed: intent.IntentResult) -> list[dict[str, str]]:
                     ).fetchall()
                     for row in rows:
                         add(str(row["merchant"]), f"停掉 {row['merchant']} 的订阅")
-                elif slot in ("due_ms", "date_hint"):
+                elif slot in ("due_ms", "date_hint", "due_hint"):
                     for label, value in (
                         ("明天 09:00", "明天 09:00"),
                         ("下周一 09:00", "下周一 09:00"),
                         ("下个月 1 号 09:00", "下个月 1 号 09:00"),
+                    ):
+                        add(label, value)
+                elif slot in ("month", "period"):
+                    for label, value in (
+                        ("这个月", "这个月"),
+                        ("上个月", "上个月"),
+                        ("最近三个月", "最近三个月"),
                     ):
                         add(label, value)
     except Exception:  # noqa: BLE001 - 选项只是锦上添花，查不到就退回纯文字反问
@@ -1131,6 +1263,9 @@ async def _events(
         await _emit_assist(session_id, parsed, queue, user_text=user_text)
     elif parsed.question:
         _remember(session_id, "assistant", parsed.question)
+        # 反问轮记一笔上下文：下一句「100 元」「李静」要能拼回这句问话，
+        # 否则照着选项点下去只会被当成新消息重新解析（点了等于白点）。
+        remember_slots(session_id, text=user_text, question=parsed.question, slots=parsed.missing)
         await queue.put(
             (
                 "done",
@@ -1143,6 +1278,8 @@ async def _events(
         )
         await queue.put((_SENTINEL, {}))
     else:
+        # 真的要执行了：上一轮的「待补槽位」作废，别让下一句又把旧话拼回来。
+        forget_clarification(session_id)
         _start_run(session_id, parsed, queue, user_text=user_text, supersede=supersede)
     while True:
         item = await queue.get()

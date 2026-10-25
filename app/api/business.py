@@ -24,12 +24,12 @@ from typing import Any, Final
 
 from fastapi import APIRouter, Depends, Query
 
-from app import audit, db, funds, plans, proactive, subscriptions, suitability
+from app import audit, db, funds, handoffs, plans, proactive, subscriptions, suitability
 from app.api.routes import require_api_token
 from app.clock import now_ms
 from app.money import fen_to_yuan_str
 from app.planner import assist, ticker
-from app.tools import bill, queries
+from app.tools import bill, queries, scheduled as scheduled_mod
 from app.tools.base import ToolContext, primary_account
 from app.tools.bill import ANOMALY_KINDS
 
@@ -63,6 +63,7 @@ REMINDER_STATE_LABELS: Final[dict[str, str]] = {
 #: 预约转账的行状态 -> 用户能看懂的说法
 SCHEDULED_STATE_LABELS: Final[dict[str, str]] = {
     "scheduled": "已安排",
+    "needs_verification": "等待你补验证",
     "executed": "已完成",
     "cancelled": "已取消",
     "failed": "已失败",
@@ -453,6 +454,11 @@ def _pending_confirmations(
                 "can_confirm_here": not expired
                 and str(row["run_status"] or "") in ("running", "waiting")
                 and not required_factors,
+                # 需要人脸/短信的那一档也能在页面上办完：签发挑战 -> 填码 -> 批准，
+                # 只是多一步验证。以前这里只给「去完成验证」跳回聊天，等于没入口。
+                "can_verify_here": not expired
+                and str(row["run_status"] or "") in ("running", "waiting")
+                and bool(required_factors),
                 "state_label": "已过期，需要重新发起" if expired else "等待确认",
             }
         )
@@ -463,6 +469,83 @@ def _pending_confirmations(
         "empty_reason": None if items else "现在没有等你确认的操作。",
     }
 
+
+#: 人工接管单的状态 -> 页面说法。和 app/handoffs.py 的状态机一一对应。
+HANDOFF_STATUS_LABELS: Final[dict[str, str]] = {
+    "pending": "等待接管",
+    "claimed": "已领取",
+    "need_info": "需要补充信息",
+    "rejected": "已拒绝",
+    "cancelled": "已取消",
+    "resumed": "已恢复执行",
+    "failed": "恢复失败",
+}
+#: 自动转人工只有两种原因，都要给人一句能看懂的话。
+HANDOFF_REASON_LABELS: Final[dict[str, str]] = {
+    "PAYEE_AMBIGUOUS": "收款人有歧义，等你选定",
+    "PAYEE_NOT_FOUND": "没找到这个收款人",
+}
+
+
+def _handoffs_view(conn: sqlite3.Connection, *, limit: int = 10) -> dict[str, Any]:
+    """人工接管队列：把「卡住的一轮」和「能做的动作」一起交给页面。
+
+    以前后端有 /api/handoffs，页面上却没有任何入口——用户只能看着一轮任务
+    停在 manual，没有任何按钮可按。动作清单在服务端算：哪个状态允许哪个动作
+    是状态机的知识，不该让前端再猜一遍。
+    """
+    try:
+        rows = handoffs.list_handoffs(conn, limit=max(1, min(int(limit), 20)))
+    except Exception:  # noqa: BLE001 - 队列读不到不能让整个首页返回 500
+        return {"items": [], "count": 0, "empty_reason": "接管队列暂时读不到。"}
+    items: list[dict[str, Any]] = []
+    for row in rows:
+        status = str(row.get("status") or "")
+        reason = str(row.get("reason") or "")
+        needs_user = reason in handoffs.USER_DECISION_REASONS
+        active = status in handoffs.ACTIVE_STATUSES
+        actions: list[dict[str, Any]] = []
+        if status == "pending":
+            actions.append({"key": "claim", "label": "领取这张单", "needs_note": False})
+        if active:
+            actions.append({"key": "need-info", "label": "要求补充信息", "needs_note": True})
+            actions.append({"key": "reject", "label": "拒绝（不动钱）", "needs_note": True})
+            actions.append({"key": "cancel", "label": "取消这一轮", "needs_note": True})
+        if status in ("claimed", "need_info") and not needs_user:
+            actions.append({"key": "resume", "label": "恢复执行", "needs_note": True})
+        failure = row.get("failure") if isinstance(row.get("failure"), dict) else {}
+        failure_text = str(failure.get("user_text") or failure.get("message") or "")[:200]
+        created_ms = int(row.get("created_ms") or 0)
+        items.append(
+            {
+                "handoff_id": str(row.get("id") or ""),
+                "run_id": str(row.get("run_id") or ""),
+                "session_id": str(row.get("session_id") or ""),
+                "status": status,
+                "status_label": HANDOFF_STATUS_LABELS.get(status, status),
+                "reason": reason,
+                "reason_label": HANDOFF_REASON_LABELS.get(reason, reason or "需要人工看一眼"),
+                "request_text": str(row.get("request_text") or "")[:200],
+                "failure_text": failure_text,
+                "operator": str(row.get("operator") or ""),
+                "note": str(row.get("note") or "")[:200],
+                "needs_user": needs_user,
+                "needs_user_note": (
+                    "这单缺的是你本人的决定（选哪个收款人），操作员不能替你选。"
+                    if needs_user
+                    else ""
+                ),
+                "created_ms": created_ms,
+                "created_text": _time_text(created_ms) if created_ms else "",
+                "actions": actions,
+            }
+        )
+    return {
+        "items": items,
+        "count": len(items),
+        "empty_reason": None if items else "现在没有需要人工接管的单。",
+        "source": "handoffs 表（收款人歧义或找不到时会自动挂单）",
+    }
 
 def _scheduled_tasks(
     conn: sqlite3.Connection, user_id: str, *, limit: int = MAX_LIST
@@ -483,6 +566,14 @@ def _scheduled_tasks(
     for row in rows:
         due_ms = int(row["due_ms"])
         status = str(row["status"])
+        # 到点复判为红之后，行状态仍然是 scheduled，只是被挂起等强验证。
+        # 页面必须能看出这一档，否则用户以为「已安排」，钱却永远不动。
+        needs_verification = status == "scheduled" and bool(
+            int(row["needs_verification"] or 0)
+        )
+        required_factors = (
+            scheduled_mod.required_factors_for(conn, str(row["id"])) if needs_verification else []
+        )
         items.append(
             {
                 "scheduled_id": str(row["id"]),
@@ -495,7 +586,14 @@ def _scheduled_tasks(
                 "due_text": _time_text(due_ms),
                 "recurrence": str(row["recurrence"]),
                 "status": status,
-                "state_label": SCHEDULED_STATE_LABELS.get(status, status),
+                "state_label": (
+                    SCHEDULED_STATE_LABELS["needs_verification"]
+                    if needs_verification
+                    else SCHEDULED_STATE_LABELS.get(status, status)
+                ),
+                "needs_verification": needs_verification,
+                "required_factors": required_factors,
+                "can_verify_here": bool(needs_verification),
                 "overdue": status == "scheduled" and due_ms <= stamp,
                 "executed_ms": int(row["executed_ms"]) if row["executed_ms"] else None,
                 "executed_text": _time_text(row["executed_ms"]),
@@ -507,6 +605,7 @@ def _scheduled_tasks(
         "count": len(items),
         "scheduled_count": len(pending),
         "overdue_count": sum(1 for i in pending if i["overdue"]),
+        "needs_verification_count": sum(1 for i in items if i["needs_verification"]),
         "empty_reason": None if items else "还没有任何预约任务。",
     }
 
@@ -630,6 +729,7 @@ def overview_view(conn: sqlite3.Connection) -> dict[str, Any]:
     goals = _savings_goals(conn, user_id, limit=3)
     scheduled = _scheduled_tasks(conn, user_id, limit=5)
     alerts = _alerts(conn, user_id, limit=3)
+    reminders = assist.active_reminders(conn, user_id)
 
     accounts = _accounts(conn)
     if not accounts:
@@ -668,6 +768,7 @@ def overview_view(conn: sqlite3.Connection) -> dict[str, Any]:
             "disclaimer": "规则命中不等于欺诈认定；每一条都可以点开看依据和相关流水。",
         },
         "pending_authorizations": pending,
+        "handoffs": _handoffs_view(conn, limit=5),
         "savings_goals": {
             "items": goals,
             "count": len(goals),
@@ -676,6 +777,14 @@ def overview_view(conn: sqlite3.Connection) -> dict[str, Any]:
         "plans_and_reminders": {
             "scheduled": scheduled,
             "alerts": alerts,
+            # 首页以前只有「预约 / 预警 / 调度器」，用户自己建的提醒和卡住的人工单
+            # 只在计划页或根本看不见；总览要把这两类都摊开，才谈得上「可疑的东西有地方处理」。
+            "reminders": {
+                "items": reminders,
+                "count": len(reminders),
+                "empty_reason": None if reminders else "还没有提醒。",
+            },
+            "handoffs": _handoffs_view(conn, limit=5),
             "scheduler": _scheduler_block(),
         },
         "quick_actions": [dict(item) for item in QUICK_ACTIONS],
@@ -835,7 +944,39 @@ def management_view(conn: sqlite3.Connection) -> dict[str, Any]:
         )
 
     profile = suitability.load(conn, user_id)
-    inferred = subscriptions.detect_recurring(conn, account_id)
+    verdict_map = subscriptions.verdicts(conn, user_id)
+    inferred = subscriptions.detect_recurring(conn, account_id, user_id=user_id)
+    # 每条疑似订阅都要有一条「这是误报」的出口：只读清单 + 没有处置动作，
+    # 就等于用户每次刷新都被同一批猜测打扰，却什么也做不了。
+    for item in inferred.get("items") or []:
+        merchant = str(item.get("merchant") or "")
+        item["verdict"] = verdict_map.get(merchant)
+        item["actions"] = [
+            {
+                "kind": "subscription_verdict",
+                "merchant": merchant,
+                "verdict": subscriptions.VERDICT_NOT_SUBSCRIPTION,
+                "label": "不是我订的",
+                "style": "ghost",
+            },
+            {
+                "kind": "subscription_verdict",
+                "merchant": merchant,
+                "verdict": subscriptions.VERDICT_CONFIRMED,
+                "label": "确实是我订的",
+            },
+            {
+                "kind": "prompt",
+                "label": "让助手核实这几笔",
+                "prompt": f"帮我核实一下「{merchant}」这几笔是不是订阅",
+            },
+        ]
+    inferred["verdicts"] = list(verdict_map.values())
+    inferred["dismissed_count"] = sum(
+        1
+        for value in verdict_map.values()
+        if value.get("verdict") == subscriptions.VERDICT_NOT_SUBSCRIPTION
+    )
     upcoming = subscriptions.upcoming(conn, account_id)
     scheduled = _scheduled_tasks(conn, user_id, limit=5)
     holdings_summary = {
@@ -1104,6 +1245,7 @@ def executions_view(
         "generated_ms": stamp,
         "generated_text": _time_text(stamp),
         "sessions": session_items,
+        "handoffs": _handoffs_view(conn, limit=20),
         "denials": [
             {
                 "reason": str(row["reason"]),

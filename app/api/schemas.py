@@ -255,6 +255,20 @@ class ScheduledVerifyRequest(BaseModel):
     proofs: list[FactorProof] | None = None
 
 
+class SubscriptionVerdictRequest(BaseModel):
+    """POST /api/subscriptions/verdict 的入参：用户对一条疑似订阅定性。
+
+    只有两种结论：不是我订的（以后不再当候选端上来）/ 确实是我订的（留痕，
+    但也不会自动变成银行侧代扣）。推断永远不自动改写这个结论。
+    """
+
+    model_config = ConfigDict(extra="forbid", title="疑似订阅定性")
+
+    merchant: str = Field(min_length=1, max_length=60)
+    verdict: Literal["not_subscription", "confirmed"]
+    note: str = Field(default="", max_length=200)
+
+
 __all__ = [
     "AlertResolveRequest",
     "BirthdayItemIn",
@@ -274,5 +288,6 @@ __all__ = [
     "SavingsGoalCreate",
     "SavingsGoalUpdate",
     "SimulatedExpenseRequest",
+    "SubscriptionVerdictRequest",
     "SuitabilityAssessRequest",
 ]

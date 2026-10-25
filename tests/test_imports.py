@@ -144,6 +144,7 @@ ALLOWED: dict[str, frozenset[str]] = {
         "app.plans",
         "app.proactive",
         "app.security",
+        "app.subscriptions",
         "app.suitability",
         # 缺失槽位的可点选项要按主账户取候选（amount_fen / payee_name …）
         "app.tools.base",
@@ -388,7 +389,7 @@ ALLOWED: dict[str, frozenset[str]] = {
         "app.audit",
         "app.clock",
     }),
-    # 订阅推断：只读流水，只用到金额格式化
+    # 订阅推断：只读流水 + 用户的定性结论（写这张表要审计，错误类型用 clock）
     "app.plans": frozenset(),
     # 生日计划：钱走 executor（确认/令牌），商户白名单复用工具层常量
     "app.birthday": frozenset({
@@ -411,6 +412,9 @@ ALLOWED: dict[str, frozenset[str]] = {
         "app.planner.runner",
     }),
     "app.subscriptions": frozenset({
+        "app.audit",
+        "app.clock",
+        "app.db",
         "app.money",
     }),
     "app.smoke": frozenset(),

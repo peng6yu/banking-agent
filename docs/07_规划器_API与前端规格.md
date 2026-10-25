@@ -356,6 +356,10 @@ for node in topo_sort(dag):
 
 **`choices` 的语义**（2026-10-25）：`done` 事件里的 `choices` 是服务端按缺失槽位从库里生成的**可点选项**（`amount_fen` / `payee_name` / `payee_names` / `card_tail` / `product_code` / `subscription_name` / `due_ms` / `date_hint`，最多 8 条）。前端把它渲染成 chips，点一下等于替用户把那句话发出去——用户不必手打；服务端照旧重新解析与裁决，选项本身不带任何权限。
 
+**chips 只问当前槽位**（2026-10-25）：`_choices_for` 先看这一句正在问哪个槽位（`_focused_slots` + `_SLOT_QUESTION_HINTS`），只给那一个槽位的候选；`unknown` / 低置信度时给 `_broad_choices` 的 8 条固定去处，不再出现「收款人与金额混排」或「一个选项都没有」。
+
+**同名对象必须可区分**：`assist` 生成结束类 chip 时，同名计划/提醒的文案带「（MM-DD HH:MM · pl_xxx）」，`value` 是「取消计划 pl_xxx」/「取消提醒 pl_xxx」；服务端先按计划号认（`by_id`），同时命中多条则回 `plan_cancel_choose` / `reminder_cancel_choose` 反问，绝不按标题猜。
+
 **操作说明（SSE 是长连接）**：`confirm` / `factor` 事件到达时这条流**不会结束**——执行器正等着用户点头。必须保持连接、**在流还开着的时候** `POST /api/confirm` 回灌确认（黄灯）或回灌因子（红灯）；整轮跑完之后会话才从 `executor.RUNS` 摘除，此后回灌会拿到 400「会话已结束或不存在」。命令行客户端要另开一个请求去 POST 确认；前端不受影响。
 
 ## 7.7 前端（`web/index.html`，单文件）
@@ -396,6 +400,10 @@ for node in topo_sort(dag):
 | `confirmAction(id, approve, factor, proofs, sid)` | POST /api/confirm；`sid` 是发起该轮确认的会话（总览页的待确认卡属于别的会话，必须带它自己的 `session_id`） |
 | `bxRenderReminders(block)` / `bxBindReminderForm()` / `bxSubmitReminder()` | 计划页的提醒列表与表单：表单只调 `POST /api/reminders`；列表读 `GET /api/business/plans` 的 `reminders` 段，「结束这条提醒」= `PATCH /api/plans/{id} {status:'cancelled'}` |
 | `bxDueParts(value)` | `datetime-local` → 本地时区 `{ms,hour,minute,weekday,day}`，`weekday` 与 `reminder_time` 的 0=周一 对齐 |
+| `bxInlineFactor(box, cid, sid, onDone)` | 就地补验证：拉 `POST /api/factor/challenge` 渲染口令行 → 带 `proofs` 调 `confirmAction(cid, true, null, proofs, sid)`；用于总览待处理授权 |
+| `bxRenderHandoffs(host, block, tagId)` / `bxHandoffCard(item)` / `bxHandoffPost(item, action, note)` | 人工接管队列：领取 / 要求补充信息（`note` 必填）/ 拒绝（不动钱）/ 取消这一轮，写审计的操作者是 `BX_OPERATOR` |
+| `bxBindBirthdayForm()` / `bxSubmitBirthdayPlan()` / `bxRenderBirthdayResult(plan)` | 生日计划：`POST /api/plans/birthday` 建单，卡片渲染预算/可支配/预留/到点与逐项状态 |
+| `bxPayBirthdayItem(planId, itemKey, btn, host)` / `bxBirthdayFactor(...)` / `bxReloadBirthdayResult(planId)` | 逐项付款：红档先拿 `waiting_factor` → 口令行 → 带 `proofs` 重发同一请求；成功后用 `GET /api/plans/{id}`（返回 `{ok, plan}`）重绘卡片，所以「已付款」与列表状态一致 |
 | `escapeHtml(s)` | **所有来自后端的文本都要过一遍**，防 XSS |
 
 ## 7.8 前端禁止事项

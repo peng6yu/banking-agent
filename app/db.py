@@ -59,6 +59,7 @@ TABLE_NAMES: Final[tuple[str, ...]] = (
     "plan_budgets",
     "plan_authorizations",
     "handoffs",
+    "subscription_verdicts",
 )
 
 SCHEMA_SQL: Final[str] = """
@@ -483,6 +484,19 @@ CREATE TABLE IF NOT EXISTS handoffs (
 CREATE INDEX IF NOT EXISTS idx_handoffs_status ON handoffs(status, created_ms);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_handoffs_active_run
   ON handoffs(run_id) WHERE status IN ('pending','claimed','need_info');
+
+-- 疑似订阅的核对结论：流水推断出来的「疑似订阅」只能由用户自己定性。
+-- 说「这不是订阅」之后要能记住，否则每次打开页面同一条又冒出来，
+-- 用户既不能转正也不能排除，那这块就只是块只读广告。
+CREATE TABLE IF NOT EXISTS subscription_verdicts (
+  user_id     TEXT NOT NULL,
+  merchant    TEXT NOT NULL,
+  verdict     TEXT NOT NULL CHECK (verdict IN ('not_subscription','confirmed')),
+  note        TEXT NOT NULL DEFAULT '',
+  created_ms  INTEGER NOT NULL,
+  updated_ms  INTEGER NOT NULL,
+  PRIMARY KEY (user_id, merchant)
+);
 
 -- 审计只增不改：UPDATE/DELETE 一律由 SQLite 层拦掉（docs/03 3.2 第 7 张表）
 CREATE TRIGGER IF NOT EXISTS audit_no_update BEFORE UPDATE ON audit_log

@@ -96,6 +96,9 @@ EVENT_TYPES: Final[frozenset[str]] = frozenset(
         "suitability.checked",
         # 订阅：从流水推断出的潜在订阅（不是已确认事实，audit 里要能区分）
         "subscription.inferred",
+        # 疑似订阅的用户定性：只有用户自己说「是我订的 / 不是我订的」才落这条，
+        # 推断永远不自动转正，也不自动消失。
+        "subscription.verdict",
         # 跨场景计划：计划与步骤的生命周期
         "plan.created",
         "plan.updated",

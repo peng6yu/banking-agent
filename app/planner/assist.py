@@ -47,6 +47,24 @@ _BALANCE_QUERY_RE: Final[re.Pattern[str]] = re.compile(r"余额|账单|流水|�
 _CARD_RE: Final[re.Pattern[str]] = re.compile(r"储蓄卡|借记卡|信用卡|工资卡")
 SAVINGS_EXCLUDES: Final[tuple[str, ...]] = ("理财", "基金", "赎回", "转账", "汇款", "还款")
 
+# 「计划」只在这里接两件事：列出来、结束掉。新建仍交给模型 + 生日/营销链路，
+# 否则「帮我建个生日计划」会被快路吞成一句话建计划，金额和日期全问不出来。
+_PLAN_LIST_RE: Final[re.Pattern[str]] = re.compile(
+    r"(有哪些|看看|查看|列出|我的|所有|还有|几个).{0,6}计划"
+)
+# 取消的动词可能在前也可能在后：「取消生日计划」和「把生日计划取消掉」都得认。
+_PLAN_CANCEL_RE: Final[re.Pattern[str]] = re.compile(
+    r"(取消|停掉|结束|删掉|放弃|终止|不想要).{0,10}计划"
+    r"|计划.{0,10}(取消|停掉|结束|删掉|放弃|终止|不要了)"
+)
+PLAN_STATUS_LABELS: Final[dict[str, str]] = {
+    "active": "进行中",
+    "paused": "等你确认",
+    "completed": "已完成",
+    "cancelled": "已结束",
+    "failed": "卡住了",
+}
+
 _CN_DIGITS: Final[dict[str, str]] = {
     "零": "0", "一": "1", "二": "2", "两": "2", "三": "3", "四": "4",
     "五": "5", "六": "6", "七": "7", "八": "8", "九": "9", "十": "10",
@@ -184,6 +202,9 @@ def detect(text: str) -> str | None:
     # 「半年内存 3000 元」这类没有关键词、但明显是存钱目标的说法。
     if _SAVINGS_AMOUNT_RE.search(clean):
         return "savings"
+    # 计划只接「列出来」和「结束掉」；新建计划仍要模型去凑参数。
+    if _PLAN_LIST_RE.search(clean) or _PLAN_CANCEL_RE.search(clean):
+        return "plan"
     return None
 
 
@@ -373,13 +394,18 @@ def _handle_savings(conn, text: str, user_id: str) -> dict[str, Any]:
 def _clean_reminder_title(text: str) -> str:
     title = _clean(text)
     patterns = (
-        r"^(帮我|请|麻烦|给我|设置|建一个|建立|定一个|添加|加一个|新增)+",
+        # 动词前缀要认「建个/设个」这种口语缩写，否则「帮我建个…的提醒」会留下「建个」；
+        # 句首的「我想/我要」也只是语气，不是提醒内容。
+        r"^(帮我|请|麻烦|给我|我想|我要|设置|设个|设一个|建一个|建个|建条|建立|定一个|定个"
+        r"|添加|加一个|新增|安排|记一下|记个|记得|提醒我|提醒一下|提醒)+",
         r"(提醒我|提醒一下|提醒|记得|别忘了|别忘|叫我|到点|到时候)+",
         r"(每(?:个)?月\s*\d+\s*[号日])",
         r"(每(?:周|星期)[一二三四五六日天])",
         r"(每天|每日)",
-        r"((?:上午|下午|晚上|中午)?\s*\d{1,2}\s*[点:：]\s*\d{0,2}\s*分?)",
-        r"(明天|后天|大后天|今天|下周[一二三四五六日天]|\d{4}-\d{1,2}-\d{1,2})",
+        # 时段词必须和钟点一起消掉，不然「明天早上 8 点喝水」会剩一个「早上」。
+        r"((?:凌晨|早上|上午|中午|下午|傍晚|晚上|今晚|今早|明早|明晚)?\s*\d{1,2}\s*[点:：]\s*\d{0,2}\s*分?)",
+        r"(明天|后天|大后天|今天|今晚|今早|明早|明晚|下周[一二三四五六日天]|\d{4}-\d{1,2}-\d{1,2})",
+        r"(闹钟|铃声)",
     )
     for _ in range(4):
         before = title
@@ -387,8 +413,13 @@ def _clean_reminder_title(text: str) -> str:
             title = re.sub(pattern, "", title)
         if title == before:
             break
-    title = title.strip(" ，。；;、:：-—")
-    return title[:40] or "你安排的事"
+    # 没带钟点的时段词（「提醒我明天早上喝水」）也只是时间信息，不是要做的事。
+    title = re.sub(
+        r"^(凌晨|早上|上午|中午|下午|傍晚|晚上|今晚|今早|明早|明晚)", "",
+        title.strip(" ，。；;、:：-—"),
+    )
+    title = re.sub(r"[的了吧呀啊]$", "", title.strip(" ，。；;、:：-—"))
+    return title.strip()[:40] or "你安排的事"
 
 
 def _parse_clock(text: str) -> tuple[int, int] | None:
@@ -547,7 +578,8 @@ def create_reminder(
 
 def _active_reminders(conn, user_id: str) -> list[dict[str, Any]]:
     rows = conn.execute(
-        "SELECT p.*, s.payload_json AS step_payload FROM plans p"
+        "SELECT p.*, s.payload_json AS step_payload, s.due_ms AS step_due_ms,"
+        " s.state AS step_state FROM plans p"
         " JOIN plan_steps s ON s.plan_id = p.id"
         " WHERE p.user_id = ? AND p.status = 'active' AND s.kind = 'reminder'"
         " GROUP BY p.id ORDER BY p.updated_ms DESC LIMIT 20",
@@ -566,6 +598,18 @@ def _active_reminders(conn, user_id: str) -> list[dict[str, Any]]:
             raw = raw[3:]
         view["title"] = raw or "你安排的事"
         view["repeat"] = str(payload.get("repeat") or "none")
+        # due/state 是步骤级的，plan_view 里没有；聊天里的「下次 X」就靠这两个字段。
+        due_ms = int(row["step_due_ms"] or 0)
+        view["due_ms"] = due_ms
+        view["due_text"] = reminder_time.time_text(due_ms) if due_ms else ""
+        view["state"] = str(row["step_state"] or "")
+        view["repeat_label"] = reminder_time.label(
+            str(view["repeat"]),
+            int(payload.get("hour") or 9),
+            int(payload.get("minute") or 0),
+            int(payload["day"]) if payload.get("day") is not None else None,
+            int(payload["weekday"]) if payload.get("weekday") is not None else None,
+        )
         result.append(view)
     return result
 
@@ -607,21 +651,103 @@ def active_reminders(conn, user_id: str) -> list[dict[str, Any]]:
     return items
 
 
+def _stamp_text(ms: Any) -> str:
+    """把毫秒时间戳写成「10-26 08:00」：同名计划/提醒只能靠时间与编号区分。"""
+    try:
+        value = int(ms or 0)
+    except (TypeError, ValueError):
+        return ""
+    if value <= 0:
+        return ""
+    return time.strftime("%m-%d %H:%M", time.localtime(value / 1000))
+
+
+def _reminder_cancel_choices(reminders: list[dict[str, Any]]) -> list[dict[str, str]]:
+    """每条提醒一个「取消」chip，最多 8 个。
+
+    同名的提醒（连着说几句「提醒我喝水」都建得出来）如果只给标题，几个按钮长得
+    一模一样、点哪个全看后端挑了第一条——所以同名时改用计划号做 value，并把
+    「下次什么时候」写进 label，让用户能分清点的是哪一条。
+    """
+    counts: dict[str, int] = {}
+    for plan in reminders:
+        title = str(plan["title"])
+        counts[title] = counts.get(title, 0) + 1
+    options: list[dict[str, str]] = []
+    for plan in reminders:
+        title = str(plan["title"])
+        plan_id = str(plan.get("plan_id") or "")
+        when = str(plan.get("due_text") or "")
+        if counts.get(title, 0) > 1 and plan_id:
+            label = f"取消「{title}」（{when}）" if when else f"取消「{title}」（{plan_id}）"
+            options.append({"label": label, "value": f"取消提醒 {plan_id}"})
+        else:
+            options.append({"label": f"取消「{title}」", "value": f"取消提醒 {title}"})
+        if len(options) >= 8:
+            break
+    return options
+
+
+def _plan_cancel_choices(plans_: list[dict[str, Any]]) -> list[dict[str, str]]:
+    """同名计划同样要能分辨：label 带日期与计划号，value 直接用计划号。"""
+    counts: dict[str, int] = {}
+    for plan in plans_:
+        title = str(plan.get("title") or "")
+        counts[title] = counts.get(title, 0) + 1
+    options: list[dict[str, str]] = []
+    for plan in plans_:
+        choice = _plan_choice(plan)
+        if choice is None:
+            continue
+        title = str(plan.get("title") or "")
+        plan_id = str(plan.get("plan_id") or "")
+        if counts.get(title, 0) > 1 and plan_id:
+            when = _stamp_text(plan.get("updated_ms") or plan.get("created_ms"))
+            tail = f"{when} · {plan_id}" if when else plan_id
+            options.append({"label": f"结束「{title}」（{tail}）", "value": f"取消计划 {plan_id}"})
+        else:
+            options.append(choice)
+        if len(options) >= 8:
+            break
+    return options
+
+
 def _handle_reminder(conn, text: str, user_id: str) -> dict[str, Any]:
     clean = _clean(text)
     reminders = _active_reminders(conn, user_id)
 
-    if re.search(r"(取消|停掉|结束|删掉|不要).{0,8}提醒", clean) or clean.startswith("取消这条提醒"):
-        wanted = re.sub(r"^(取消|停掉|结束|删掉|不要)\s*(这条|这个)?\s*提醒\s*", "", clean).strip(" 「」\"'")
-        matches = [p for p in reminders if wanted and wanted in str(p["title"])]
+    if (
+        re.search(r"(取消|停掉|结束|删掉|去掉|关掉|不要).{0,10}提醒", clean)
+        or re.search(r"提醒.{0,10}(取消|停掉|结束|删掉|去掉|关掉|不用了)", clean)
+        or clean.startswith("取消这条提醒")
+    ):
+        # 动词可能在「提醒」前面（取消提醒 开会），也可能在后面（把提醒结束掉）；
+        # 只认一种语序会把「结束掉」当成要新建一个叫「结束掉」的提醒。
+        wanted = re.sub(r"^(请|帮我|麻烦|把|将)\s*", "", clean)
+        wanted = re.sub(
+            r"(取消|停掉|结束|删掉|去掉|关掉|不要|不用了|这条|这个|那个|提醒|一下|掉|吧|了|的)",
+            "",
+            wanted,
+        ).strip(" 「」\"'，。！？,.!?")
+        # 点 chip 发回来的可能带计划号（同名提醒只能靠编号分清），先按编号认
+        by_id = [p for p in reminders if str(p.get("plan_id") or "") and str(p["plan_id"]) in clean]
+        matches = by_id or [p for p in reminders if wanted and wanted in str(p["title"])]
         if not matches and len(reminders) == 1:
             matches = reminders
+        if len(matches) > 1:
+            return {
+                "intent": "assist",
+                "action": "reminder_cancel_choose",
+                "summary": f"有 {len(matches)} 条提醒都对得上，要取消哪一条？",
+                "choices": _reminder_cancel_choices(matches),
+                "data": {"reminders": matches},
+            }
         if not matches and reminders:
             return {
                 "intent": "assist",
                 "action": "reminder_cancel_choose",
                 "summary": "你有不止一个提醒，要取消哪一个？",
-                "choices": [{"label": p["title"], "value": f"取消提醒 {p['title']}"} for p in reminders[:6]],
+                "choices": _reminder_cancel_choices(reminders),
                 "data": {"reminders": reminders},
             }
         if not matches:
@@ -652,14 +778,26 @@ def _handle_reminder(conn, text: str, user_id: str) -> dict[str, Any]:
                 "choices": [{"label": "建一个提醒", "value": "提醒我明天上午 9 点开会"}],
                 "data": {"reminders": []},
             }
-        lines = [f"「{p['title']}」下次 {p.get('due_text') or '—'}" for p in reminders[:5]]
+        # 同名提醒（比如连着建了几条「喝水」）在列表里各占一行会显得像 bug：
+        # 按标题归并，报「同名 N 条」并把最早那次当成「下次」。
+        counts: dict[str, int] = {}
+        soonest: dict[str, dict[str, Any]] = {}
+        for item in reminders:
+            title = str(item["title"])
+            counts[title] = counts.get(title, 0) + 1
+            current = soonest.get(title)
+            if current is None or int(item.get("due_ms") or 0) < int(current.get("due_ms") or 0):
+                soonest[title] = item
+        lines = []
+        for title, item in list(soonest.items())[:5]:
+            extra = f"（同名 {counts[title]} 条）" if counts[title] > 1 else ""
+            lines.append(f"「{title}」下次 {item.get('due_text') or '—'}{extra}")
         return {
             "intent": "assist",
             "action": "reminder_list",
-            "summary": "你有这些提醒：" + "；".join(lines) + "。",
-            "choices": [
-                {"label": f"取消「{reminders[0]['title']}」", "value": f"取消提醒 {reminders[0]['title']}"}
-            ],
+            "summary": f"你有 {len(reminders)} 条提醒：" + "；".join(lines) + "。",
+            # 列表本身也要给动作：只报「你有这些提醒」等于让用户自己再打一句。
+            "choices": _reminder_cancel_choices(reminders),
             "data": {"reminders": reminders},
         }
 
@@ -696,6 +834,128 @@ def _handle_reminder(conn, text: str, user_id: str) -> dict[str, Any]:
     }
 
 
+
+# ------------------------------------------------------------------ 计划的列出与结束
+
+
+def _plan_line(plan: dict[str, Any]) -> str:
+    steps = plan.get("steps") or []
+    done = sum(1 for item in steps if str(item.get("state")) in ("done", "skipped"))
+    status = PLAN_STATUS_LABELS.get(str(plan.get("status")), str(plan.get("status")))
+    nxt = next((item for item in steps if str(item.get("state")) == "pending"), None)
+    tail = ""
+    if nxt is not None:
+        tail = "，下一步 {} {}".format(
+            str(nxt.get("title") or "待办"), str(nxt.get("due_text") or "")
+        ).strip()
+    return "「{}」（{}，{}/{} 步{}）".format(
+        str(plan.get("title") or "计划"), status, done, len(steps), tail
+    )
+
+
+def _plan_choice(plan: dict[str, Any]) -> dict[str, str] | None:
+    """提醒和储蓄目标各有自己的结束动词，别混进「取消计划」这条路径。"""
+    title = str(plan.get("title") or "")
+    if title.startswith("提醒："):
+        return {"label": f"结束提醒「{title[3:]}」", "value": f"取消提醒 {title[3:]}"}
+    if title.startswith("储蓄目标："):
+        return None
+    return {"label": f"结束「{title}」", "value": f"取消计划 {title}"}
+
+
+def _real_plans_first(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """真正的计划排在提醒前面：提醒通常几十条，先占满 chip 就把「结束这份生日计划」挤没了。"""
+    return sorted(
+        items,
+        key=lambda p: (str(p.get("title") or "").startswith("提醒："), -int(p.get("updated_ms") or 0)),
+    )
+
+
+def _handle_plan(conn, text: str, user_id: str) -> dict[str, Any]:
+    clean = _clean(text)
+    all_plans = plans.list_plans(conn, user_id=user_id, limit=20)
+    live = [p for p in all_plans if str(p.get("status")) in ("active", "paused")]
+
+    if _PLAN_CANCEL_RE.search(clean):
+        key = re.sub(r"[\s，。！？,.!?、:：]", "", clean)
+        for word in (
+            "帮我", "请", "麻烦", "把", "那个", "这个", "计划", "取消", "停掉",
+            "结束", "删掉", "放弃", "终止", "不想要", "不要了", "一下", "掉", "吧", "了", "的",
+        ):
+            key = key.replace(word, "")
+        def norm(value: str) -> str:
+            return re.sub(r"[\s，。！？,.!?、:：]", "", value)
+
+        # 同名计划（「API 测试」建过好几份）只能靠计划号认：chip 的 value 会带编号
+        by_id = [p for p in live if str(p.get("plan_id") or "") and str(p["plan_id"]) in clean]
+        matches = by_id or [p for p in live if key and key in norm(str(p.get("title") or ""))]
+        if not matches and len(live) == 1:
+            matches = live
+        if len(matches) > 1:
+            return {
+                "intent": "assist",
+                "action": "plan_cancel_choose",
+                "summary": f"有 {len(matches)} 个计划都对得上，要结束哪一个？结束只是停掉后面没做的事，账户里的钱一分没动。",
+                "choices": _plan_cancel_choices(_real_plans_first(matches)),
+                "data": {"plans": matches},
+            }
+        if not matches and live:
+            return {
+                "intent": "assist",
+                "action": "plan_cancel_choose",
+                "summary": "你有不止一个计划，要结束哪一个？结束只是停掉后面没做的事，账户里的钱一分没动。",
+                "choices": _plan_cancel_choices(_real_plans_first(live)),
+                "data": {"plans": live},
+            }
+        if not matches:
+            return {
+                "intent": "assist",
+                "action": "plan_cancel_none",
+                "summary": "现在没有进行中的计划，没什么可结束的。",
+                "choices": [
+                    {"label": "我有哪些提醒", "value": "我有哪些提醒"},
+                    {"label": "我有哪些储蓄目标", "value": "我有哪些储蓄目标"},
+                ],
+                "data": {},
+            }
+        plan = matches[0]
+        plans.update(conn, str(plan["plan_id"]), user_id=user_id, status="cancelled")
+        return {
+            "intent": "assist",
+            "action": "plan_cancel",
+            "summary": f"已结束计划「{plan['title']}」。计划里没做的事不会再提醒你，账户里的钱一分没动。",
+            "choices": [{"label": "看看还剩下哪些计划", "value": "我的计划列表"}],
+            "data": {"plan": plan},
+        }
+
+    if not all_plans:
+        return {
+            "intent": "assist",
+            "action": "plan_list",
+            "summary": "现在还没有任何计划。可以让我「提醒我明天上午 9 点开会」，或者「帮我建一个存钱目标」。",
+            "choices": [
+                {"label": "建一个提醒", "value": "提醒我明天上午 9 点开会"},
+                {"label": "建一个储蓄目标", "value": "帮我建一个存钱目标"},
+                {"label": "我有哪些提醒", "value": "我有哪些提醒"},
+            ],
+            "data": {"plans": []},
+        }
+    lines = [_plan_line(p) for p in all_plans[:5]]
+    head = f"你有 {len(all_plans)} 个计划"
+    if len(all_plans) > len(lines):
+        head += f"，先列最近 {len(lines)} 个"
+    choices = _plan_cancel_choices(_real_plans_first(live))
+    if not choices:
+        choices = [{"label": "建一个提醒", "value": "提醒我明天上午 9 点开会"}]
+    return {
+        "intent": "assist",
+        "action": "plan_list",
+        "summary": head + "：" + "；".join(lines) + "。",
+        "choices": choices,
+        "data": {"plans": all_plans},
+    }
+
+
 def handle(conn, text: str, *, session_id: str | None = None) -> dict[str, Any] | None:
     """识别并执行；没命中返回 None，调用方继续走模型解析。"""
     kind = detect(text)
@@ -704,6 +964,8 @@ def handle(conn, text: str, *, session_id: str | None = None) -> dict[str, Any] 
     user_id = proactive.default_user_id(conn)
     if kind == "reminder":
         return _handle_reminder(conn, text, user_id)
+    if kind == "plan":
+        return _handle_plan(conn, text, user_id)
     return _handle_savings(conn, text, user_id)
 
 

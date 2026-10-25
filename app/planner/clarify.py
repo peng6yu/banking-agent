@@ -34,14 +34,31 @@ _ORDINAL_DIGITS: Final[dict[str, int]] = {
 }
 
 
+#: 这一轮反问需要用户补哪个槽位。记下来只为了「下一句短回答接回上一句」，
+#: 不参与任何放行判断——真正执行仍然重新解析、重新裁决。
+_SHORT_REPLY_MAX: Final[int] = 16
+#: 明显是在说别的事（新请求 / 提问）：这些开头不当作「回答上一轮」。
+_NEW_TALK_RE: Final[re.Pattern[str]] = re.compile(
+    r"^(?:帮我|帮忙|麻烦|请|我想|我要|我要看|查|看|给我|取消|停掉|结束|挂失|冻结|"
+    r"解冻|调整|赎回|申购|买|卖|建|创建|新建|记录|添加|把|为什么|怎么|什么)"
+)
+#: 带这些疑问词的是新问题，不是槽位取值。
+_QUESTION_WORDS: Final[tuple[str, ...]] = ("怎么", "为什么", "什么", "能不能", "可以吗", "是不是", "多少")
+
+
 @dataclass
 class Pending:
-    """一次待澄清的上下文：原话、被问到的收款人查询词、候选、问题。"""
+    """一次待澄清的上下文：原话、被问到的收款人查询词、候选、问题。
+
+    kind="payee"：收款人歧义闸门，候选里必须有一致的尾号才补全；
+    kind="slots"：普通反问（缺金额/缺对象…），只有「短回答」才拼回上一句。
+    """
 
     text: str
-    query: str
+    query: str = ""
     candidates: list[dict[str, Any]] = field(default_factory=list)
     question: str = ""
+    kind: str = "payee"
     created_ms: int = field(default_factory=now_ms)
 
 
@@ -62,6 +79,22 @@ def remember(
         query=query,
         candidates=[dict(item) for item in candidates if isinstance(item, dict)],
         question=question,
+        kind="payee",
+    )
+
+
+def remember_slots(session_id: str, *, text: str, question: str, slots: list[str]) -> None:
+    """普通反问也记一笔：下一句短回答（「100 元」「李静」）要能拼回这句话。
+
+    不记的话，用户照着问句答一句就会被当成全新消息重新解析，于是只能收到
+    「你是想查询、转账还是看账单？」——页面上那些可点选项点了也是白点。
+    """
+    _PENDING[session_id] = Pending(
+        text=str(text or "").strip(),
+        query=",".join(str(item) for item in slots),
+        candidates=[],
+        question=str(question or ""),
+        kind="slots",
     )
 
 
@@ -94,6 +127,8 @@ def augment(session_id: str, reply: str) -> str | None:
     text = str(reply or "").strip()
     if not text:
         return None
+    if pending.kind == "slots":
+        return _merge_slots(pending, text)
     chosen = _match_tail(pending, text) or _match_ordinal(pending, text)
     if chosen is None:
         return None
@@ -105,6 +140,24 @@ def augment(session_id: str, reply: str) -> str | None:
     if name:
         return f"{pending.text}（收款人是{name}）"
     return None
+
+
+def _merge_slots(pending: Pending, text: str) -> str | None:
+    """短回答拼回上一句；不像回答（新请求、提问、太长）就返回 None 走正常解析。
+
+    刻意不在这里 forget：拼完还会重新解析，如果仍然缺槽位，调用方会再记一笔
+    新的上下文，累计成「我想转钱，100 元，李静」这种完整句子。
+    """
+    if len(text) > _SHORT_REPLY_MAX:
+        return None
+    if any(word in text for word in _QUESTION_WORDS):
+        return None
+    if len(text) > 4 and _NEW_TALK_RE.search(text):
+        return None
+    base = pending.text.strip()
+    if not base:
+        return None
+    return f"{base}，{text}"
 
 
 def _match_tail(pending: Pending, text: str) -> dict[str, Any] | None:
@@ -144,4 +197,5 @@ __all__ = [
     "forget",
     "peek",
     "remember",
+    "remember_slots",
 ]

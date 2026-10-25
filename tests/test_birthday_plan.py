@@ -317,3 +317,72 @@ def test_large_item_needs_server_verified_factor_before_any_money_moves(bank) ->
     view = birthday.plan_with_budgets(bank, plan["plan_id"])
     assert view["items"][0]["status"] == "reserved"
     assert not _events("plan.item_paid")
+
+
+def test_waiting_factor_then_proofs_pays_the_same_run(bank) -> None:
+    """缺多因子时那一轮不能被扔掉：补验证回来必须付成功，不能记成付款失败。
+
+    旧实现每次 pay 都新建一张确认卡，用户手里的口令属于上一张，第二次提交
+    拿不到 tool 事件、预算被记成 failed——钱没动，但计划看起来像付款失败。
+    """
+    import asyncio
+
+    from app.security import factors
+
+    items = [
+        {"key": "flowers", "label": "鲜花", "merchant": "flower_shop", "amount_fen": 200_000},
+    ]
+    plan = _create(bank, budget_fen=200_000, items=items, days=20)
+    sid = f"plan:{plan['plan_id']}:flowers:ui"
+
+    async def scenario():
+        first = await birthday.pay_item(plan_id=plan["plan_id"], item_key="flowers", session_id=sid)
+        assert first["status"] == "waiting_factor", first
+        cid = str(first["confirmation_id"])
+        proofs = []
+        for factor in first["required"]:
+            ch = factors.issue(bank, session_id=sid, confirmation_id=cid, factor=factor)
+            proofs.append(
+                {"factor": ch["factor"], "challenge_id": ch["challenge_id"], "code": ch["code"]}
+            )
+        return await birthday.pay_item(
+            plan_id=plan["plan_id"], item_key="flowers", session_id=sid, proofs=proofs
+        )
+
+    result = asyncio.run(scenario())
+    assert result["status"] == "paid", result
+    view = birthday.plan_with_budgets(bank, plan["plan_id"])
+    flowers = [item for item in view["items"] if item["item_key"] == "flowers"][0]
+    assert flowers["status"] == "committed"
+    assert _balance() == SEED_BALANCE_FEN - 200_000
+    assert _events("plan.item_paid")
+    assert not _events("plan.item_failed")
+
+
+def test_wrong_factor_code_keeps_item_retryable(bank) -> None:
+    """口令错了不能把项目打成失败：还是 waiting_factor，预算仍是 reserved，可重试。"""
+    import asyncio
+
+    items = [
+        {"key": "flowers", "label": "鲜花", "merchant": "flower_shop", "amount_fen": 200_000},
+    ]
+    plan = _create(bank, budget_fen=200_000, items=items, days=20)
+    sid = f"plan:{plan['plan_id']}:flowers:bad"
+
+    async def scenario():
+        first = await birthday.pay_item(plan_id=plan["plan_id"], item_key="flowers", session_id=sid)
+        assert first["status"] == "waiting_factor", first
+        return await birthday.pay_item(
+            plan_id=plan["plan_id"],
+            item_key="flowers",
+            session_id=sid,
+            proofs=[{"factor": "face", "challenge_id": "fc_missing", "code": "000000"}],
+        )
+
+    result = asyncio.run(scenario())
+    assert result["status"] == "waiting_factor", result
+    view = birthday.plan_with_budgets(bank, plan["plan_id"])
+    flowers = [item for item in view["items"] if item["item_key"] == "flowers"][0]
+    assert flowers["status"] == "reserved"
+    assert _balance() == SEED_BALANCE_FEN
+    assert not _events("plan.item_paid")

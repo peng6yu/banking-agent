@@ -136,7 +136,31 @@ def test_cancel_with_several_reminders_asks_which_one(bank) -> None:
     result = assist.handle(bank, "取消提醒")
     assert result["action"] == "reminder_cancel_choose"
     labels = [choice["label"] for choice in result["choices"]]
-    assert "提醒我每天喝水" in labels
+    # 两条标题不同，按钮就按标题给；点哪个取消哪个（不能取消错的那条）
+    assert any("提醒我每天喝水" in label for label in labels)
+    pick = [c["value"] for c in result["choices"] if "提醒我每天喝水" in c["label"]][0]
+    done = assist.handle(bank, pick)
+    assert done["action"] == "reminder_cancel"
+    left = assist.active_reminders(bank, USER_ID)
+    assert [item["title"] for item in left] == ["提醒我明天上午 9 点开会"]
+
+
+def test_same_title_reminders_get_distinguishable_choices(bank) -> None:
+    """连着说两句「提醒我喝水」会建出两条同名提醒：按钮必须能分清点的是哪一条。"""
+    assist.create_reminder(bank, text="提醒我喝水", user_id=USER_ID, repeat="daily", hour=8, minute=0)
+    assist.create_reminder(bank, text="提醒我喝水", user_id=USER_ID, repeat="daily", hour=9, minute=0)
+    result = assist.handle(bank, "我有哪些提醒")
+    assert result["action"] == "reminder_list"
+    values = [choice["value"] for choice in result["choices"]]
+    assert len(values) == 2
+    assert len(set(values)) == 2
+    # 两条都带「下次什么时候」，否则两个按钮长得一模一样
+    assert all("（" in choice["label"] for choice in result["choices"])
+    before = {item["plan_id"] for item in assist.active_reminders(bank, USER_ID)}
+    done = assist.handle(bank, values[0])
+    assert done["action"] == "reminder_cancel"
+    after = {item["plan_id"] for item in assist.active_reminders(bank, USER_ID)}
+    assert len(after) == 1 and after < before
 
 
 def test_list_reminders_reports_next_due(bank) -> None:
@@ -189,3 +213,36 @@ def test_cancel_savings_goal_keeps_the_money(bank) -> None:
     assert str(row["status"]) == "cancelled"
     assert _balance(bank) == before
     assert proactive.default_user_id(bank) == USER_ID
+
+
+def test_same_title_plans_get_distinguishable_choices(bank) -> None:
+    """同名计划（「API 测试」建过好几份）不能只靠标题结束：chip 要带编号，点了只结束那一份。"""
+    import time
+
+    from app import plans as plans_mod
+
+    stamp = int(time.time() * 1000)
+    ids = []
+    for offset in (0, 60_000):
+        plan = plans_mod.create(
+            bank,
+            user_id=USER_ID,
+            title="API 测试",
+            steps=[{"kind": "reminder", "title": "确认余额够生日预算", "due_ms": stamp + 3_600_000 + offset}],
+        )
+        ids.append(plan["plan_id"])
+
+    listed = assist.handle(bank, "我的计划列表")
+    assert listed["action"] == "plan_list"
+    choices = [c for c in listed["choices"] if c["label"].startswith("结束「API 测试」")]
+    assert len(choices) == 2
+    assert len({c["value"] for c in choices}) == 2
+    assert all("（" in c["label"] for c in choices)
+
+    done = assist.handle(bank, choices[0]["value"])
+    assert done["action"] == "plan_cancel"
+    statuses = {
+        row["id"]: row["status"]
+        for row in bank.execute("SELECT id, status FROM plans WHERE id IN (?, ?)", tuple(ids))
+    }
+    assert sorted(statuses.values()) == ["active", "cancelled"]

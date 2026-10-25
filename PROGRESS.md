@@ -413,3 +413,46 @@
 - 提醒只到「页内提醒」，未接系统通知/短信；储蓄目标只是记录，不产生任何资金动作（这是设计，不是缺口）。
 - 真实短信/人脸渠道仍未接（沿用 v2.0 的桩），未推送远程仓库。
 
+
+## v2.3.0 功能体检轮：选项、批准、AI 管计划（2026-10-25）
+
+> 起因：以真实用户口吻投诉「需要我选的地方没有能选的选项、计划与提醒不能由 AI 建立或结束、疑似的东西没有批准按钮」。这一轮不加新故事，只把已有能力补到「能点、能批、能结束」。
+
+### 一、需要选择的地方真的能选（choices 对齐问句）
+- [x] `app/api/routes.py::_choices_for` 重写：先按 `parsed.missing` 里**这一句正在问的那个槽位**（`_focused_slots` + `_SLOT_QUESTION_HINTS`）出 chips，不再把全部缺失槽位混排成一锅（原实现把「生日礼物给谁」的收款人候选和 100/500/1000 金额混在一起）。
+- [x] `unknown` / 低置信度分支不再零选项：`_broad_choices` 给 8 条固定去处（查余额 / 看账单 / 我有哪些提醒 / 我的计划列表 / 有什么理财产品 / 我有哪些持仓 / 预约转账 / 人工接管队列），并附 `_INTENT_EXAMPLES` 话术示例。
+- [x] 前端 `renderDone` 补 `else if (data.question)` 兜底：没对上意思时给 4 个可点去处，不再是空白追问。
+- [x] 点选后的**短回答合并**（`app/planner/clarify.py`：`remember_slots` / `_merge_slots`，kind=`slots`）：chip 值仍是裸槽位值（如「李静」「500 元」），原来点下去被当成全新话语重新解析 → unknown；现在反问轮登记槽位、点选时合并，指向同一个计划/申购继续走。
+- [x] 同名消歧：`app/planner/assist.py` 里 `_stamp_text` / `_plan_cancel_choices` / `_reminder_cancel_choices`，同名计划或提醒的 chip 文案带「（时间 · pl_xxx）」并支持按计划号点选（原来两份「API 测试」、8 条「喝水」只给标题，点下去分不清动哪一条）。
+
+### 二、计划与提醒由 AI 建立、也由 AI 结束
+- [x] 提醒：建立走 `assist.create_reminder`（一次性 / daily / weekly / monthly，`app/reminder_time.py` 算下一次），结束走新增的双向语序（「结束提醒 喝水」「把提醒结束掉」都认）+ `reminder_cancel_choose` 多命中反问；取消只改计划状态，余额不动。
+- [x] 计划：新增 `_PLAN_LIST_RE` / `_PLAN_CANCEL_RE` 两条快路 + `_handle_plan`（`plan_list` / `plan_cancel` / `plan_cancel_choose` / `plan_cancel_none`），列表按 `PLAN_STATUS_LABELS` 给中文状态；「我的计划列表」现在返回「你有 N 个计划，先列最近 5 个」并附可点「结束」chip。
+- [x] 读侧修正：`active_reminders` 原来从 plan 级 `plan_view` 取 `due_text`，恒为空（页面显示「下次 —」）；改为从步骤 payload 取 `due_ms` 现算，并补 `state` / `repeat_label`。
+- [x] 生日计划可从页面直接建：新卡片「新建生日计划（预算 + 鲜花蛋糕）」（标题 / 日期 / 预算 / 鲜花 / 蛋糕 / 到点自动付款），提交 `POST /api/plans/birthday`；卡片列出预算·计划内·已付款、可支配/余额/预留与到点时间，逐项「现在付这一项」/「取消这份计划」。
+- [x] 生日付款补验证链路打通（后端 + 前端）：红档 `POST /api/plans/{id}/items/{key}/pay` 返 `status:'waiting_factor'` → 前端 `bxBirthdayFactor` 调 `POST /api/factor/challenge` 渲染口令输入 → 带 `proofs` 重发同一请求完成付款；错口令仍可重试。修 `app/birthday.py::_settle_run` 的返回值 bug：视图在事务提交前构造，接口说已付款而卡片仍显示「预算已预留」，现在两处分支都重查 `plan_budgets` 重建视图。
+- [x] 生日计划明细有了 HTTP 出口：`GET /api/plans/{id}` 在 `birthday.budgets` 非空时改用 `birthday.plan_with_budgets`，返回 `budget` / `items[]` / `authorization`（原来 `plans.view_plan` 拿不到，前端无处渲染 items 与付款按钮）。
+
+### 三、疑似的东西给批准空间
+- [x] 总览「待处理的授权」：`_pending_confirmations` 增 `can_verify_here`（未过期 + run 在 running/waiting + 无必填因子）；为真时卡片直接给「就地验证并批准」（新增 `bxInlineFactor`：拉 `/api/factor/challenge` → 口令行 → 带 proofs 批准 / 拒绝），否则说明为什么不能（过期 / 需人脸短信 / 这一轮已结束）。
+- [x] 硬拦截面板：`renderFactor` 在 `required` 为空时原先是静默 `return null`，现在给出规则号、理由、额度口径，并给「换个说法再说」「知道了」两个出口。
+- [x] 人工接管队列有 UI 了（后端早就有 `/api/handoffs/*`，前端零入口）：概览「让 AI 助手来做」与安全页各一张队列卡，`bxHandoffCard` 支持领取 / 要求补充信息（带备注输入）/ 拒绝（不动钱）/ 取消这一轮，操作以「演示客服」写审计。
+- [x] 疑似订阅可定性（新表 + 新端点）：`subscription_verdicts`（`app/db.py`）、`subscriptions.verdicts` / `record_verdict`、审计事件 `subscription.verdict`、`POST /api/subscriptions/verdict`；管理页每条疑似订阅给「不是我订的 / 确实是我订的 / 让助手核实这几笔」，判为「不是我订的」后从推断列表消失并计入 `dismissed_count`。
+- [x] 预约转账的补验证在后端补齐：`scheduled.required_factors_for`（只读重裁）→ `business._scheduled_tasks` 增 `needs_verification` / `required_factors` / `can_verify_here` 与状态文案「等待你补验证」；接口 `POST /api/scheduled/{id}/challenge|verify` 既有可用。
+
+### 四、验收（全部 exit 0）
+- [x] pytest 全量：**1468 passed / 4 skipped，61.53s**（`tmp/pytest_round6.log`；v2.2.0 的 1464 基线 + 本轮 4 条新用例）。
+- [x] 新增/改动用例：`tests/test_birthday_plan.py` +2（红档 proofs 复用同一 run 付成功、错口令可重试且余额不变）、`tests/test_assist_fastpath.py` +2 改 1（同名计划 / 同名提醒的 chip 值互异并只作用于点中那条）、`tests/test_imports.py` 登记 `app.subscriptions` 新依赖与 `app.tools.base`；`tests/lease_worker.py` + `tests/test_multiprocess_lease.py` 把墙钟起跑改成文件闸门（`LEASE_READY_DIR` / `LEASE_GO_FILE`）修多进程租约时序 flake。
+- [x] 红队 **43/43**、e2e `--offline` **13/13**、前端自检 **66/66**、内联 JS `node --check` 通过（本轮改动后重跑，日志 `tmp/redteam_round6.log` / `tmp/e2e_round6.log`）。
+- [x] 真浏览器逐条点过：chips 点选接回、总览就地批准/拒绝、接管队列四类操作、疑似订阅三按钮、预约转账红档全流程、生日计划建单 + 红档付款。
+- [x] 规模对账：`openapi` 路径 **41**（新增 `POST /api/subscriptions/verdict`），`tests/test_*.py` **91**，表 **31**（新增 `subscription_verdicts`）。
+
+### 五、文档与单一事实源
+- [x] `docs/02` 补 `subscription_verdicts`、`POST /api/subscriptions/verdict`、`SubscriptionVerdictRequest`、新测试点数；`docs/07` 补 chips 消歧（按计划号点选）与生日付款补验证/重试；`docs/10` 补三条必测点（生日付款 proofs、同名消歧、订阅定性）。
+- [x] 规模数字批量对齐：1464→**1468**、API 40→**41**、表 30→**31**、37.50s→**61.53s**、日期→2026-10-25；`release_manifest.json` 重生成。
+
+### 遗留（照实说）
+- 预约转账的「补验证」按钮只做到后端字段与接口（`can_verify_here` / `required_factors`），计划页那一行仍只有「让助手撤销这笔预约」，没接 `bxInlineFactor`。
+- 管理页工具按钮的话术仍不带对象（如「冻结」「挂失」用通用话术，靠卡片上下文补全），未逐张改写成「冻结尾号 4417 这张卡」。
+- `tests/test_imports.py::_exists` 的路径拼接缺陷仍未修（`APP_DIR` 已是 `repo/app`，函数又拼 `app/<mod>`，子模块依赖恒判 False）；本轮只登记不修。
+- 真实短信/人脸仍是桩；提醒未接系统通知；本轮未 push 远程。
