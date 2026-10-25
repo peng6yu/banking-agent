@@ -53,6 +53,11 @@ UPCOMING_NOTE: Final[str] = (
     "想提前处理，可以先停掉银行侧代扣。"
 )
 
+#: 停掉银行侧代扣之后必须一直说清的那句边界：停的只是本行代扣，商户会员还在。
+STOPPED_BOUNDARY_TEXT: Final[str] = (
+    "只停了银行侧周期性代扣，商户会员需要你自己去商户端取消"
+)
+
 _DAY_MS: Final[int] = 86_400_000
 
 
@@ -68,6 +73,16 @@ def _month_start(ts_ms: int, months_back: int = 0) -> int:
 
 def _time_text(ts_ms: int) -> str:
     return time.strftime("%Y-%m-%d", time.localtime(ts_ms / 1000))
+
+
+def _period_text(period: str) -> str:
+    """周期口径中文：monthly → 每月，yearly → 每年。"""
+    return "每月" if str(period) == "monthly" else "每年"
+
+
+def _status_text(status: str) -> str:
+    """订阅状态中文：active → 生效中，其余（只会有 cancelled）→ 已停止（银行侧）。"""
+    return "生效中" if str(status) == "active" else "已停止（银行侧）"
 
 
 def _days_between(earlier_ms: int, later_ms: int) -> float:
@@ -254,9 +269,13 @@ def detect_recurring(
 ) -> dict[str, Any]:
     """按商户分组找周期性支出，返回候选清单（永不改库）。
 
-    user_id 只用来过滤用户已经给出结论的商户：不论他说「不是我订的」还是
-    「确实是我订的」，这条推断都已经不再待办——退订误报和确认订阅都算处理
-    完了，继续挂在这里只会让列表永远清不掉。
+    两类商户会被排除在待办之外，理由都是「用户已经处理完了」：
+    1. user_id 已经给过结论的：不论他说「不是我订的」还是「确实是我订的」，
+       这条推断都不再待办——退订误报和确认订阅都算处理完了，继续挂在这里
+       只会让列表永远清不掉；
+    2. subs 表里 status='cancelled' 的：停掉银行侧代扣就等于用户已经把这条
+       代扣处理掉了，不该还挂在「疑似订阅」里像没管过。注意只排除已停止的，
+       active 的照旧留在推断结果里——用户可能还想核对、或者把它停掉。
     """
     as_of = int(as_of if as_of is not None else time.time() * 1000)
     since = _month_start(as_of, lookback_months)
@@ -277,9 +296,18 @@ def detect_recurring(
         if user_id
         else set()
     )
+    # 已经停掉银行侧代扣的商户：用户处理完了，不该再当待办。
+    # 这里刻意不排除 status='active' 的商户——那才是还需要用户决定的那批。
+    stopped = {
+        str(row["merchant"])
+        for row in conn.execute(
+            "SELECT DISTINCT merchant FROM subs WHERE account_id = ? AND status = 'cancelled'",
+            (account_id,),
+        ).fetchall()
+    }
     candidates: list[dict[str, Any]] = []
     for merchant in sorted(groups):
-        if merchant in settled:
+        if merchant in settled or merchant in stopped:
             continue
         rows = groups[merchant]
         if len(rows) < MIN_OCCURRENCES:
@@ -333,6 +361,42 @@ def upcoming(
         "note": UPCOMING_NOTE,
         "action": "想停就在「业务管理 · 订阅」里停掉银行侧代扣；停不了商户会员本身。",
     }
+
+
+def stopped_debits(conn, account_id: str) -> list[dict[str, Any]]:
+    """本账户下已经停掉银行侧代扣的商户（只读，按商户名排序）。
+
+    停掉银行侧代扣等于用户已经处理完了：这些商户不再出现在「疑似订阅」待办里，
+    改成列在「已停止银行侧代扣」一栏，让用户看得到自己处理过什么、还差哪一步。
+
+    boundary_text 是固定口径，不随记录变化：停的只是本行的周期性代扣，商户那边的
+    会员/订阅本身还在，得用户自己去商户端取消。别把它写成「已取消订阅」。
+    """
+    rows = conn.execute(
+        "SELECT * FROM subs WHERE account_id = ? AND status = 'cancelled'"
+        " ORDER BY merchant, id",
+        (account_id,),
+    ).fetchall()
+    items: list[dict[str, Any]] = []
+    for row in rows:
+        amount_fen = int(row["amount_fen"])
+        period = str(row["period"])
+        status = str(row["status"])
+        items.append(
+            {
+                "sub_id": str(row["id"]),
+                "merchant": str(row["merchant"]),
+                "amount_fen": amount_fen,
+                "amount_yuan": fen_to_yuan_str(amount_fen),
+                "period": period,
+                "period_label": _period_text(period),
+                "next_charge_text": _time_text(int(row["next_charge_ms"])),
+                "status": status,
+                "status_label": _status_text(status),
+                "boundary_text": STOPPED_BOUNDARY_TEXT,
+            }
+        )
+    return items
 
 
 #: 用户对「疑似订阅」只能做两种定性。没有第三种：不能替用户在商户退订，
@@ -444,6 +508,7 @@ __all__ = [
     "merchant_transactions",
     "merchants_with_transactions",
     "record_verdict",
+    "stopped_debits",
     "upcoming",
     "verdicts",
 ]

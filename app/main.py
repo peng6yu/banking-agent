@@ -17,7 +17,7 @@ from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app import db
-from app.api import business, handoffs_api, routes
+from app.api import business, handoffs_api, memory_api, routes
 from app.clock import BankError
 from app.llm import LLMError
 from app.planner import ticker
@@ -101,6 +101,9 @@ app.include_router(business.router)
 # 人工接管队列：每张单都带 run/DAG/失败原因，属于「运维视角」的敏感数据，
 # 和业务视图一样挂在 require_api_token 后面（router 内部已声明依赖）。
 app.include_router(handoffs_api.router)
+# 长期记忆：用户能看、能补、能删「agent 记住了我什么」，所以和会话/业务视图并列，
+# 同样挂 require_api_token（router 内部已声明依赖）。
+app.include_router(memory_api.router)
 
 
 @app.exception_handler(BankError)

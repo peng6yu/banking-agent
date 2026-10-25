@@ -26,6 +26,8 @@ from fastapi.responses import FileResponse, StreamingResponse
 
 import app.birthday as birthday
 import app.chat_history as chat_history
+import app.memory as memory
+import app.memory_extract as memory_extract
 import app.plans as plans
 import app.proactive as proactive
 import app.subscriptions as subscriptions
@@ -340,8 +342,13 @@ async def list_tools() -> dict[str, Any]:
 
 @router.post("/api/chat")
 async def chat(request: ChatRequest) -> StreamingResponse:
-    """对话主入口：先解析意图，再把执行过程用 SSE 一条条吐出来。"""
-    session_id = request.session_id or new_id("s")
+    """对话主入口：先解析意图，再把执行过程用 SSE 一条条吐出来。
+
+    没带 session_id 时接上最近一条会话（本机单用户演示），而不是每句话新开一条：
+    前端丢一次 sessionStorage、换一个标签页、用 curl 试一句，都会落在同一条线上，
+    助手才看得见前几轮说过什么。真要多开一条，客户端自己带一个新的 session_id 就行。
+    """
+    session_id = request.session_id or _resume_session_id()
     _remember(session_id, "user", request.text)
     # 上一轮如果停在收款人歧义上，这一轮的「尾号4417 / 第一个」要先补全再解析，
     # 否则解析器只看到一句没有金额的短回答，只能把问题再问一遍（已知限制 3）。
@@ -1190,6 +1197,23 @@ async def index() -> Any:
     return {"service": "银行 AI 智能体", "health": "/api/health"}
 
 
+def _resume_session_id() -> str:
+    """没带会话号时接上最近一条有内容的会话；一条都没有才新建。
+
+    读失败（库不可用）时退回新会话：接不上历史最多是「这轮没上下文」，
+    但不能因为查一次历史把整轮对话挡在 500 上。
+    """
+    try:
+        with _conn() as conn:
+            latest = chat_history.latest(conn, limit=1)
+        found = str(latest.get("session_id") or "")
+        if found:
+            return found
+    except Exception:  # noqa: BLE001 - 历史查不到就当没有历史
+        log.warning("api.chat.resume_failed", exc_info=True)
+    return new_id("s")
+
+
 def _assist_parse(session_id: str, text: str) -> intent.IntentResult | None:
     """命中储蓄/提醒关键词就构造一个 assist 结果；没命中返回 None 走模型。"""
     if assist.detect(text) is None:
@@ -1230,6 +1254,7 @@ async def _emit_assist(
         result = {"summary": "没太理解这句，可以换个说法。", "choices": [], "action": "assist_none", "data": {}}
     summary = str(result.get("summary") or "")
     _remember(session_id, "assistant", summary)
+    _learn(session_id, text, summary)
     await queue.put(
         (
             "done",
@@ -1430,14 +1455,107 @@ def _choices_for(parsed: intent.IntentResult) -> list[dict[str, str]]:
 async def _parse(session_id: str, text: str) -> intent.IntentResult:
     """解析意图并写审计；模型不可用时把 LLMError 原样抛给处理器。"""
     try:
-        parsed = await asyncio.to_thread(_parse_sync, text, _turns(session_id), session_id=session_id)
+        parsed = await asyncio.to_thread(
+            _parse_sync,
+            text,
+            _turns(session_id),
+            session_id=session_id,
+            memory_block=await asyncio.to_thread(_memory_block),
+        )
     except LLMError:
         _audit_failure(session_id, text, "MODEL_UNAVAILABLE")
         raise
+    _contextualize(session_id, parsed)
     _audit_intent(session_id, text, parsed)
     _audit_knowledge(session_id, parsed)
     _audit_injection_reflection(session_id, parsed)
     return parsed
+
+
+def _contextualize(session_id: str, parsed: intent.IntentResult) -> None:
+    """没听懂时把上一句的话题带进反问里——「你到底想办什么」这种空话等于没有记忆。
+
+    只改「没槽位可问」的两类：intent=unknown 与置信度不够。缺槽位的反问（给谁转、
+    多少钱）已经有确定的问题，再叠一句上下文只会把问句变长。
+    有上一句就念出它（截断到 CONTEXT_CHARS），让用户看着自己刚说的话改口；
+    没有上一句（今天第一句）就保持原来的问句，不硬编上下文。
+    """
+    if parsed.missing:
+        return
+    if parsed.intent != "unknown" and not (0 < parsed.confidence < intent.CONFIDENCE_FLOOR):
+        return
+    topic = _last_user_text(session_id)
+    if not topic:
+        return
+    head = f"上一句你问的是「{topic}」，这一句我没太跟上。"
+    if parsed.intent == "unknown":
+        parsed.question = f"{head}是想接着这件事往下办，还是换一件事？说得再具体一点我就动手。"
+    else:
+        parsed.question = f"{head}{parsed.question}"
+
+
+CONTEXT_CHARS: Final[int] = 24
+
+
+def _last_user_text(session_id: str) -> str:
+    """这条会话里「上一句」用户说的话——截断到 CONTEXT_CHARS。
+
+    当前这句话在进解析之前就已经 _remember 进历史了，所以最近那条 user 轮要跳过，
+    否则反问里会念用户刚说过的同一句，看起来像在复读。
+    """
+    skipped_current = False
+    for item in reversed(_turns(session_id)):
+        if str(item.get("role")) != "user":
+            continue
+        if not skipped_current:
+            skipped_current = True
+            continue
+        text = str(item.get("content") or "").strip()
+        if text:
+            return text[:CONTEXT_CHARS] + ("…" if len(text) > CONTEXT_CHARS else "")
+    return ""
+
+
+def _memory_block() -> str:
+    """这位用户的长期记忆（模型上下文里的「他是谁」）；没有记忆或读不出来就返回空串。
+
+    记忆是增强项：库读不出来只记一条 warning，绝不让一轮对话因为「想不起前人是谁」而失败。
+    """
+    try:
+        with _conn() as conn:
+            return memory.prompt_block(conn, user_id=proactive.default_user_id(conn))
+    except Exception:  # noqa: BLE001 - 记忆读失败只当没有记忆
+        log.warning("api.chat.memory_block_failed", exc_info=True)
+        return ""
+
+
+def _learn(session_id: str, user_text: str, assistant_text: str) -> None:
+    """一轮说完之后在后台抽长期记忆：不阻塞回包、失败只记日志。
+
+    这是「越用越聪明」的那一半：用户不用专门说「请记住」，助手从对话里自己捡事实。
+    显式记忆（/api/memory、快路的「记住…」）走同步路径，用户点完立刻能看到。
+    """
+    if not user_text.strip():
+        return
+
+    async def worker() -> None:
+        try:
+            with _conn() as conn:
+                await asyncio.to_thread(
+                    memory_extract.run,
+                    conn,
+                    user_id=proactive.default_user_id(conn),
+                    user_text=user_text,
+                    assistant_text=assistant_text,
+                    adapter=get_adapter(),
+                )
+        except Exception:  # noqa: BLE001 - 学不会也不能影响对话
+            log.warning("api.chat.learn_failed session=%s", session_id, exc_info=True)
+
+    try:
+        asyncio.get_running_loop().create_task(worker())
+    except RuntimeError:  # 没有事件循环（同步测试）就干脆不学
+        _ = session_id
 
 
 def _parse_sync(
@@ -1445,13 +1563,22 @@ def _parse_sync(
     history: list[dict[str, str]],
     *,
     session_id: str | None = None,
+    memory_block: str = "",
 ) -> intent.IntentResult:
     """在线程里跑一次同步阻塞的模型调用，别把事件循环堵住。
 
     session_id 一路带到底：原话命中注入时要压一根「属于这个会话」的棒，
     执行层取棒时按会话认领——接力棒不许跨会话串味（app/security/injection.py）。
     """
-    return asyncio.run(intent.parse(text, history, adapter=get_adapter(), session_id=session_id))
+    return asyncio.run(
+        intent.parse(
+            text,
+            history,
+            adapter=get_adapter(),
+            session_id=session_id,
+            memory_block=memory_block,
+        )
+    )
 
 
 async def _events(
@@ -1479,6 +1606,7 @@ async def _events(
         await _emit_assist(session_id, parsed, queue, user_text=user_text)
     elif parsed.question:
         _remember(session_id, "assistant", parsed.question)
+        _learn(session_id, user_text, parsed.question)
         # 反问轮记一笔上下文：下一句「100 元」「李静」要能拼回这句问话，
         # 否则照着选项点下去只会被当成新消息重新解析（点了等于白点）。
         remember_slots(session_id, text=user_text, question=parsed.question, slots=parsed.missing)
@@ -1520,6 +1648,9 @@ def _start_run(
     )
 
     async def emit(name: str, data: dict[str, Any]) -> None:
+        if name == "done":
+            # 执行完这一轮再学：用户说了什么、助手最后怎么回的，一起交给记忆抽取。
+            _learn(session_id, user_text, str(data.get("summary") or ""))
         await queue.put((name, data))
 
     async def driver() -> None:

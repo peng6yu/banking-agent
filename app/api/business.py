@@ -997,6 +997,15 @@ def management_view(conn: sqlite3.Connection) -> dict[str, Any]:
         }]}
         for value in verdict_map.values()
     ]
+    # 停掉银行侧代扣的商户已经从「疑似订阅」待办里排除（见 detect_recurring），
+    # 但不能让它们凭空消失：单列一栏，让用户看得到自己处理过什么、还差商户端那一步。
+    stopped = subscriptions.stopped_debits(conn, account_id)
+    inferred["stopped"] = stopped
+    inferred["stopped_count"] = len(stopped)
+    inferred["note"] = (
+        f"{inferred.get('note') or ''}"
+        "停掉银行侧代扣的商户已不在待办里，列在「已停止银行侧代扣」一栏。"
+    )
     upcoming = subscriptions.upcoming(conn, account_id)
     scheduled = _scheduled_tasks(conn, user_id, limit=5)
     holdings_summary = {

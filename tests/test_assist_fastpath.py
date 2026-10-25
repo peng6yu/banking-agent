@@ -246,3 +246,58 @@ def test_same_title_plans_get_distinguishable_choices(bank) -> None:
         for row in bank.execute("SELECT id, status FROM plans WHERE id IN (?, ?)", tuple(ids))
     }
     assert sorted(statuses.values()) == ["active", "cancelled"]
+
+
+# --------------------------------------------------------------- 长期记忆快路
+
+
+@pytest.mark.parametrize(
+    "text",
+    ["记住我不喜欢电话推销", "记一下我常用招行那张卡", "你记得我什么", "忘掉记忆「不喜欢电话推销」"],
+)
+def test_memory_phrases_route_to_the_memory_fast_path(text: str) -> None:
+    assert assist.detect(text) == "memory"
+
+
+def test_remember_list_and_forget_only_touch_the_memory_table(bank) -> None:
+    """说一句就记住、问一句就列出、说忘掉就删——三步都不许动账户余额。"""
+    import app.memory as memory
+
+    before = _balance(bank)
+
+    made = assist.handle(bank, "记住我不喜欢电话推销")
+    assert made is not None and made["action"] == "memory_remember"
+    facts = memory.all_facts(bank, user_id=proactive.default_user_id(bank))
+    assert [fact["key"] for fact in facts] == ["不喜欢电话推销"]
+    assert facts[0]["kind"] == "preference"
+
+    listed = assist.handle(bank, "你记得我什么")
+    assert listed is not None and listed["action"] == "memory_list"
+    assert "不喜欢电话推销" in listed["summary"]
+    assert listed["data"]["memories"]
+
+    forgot = assist.handle(bank, "忘掉记忆「不喜欢电话推销」")
+    assert forgot is not None and forgot["action"] == "memory_forget"
+    assert memory.all_facts(bank, user_id=proactive.default_user_id(bank)) == []
+
+    assert _balance(bank) == before
+
+
+def test_forget_unknown_keeps_everything(bank) -> None:
+    import app.memory as memory
+
+    assist.handle(bank, "记住我周末不看理财")
+    out = assist.handle(bank, "忘掉记忆「不存在的偏好」")
+
+    assert out is not None and out["action"] == "memory_forget_none"
+    assert [fact["key"] for fact in memory.all_facts(bank, user_id=proactive.default_user_id(bank))] == [
+        "周末不看理财"
+    ]
+
+
+def test_reminder_still_wins_over_memory_markers(bank) -> None:
+    """「提醒我…」里就算带「记」字，也仍然是提醒，不能被记忆快路抢走。"""
+    out = assist.handle(bank, "提醒我明天上午 9 点喝水")
+
+    assert out is not None and out["action"] == "reminder_create"
+

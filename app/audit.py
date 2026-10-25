@@ -118,6 +118,11 @@ EVENT_TYPES: Final[frozenset[str]] = frozenset(
         "handoff.cancelled",
         "handoff.resumed",
         "handoff.resume_failed",
+        # 长期记忆：用户亲口说过/确认过的偏好与事实，写和忘都要留痕。
+        # 记忆会影响后续每轮对话的默认值，是「这个 agent 越来越懂这个人」的证据链，
+        # 用户也有权知道「你都记住了我什么」，所以写与删分开记两类。
+        "memory.written",
+        "memory.forgotten",
         "session.end",
     }
 )

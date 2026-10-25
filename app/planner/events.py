@@ -12,6 +12,7 @@ from typing import Any
 
 from app.models import Action, Decision
 from app.money import fen_to_yuan_str
+from app.subscriptions import STOPPED_BOUNDARY_TEXT
 from app.planner.state import (
     CONFIRM_TIMEOUT_MS,
     confirm_timeout_ms,
@@ -193,6 +194,39 @@ def _payee_row(conn: Any, payee_id: Any) -> dict[str, Any] | None:
     }
 
 
+def _subscription_row(conn: Any, sub_id: Any, account_id: Any = None) -> dict[str, Any] | None:
+    """按订阅号查 subs 行，翻成确认卡上的订阅详情；查不到就 None，不编造。
+
+    确认卡只写「取消订阅」等于让用户在不知道对象的情况下点头——所以要把商户、
+    月费、下次扣费时间和能力边界一起给出来。这里只读，不改订阅状态。
+    """
+    key = str(sub_id or "").strip()
+    if not key:
+        return None
+    if account_id:
+        row = conn.execute(
+            "SELECT * FROM subs WHERE id = ? AND account_id = ?", (key, str(account_id))
+        ).fetchone()
+    else:
+        row = conn.execute("SELECT * FROM subs WHERE id = ?", (key,)).fetchone()
+    if row is None:
+        return None
+    amount_fen = int(row["amount_fen"])
+    period = str(row["period"])
+    status = str(row["status"])
+    return {
+        "merchant": str(row["merchant"]),
+        "amount_fen": amount_fen,
+        "amount_yuan": fen_to_yuan_str(amount_fen),
+        "period": period,
+        "period_label": "每月" if period == "monthly" else "每年",
+        "next_charge_text": _fmt_ms(int(row["next_charge_ms"])) or "",
+        "boundary_text": STOPPED_BOUNDARY_TEXT,
+        "status": status,
+        "status_label": "生效中" if status == "active" else "已停止（银行侧）",
+    }
+
+
 def describe_confirmation(
     conn: Any, action: Action, decision: Decision, *, tool: str = ""
 ) -> dict[str, Any]:
@@ -231,6 +265,13 @@ def describe_confirmation(
         ),
         "scheduled_for": scheduled_for,
         "fee": {"known": False, "amount_fen": None, "text": FEE_UNKNOWN_TEXT},
+        # 停止代扣要把对象摊开：哪家商户、多少钱、多久一次、下次什么时候、边界是什么。
+        # 别的工具没有订阅详情，这里就是 None——不硬塞一个空对象冒充。
+        "subscription": (
+            _subscription_row(conn, params.get("sub_id"), action.account_id)
+            if name == "cancel_subscription"
+            else None
+        ),
         "verification": {
             "level": decision.level,
             "level_label": LEVEL_LABELS.get(decision.level, decision.level),
@@ -323,6 +364,7 @@ def confirmation_frame(
         "payee",
         "scheduled_for",
         "fee",
+        "subscription",
         "verification",
     ):
         payload[key] = details.get(key)
@@ -365,9 +407,15 @@ def prompt_payload(
                 "payee": details.get("payee"),
                 "scheduled_for": details.get("scheduled_for"),
                 "fee": details.get("fee"),
+                # 停代扣的详情：前端用它把「取消订阅」铺成商户 / 月费 / 下次扣费 / 边界。
+                # 别的工具这里是 None。
+                "subscription": details.get("subscription"),
                 "verification": details.get("verification"),
             }
         )
+    else:
+        # 老调用方（只传三个参数）也要拿到同一个键，缺的是 None 而不是 KeyError。
+        payload["subscription"] = None
     return payload
 
 

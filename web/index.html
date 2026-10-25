@@ -994,6 +994,7 @@
       <div class="grid grid-2">
         <div class="card"><div class="card-head"><h3>银行卡</h3><span class="spacer"></span><span class="tag" id="mg-card-tag">—</span></div><div id="mg-cards"></div></div>
         <div class="card"><div class="card-head"><h3>订阅与代扣</h3><span class="spacer"></span><span class="tag warn">仅银行侧代扣</span></div><div id="mg-subs"></div><div class="card-note">下面是两类完全不同的数据：银行侧代扣记录（能停），以及从流水推断出来的「疑似订阅」（只能核实，不能停）。</div><div id="mg-subs-inferred"></div><div id="mg-upcoming"></div></div>
+        <div class="card"><div class="card-head"><h3>助手对你的长期记忆</h3><span class="spacer"></span><span class="tag info" id="mg-memory-tag">—</span></div><div id="mg-memory"></div><div class="card-note">这些是助手在聊天里自己记下来的稳定偏好与事实（跨会话、刷新后仍在），也可以在下面手动补一条。它只当默认值用：涉及金额、账户、收款人时，仍以你当次原话为准。</div></div>
       </div>
 
       <div class="card"><div class="card-head"><h3>理财产品</h3><span class="spacer"></span><span class="tag bad" id="mg-fit">适当性：未评估</span></div><div id="mg-suit"></div><div id="mg-products"></div><div class="card-note" id="mg-fit-note"></div></div>
@@ -1529,8 +1530,13 @@
     }
     const amountUnit = amountInfo.key.indexOf('fen') !== -1 ? ' 分' : '';
     /* 金额与收款人必须显式出现在卡片和按钮上：拿不到原文就指向操作说明全文，不做二次计算 */
-    const amountText = amountInfo.value ? amountInfo.value + amountUnit : '见操作说明全文';
-    const payeeText = payeeInfo.value ? payeeInfo.value : '见操作说明全文';
+    /* 停代扣、退订这类动作本来就没有「金额」：写「见操作说明全文」等于什么都没说。
+       后端会带 subscription（商户/月费/下次扣费/边界），卡片直接按它说人话。 */
+    const subs = bxIsObj(data.subscription) ? data.subscription : null;
+    const amountText = amountInfo.value ? amountInfo.value + amountUnit
+      : (subs ? '不动本金余额（只停银行侧代扣）' : '见操作说明全文');
+    const payeeText = payeeInfo.value ? payeeInfo.value
+      : (subs && textOf(subs.merchant) ? '「' + textOf(subs.merchant) + '」' : '见操作说明全文');
 
     const card = el('div', 'confirm-card');
     card.appendChild(el('div', 'confirm-head',
@@ -1540,6 +1546,14 @@
        后端没给的项不写，避免把推测值摆成事实。 */
     const rows = [['金额（后端原文）', amountText, 'confirm-amount']];
     bxConfirmRows(data).forEach(function (row) { rows.push(row); });
+    if (subs) {
+      rows.push(['订阅商户', textOf(subs.merchant) || '后端没给', 'confirm-sub']);
+      if (textOf(subs.amount_yuan)) {
+        rows.push(['每期金额', textOf(subs.amount_yuan) + ' 元 · ' + (textOf(subs.period_label) || '周期未知'), 'confirm-sub']);
+      }
+      if (textOf(subs.next_charge_text)) { rows.push(['下次扣费', textOf(subs.next_charge_text), 'confirm-sub']); }
+      if (textOf(subs.status_label)) { rows.push(['当前状态', textOf(subs.status_label), 'confirm-sub']); }
+    }
     rows.push(['操作说明（全文）', actionText, 'confirm-action']);
     rows.push(['有效期', expiresRaw ? expiresRaw + ' 秒' : '以后端为准', 'confirm-expire']);
     rows.forEach(function (row) {
@@ -1854,9 +1868,18 @@
 
   function onStart(data) {
     const sid = fieldVal(data, ['session_id', 'id']);
+    const prev = sessionId;
     if (sid) { sessionId = sid; bxRememberSession(sid); }
     panelBadge('panel-audit', auditCount + ' 条');
-    appendBubble('sys', '已建立会话：' + (sid || '未回传 session_id'), 'start');
+    /* 以前每发一句话都打一条「已建立会话」：看着像每轮都新开会话，用户以为没有记忆。
+       现在只在「第一次拿到会话」或「服务端换了会话号」时说一句，同一会话内闭嘴。 */
+    if (!sid) {
+      appendBubble('sys', '服务端没回传 session_id，这一轮的执行结果可能接不上。', 'start');
+    } else if (!prev) {
+      appendBubble('sys', '会话 ' + sid + '（同一条会话一直用下去，刷新也接得上）。', 'start');
+    } else if (prev !== sid) {
+      appendBubble('sys', '换到了另一条会话：' + sid + '（刚才那条是 ' + prev + '）。刚才的对话还在上面。', 'start');
+    }
     setBusy(streaming);
     renderAudit(fromEvent('session.start', data));
   }
@@ -3048,7 +3071,7 @@
     overview: ['ov-balance', 'ov-flow', 'ov-cats', 'ov-anomalies', 'ov-pending', 'ov-goals', 'ov-plans', 'ov-handoffs', 'ov-actions'],
     bill: ['bill-summary', 'bill-cats', 'bill-trend', 'bill-anomalies', 'bill-tx'],
     plans: ['plan-banner', 'plan-goals', 'plan-tasks', 'plan-alerts'],
-    manage: ['mg-cards', 'mg-subs', 'mg-products', 'mg-caps'],
+    manage: ['mg-cards', 'mg-subs', 'mg-products', 'mg-caps', 'mg-memory'],
     security: ['sec-summary', 'sec-sessions', 'sec-handoffs', 'sec-denials', 'sec-note']
   };
 
@@ -5026,6 +5049,7 @@
     }
     bxRenderInferred(subs.inferred);
     bxRenderManageUpcoming(subs.upcoming);
+    bxRenderMemory();
 
     const invest = bxIsObj(data.investments) ? data.investments : {};
     bxRenderSuitability($('mg-suit'), invest);
@@ -5181,7 +5205,138 @@
         host.appendChild(line);
       });
     }
+    /* 停掉银行侧代扣的商户已经从待办里排除（后端 detect_recurring 过滤 cancelled 的 subs），
+       但用户需要看到「我停过哪些、停的是什么」，所以单列一栏，不是又挂回待办。 */
+    const stopped = bxArr(data.stopped).filter(function (row) { return bxIsObj(row); });
+    if (stopped.length) {
+      host.appendChild(el('div', 'card-sub', '已停止银行侧代扣（' + bxCount(data.stopped_count || stopped.length, ' 条') + '）'));
+      host.appendChild(el('div', 'card-note', '这些是你停过的银行侧周期性代扣，已经不在待办里。'));
+      stopped.forEach(function (row) {
+        const line = el('div', 'anomaly');
+        const head = el('div', 'anomaly-head');
+        head.appendChild(el('span', 'anomaly-title', textOf(row.merchant)));
+        head.appendChild(el('span', 'tag info', textOf(row.status_label) || '已停止'));
+        if (textOf(row.period_label)) { head.appendChild(el('span', 'tag', textOf(row.period_label))); }
+        if (textOf(row.amount_yuan)) { head.appendChild(el('span', 'tag', textOf(row.amount_yuan) + ' 元')); }
+        line.appendChild(head);
+        if (textOf(row.next_charge_text)) { line.appendChild(kvRow('原下次扣费', textOf(row.next_charge_text))); }
+        if (textOf(row.boundary_text)) { line.appendChild(el('div', 'card-note', textOf(row.boundary_text))); }
+        host.appendChild(line);
+      });
+    }
     host.appendChild(el('div', 'card-note', textOf(data.note) + ' ' + textOf(data.boundary)));
+  }
+
+  /* 长期记忆：助手在聊天里自己记下来的稳定偏好与事实，跨会话、跨刷新都还在。
+     这里只做展示/手动补一条/忘掉一条；写删一律走后端 /api/memory，前端不自己合并。 */
+  function bxMemoryField(id, label, placeholder) {
+    const field = el('label', 'pf-field');
+    field.appendChild(el('span', 'field-label', label));
+    const input = el('input', 'pf-in');
+    input.id = id;
+    input.type = 'text';
+    input.placeholder = placeholder || '';
+    field.appendChild(input);
+    return field;
+  }
+
+  function bxRenderMemory() {
+    const host = $('mg-memory');
+    if (!host) { return; }
+    host.replaceChildren(el('div', 'card-note', '正在读记忆…'));
+    bxFetch('/api/memory').then(function (payload) {
+      const data = bxIsObj(payload) ? payload : {};
+      const facts = bxArr(data.facts).filter(function (row) { return bxIsObj(row); });
+      const tag = $('mg-memory-tag');
+      if (tag) { setText(tag, facts.length ? bxCount(facts.length, ' 条') : '—'); }
+      host.replaceChildren();
+      if (!facts.length) {
+        host.appendChild(el('div', 'card-note',
+          '还没有记忆。你在聊天里说过「我习惯…」「以后都…」这类稳定偏好，助手会记下来，下次直接按这个来。'));
+      } else {
+        facts.forEach(function (fact) {
+          const box = el('div', 'anomaly');
+          const head = el('div', 'anomaly-head');
+          head.appendChild(el('span', 'anomaly-title', textOf(fact.key)));
+          head.appendChild(el('span', 'tag info', textOf(fact.kind_label) || '事实'));
+          if (textOf(fact.updated_text)) { head.appendChild(el('span', 'tag', textOf(fact.updated_text))); }
+          box.appendChild(head);
+          box.appendChild(kvRow('内容', textOf(fact.value)));
+          if (textOf(fact.source)) { box.appendChild(el('div', 'card-note', '来源：' + textOf(fact.source))); }
+          const bar = el('div', 'anomaly-actions');
+          const del = el('button', 'btn btn-mini', '忘掉这条');
+          del.type = 'button';
+          del.addEventListener('click', function () { bxForgetMemory(textOf(fact.key), del); });
+          bar.appendChild(del);
+          box.appendChild(bar);
+          host.appendChild(box);
+        });
+      }
+
+      const form = el('div', 'pf-form');
+      form.appendChild(bxMemoryField('mg-memory-key', '记什么（键，例如「常去商户」）', '常去商户'));
+      form.appendChild(bxMemoryField('mg-memory-value', '内容（例如「乐刻健身」）', '乐刻健身'));
+      const kindField = el('label', 'pf-field');
+      kindField.appendChild(el('span', 'field-label', '类型'));
+      const kindSel = el('select', 'pf-in');
+      kindSel.id = 'mg-memory-kind';
+      [['fact', '事实'], ['preference', '偏好'], ['profile', '画像']].forEach(function (pair) {
+        const opt = el('option', '', pair[1]);
+        opt.value = pair[0];
+        kindSel.appendChild(opt);
+      });
+      kindField.appendChild(kindSel);
+      form.appendChild(kindField);
+      const bar = el('div', 'pf-actions');
+      const add = el('button', 'btn btn-green btn-mini', '记住这条');
+      add.type = 'button';
+      add.addEventListener('click', function () { bxSaveMemory(add); });
+      bar.appendChild(add);
+      form.appendChild(bar);
+      host.appendChild(form);
+    }).catch(function (err) {
+      bxError(host, err);
+    });
+  }
+
+  function bxSaveMemory(btn) {
+    const keyEl = $('mg-memory-key');
+    const valEl = $('mg-memory-value');
+    const kindEl = $('mg-memory-kind');
+    const key = keyEl ? textOf(keyEl.value).trim() : '';
+    const value = valEl ? textOf(valEl.value).trim() : '';
+    if (!key || !value) {
+      appendBubble('sys', '手动记一条记忆要填「记什么」和「内容」两项。', 'memory');
+      return;
+    }
+    if (btn) { btn.disabled = true; }
+    bxSend('/api/memory', 'POST', { key: key, value: value, kind: kindEl ? textOf(kindEl.value) : 'fact' })
+      .then(function (res) {
+        const fact = bxIsObj(res) && bxIsObj(res.fact) ? res.fact : null;
+        appendBubble('sys', '记住了：' + key + ' —— ' + (fact ? textOf(fact.value) : value) + '。以后我会按这个当默认值。', 'memory');
+        if (keyEl) { keyEl.value = ''; }
+        if (valEl) { valEl.value = ''; }
+        bxRenderMemory();
+      })
+      .catch(function (err) {
+        if (btn) { btn.disabled = false; }
+        appendBubble('sys', '这条没记上：' + errorText(err));
+      });
+  }
+
+  function bxForgetMemory(key, btn) {
+    if (!key) { return; }
+    if (btn) { btn.disabled = true; }
+    bxSend('/api/memory/' + encodeURIComponent(key), 'DELETE')
+      .then(function (res) {
+        const removed = bxIsObj(res) ? res.removed !== false : true;
+        appendBubble('sys', removed ? ('已经忘掉「' + key + '」这条记忆。') : ('本来就没有「' + key + '」这条记忆。'), 'memory');
+        bxRenderMemory();
+      })
+      .catch(function (err) {
+        if (btn) { btn.disabled = false; }
+        appendBubble('sys', '这条记忆没删掉：' + errorText(err));
+      });
   }
 
   function bxRenderManageUpcoming(payload) {

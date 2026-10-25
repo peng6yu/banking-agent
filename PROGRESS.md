@@ -543,3 +543,69 @@
 2. 管理页工具按钮的话术仍不带对象（点了只发「我要转账」这类泛问）；
 3. `tests/test_imports.py::_exists` 的路径拼接缺陷未修（`APP_DIR` 已是 `repo/app`，函数又拼 `app/<mod>`，子模块依赖恒判 False）；
 4. 真实短信/人脸仍是桩；提醒未接系统通知；未 push 远程。
+
+
+## v2.6.0 助手智能度 + 长期记忆 + 停代扣联动 2026-10-25
+
+### 1. 起因（用户原话）
+
+> 确认代扣了之后为什么疑似订阅这里还有这个疑似订单，而且确认框里面还没有相关的具体订阅信息？而且这个agent智能程度太差了，你能不能让他成为你harness对话的这种要有预设和思维连等等，只不过给他限制他能用的工具。不要每次对话都要建立一个新的会话啊我希望他能像hermes一样越用越智能。你好好分析我的请求。
+
+紧随其后又要求「继续所有任务，并且你要按照用户的习惯完整做审计」。四件事拆开是：①停掉银行侧代扣之后，该商户还挂在「疑似订阅」待办里；②停代扣的确认卡只有一句「取消订阅」，没有商户、月费、下次扣费；③助手缺人格与思考步骤，也不该每句话都新开一个会话；④要能跨会话记住用户（越用越智能）。
+
+### 2. 停代扣后疑似订阅仍在待办
+
+- 根因：`subscriptions.detect_recurring` 只看流水，与 `subs` 表互不相干——停掉银行侧代扣只改 `subs.status`，推断链路完全看不见。
+- `app/subscriptions.py`：`detect_recurring` 额外排除该账户下 `subs.status='cancelled'` 的商户；新增 `stopped_debits(conn, account_id)`（`sub_id/merchant/amount_fen/amount_yuan/period/period_label/next_charge_text/status/status_label/boundary_text`），`boundary_text` 固定「只停了银行侧周期性代扣，商户会员需要你自己去商户端取消」。
+- `app/api/business.py`：`management_view` 的 `subscriptions.inferred` 增 `stopped[]` 与 `stopped_count`——停过的商户不进 `items` 待办，改列到「已停止」一栏；note 同步改口径。
+- 前端 `bxRenderInferred`：新增「已停止银行侧代扣（N 条）」块，每条带商户、状态、每期金额、原下次扣费与边界句。
+
+### 3. 确认卡补出具体订阅信息
+
+- `app/planner/events.py`：新增 `_subscription_row(conn, sub_id, account_id=None)`；`describe_confirmation` 对 `cancel_subscription` 出 `details['subscription']`，`confirmation_frame` / `prompt_payload` 透传该字段。
+- `app/planner/state.py`：`new_confirmation` 对 `cancel_subscription` 把 `action_text` 覆写成「停止银行侧代扣「爱奇艺会员」（每月 25.00 元）」——原来只回工具名中文「取消订阅」。
+- 真模型实测确认帧：`subscription={merchant, amount_fen, amount_yuan:'25.00', period:'monthly', period_label:'每月', next_charge_text:'2026-11-24 23:03', boundary_text, status:'active', status_label:'生效中'}`。
+- 前端 `renderConfirm`：带 `subscription` 时金额行改「不动本金余额（只停银行侧代扣）」，并追加「订阅商户 / 每期金额 / 下次扣费 / 当前状态」四行；确认按钮文案带商户名。
+
+### 4. 助手的人格、预设与思考步骤（提示词 v2）
+
+- `app/planner/intent.py` 的 `SYSTEM_PROMPT` 重写：人格「小银」（银行里的办事助手，话短、先说结论）、5 条预设（不确定就问一句但不是每句都问；金额/账户/收款人只认当次原话；不编造额度与产品；只申请不执行；高风险先说明再请确认）、5 步内部思考顺序（听清要办什么 → 缺什么槽位 → 有没有歧义 → 这动作风险如何 → 该不该先反问），**原有 7 条硬性规则逐字保留**（末条仍是「工具报错时用一句人话解释，不要输出英文错误码或堆栈」）。
+- 工具权限没有放松：模型仍然只能通过 `emit_intent` 的 schema 申请（意图 + 槽位白名单），执行侧照样过 `PolicyEngine` + 能力令牌。提示词写明「你只能申请，不能执行」——人格与思考步骤改的是表达，不是权限。
+- `build_messages(text, history=None, *, memory_block='')`：记忆非空时追加第二条 system（「长期记忆只当默认值；涉及金额、账户、收款人时以本次原话为准」）。
+
+### 5. 不再每句话都新开会话
+
+- `routes.py`：`session_id = request.session_id or _resume_session_id()`——没带 sid 时用 `chat_history.latest(limit=1)` 接上最近一次真聊过的会话，而不是新建。
+- 前端 `onStart` 重写：只在「这一轮没带 sid」或「sid 变了」时提示「会话 s_xxx（同一条会话一直用下去，刷新也接得上）」，删掉每轮都打印的「已建立会话」——那句提示本身在制造「每句话都新开会话」的错觉。
+- 上下文反问：`_contextualize()` 对 `intent=unknown` 或 0<confidence<0.5 的轮次把上一句念回来（「上一句你问的是「我有哪些提醒」，这一句我没太跟上……」），再给 8 条兜底 chips（查余额/看账单/理财/订阅/提醒/计划/储蓄目标/卡）。
+
+### 6. 越用越智能：长期记忆
+
+- 新表 `agent_memory(user_id, mem_key, mem_value, kind CHECK IN ('fact','preference','profile'), source, updated_ms)`，主键 `(user_id, mem_key)`（33 张表）。
+- `app/memory.py`（第 1 层）：`remember` / `forget` / `all_facts` / `prompt_block`，键 ≤ 40 字、值 ≤ 200 字，同键覆盖写；审计 `memory.written` / `memory.forgotten`（闭集 64→66，payload 只存 value 前 40 字）。
+- `app/memory_extract.py`：每轮对话后 best-effort 抽 1—5 条事实（`remember_facts` 工具，永不抛）；近义去重——`_norm` 归一化后，包含关系或 `difflib` 相似度 ≥ 0.82 就沿用旧键覆盖写，否则真实模型会把「记账喜欢按周看」拆成「记账习惯」+「记账周期偏好」两条。
+- 快路 `assist.py` 加记忆分支：`memory_remember`（「记住…」→ 落库并回执）、`memory_list`（「你记得我什么」→ 逐条列 + `忘掉「X」` chips）、`memory_forget`（先按键再按值匹配，多命中回 `memory_forget_choose`，零命中不删也不报错）；含「提醒」的话仍优先按提醒处理。
+- `app/api/memory_api.py` + `GET/POST /api/memory`、`DELETE /api/memory/{key}`；前端管理页新增「助手对你的长期记忆」卡（列出/手写/忘掉）。
+
+### 7. 测试与验收
+
+- 新增 `tests/test_memory.py`(13)、`tests/test_sub_stop_link.py`(10)；`tests/test_assist_fastpath.py` 加记忆快路 7 条；`tests/test_chat_memory.py` / `tests/test_api.py` / `tests/test_imports.py` 按新行为更新（记忆模块不写 `sessions`，否则 `session.start` 审计消失——本轮真踩到并修）。
+- 全量 `.venv/bin/python -m pytest -q` → **1560 passed, 4 skipped, 1 warning in 40.82s**（`tmp/pytest_r11.log`，exit 0）；`tests/test_*.py` **97** 个（`tests/` 下 102 个）。
+- 前端 `scripts/check_frontend.py` **66/66**；抽内联 `<script>` 后 `node --check` 通过。
+- 真浏览器（8112 真模型 + 真 `api_token`）：
+  - 确认卡：说「把爱奇艺会员的自动续费停掉」→ 卡上出现「订阅商户 爱奇艺会员 / 每期金额 25.00 元 · 每月 / 下次扣费 2026-11-24 23:03 / 当前状态 生效中」，金额行写「不动本金余额（只停银行侧代扣）」，按钮「确认：不动本金余额（只停银行侧代扣） → 「爱奇艺会员」」；点「拒绝」后气泡明说这一轮不继续。截图 `tmp/shot_confirm_sub.png`。
+  - 管理页：疑似订阅 0 个（「1 条你已经定过性」）+「已停止银行侧代扣（2 条：百度网盘 12.00 元、网易云音乐 15.00 元）」；长期记忆卡 3 条（记账习惯 / 常用银行卡 / 记账周期偏好），各带「忘掉这条」。截图 `tmp/shot_memory_card.png`。
+  - 会话续接：刷新后聊天顶部「这是上次的对话（…最近 8 轮，服务端存着）」→ 逐轮回放 →「已接着上次的会话 s_xxx」。
+  - 面板审计（按用户要求把七个页签逐块点过）：overview / bill / plans / manage / security 的每张卡都有对应动作或明确说明；需要选择处一律有可点 chips/按钮；疑似对象（授权、接管单、疑似订阅、预约补验证、生日逐项付款、被拒操作）都有批准或处理入口。
+
+### 8. 规模与文档
+
+- 规模：数据库表 **33**（+agent_memory）、审计事件 **66**（+memory.written/forgotten）、API 路径 **47**（46 条 `/api/*` + 根路径；+3 记忆端点 → 53 个 operation）、工具 35、规则 13、`tests/test_*.py` **97**、`app` 模块 **81**。
+- 文档：`docs/02` 登记 `app/memory.py` / `app/memory_extract.py` / `app/api/memory_api.py` 与两个测试文件；`docs/03` 加 `agent_memory` 行与两类记忆审计；`docs/07` §7.1 提示词 v2 逐字同步、§7.5 加三个记忆端点并写明确认帧 `subscription` 与管理页 `stopped` 契约、§7.7 加记忆卡三个函数与 `onStart`/`renderConfirm` 两行；`docs/10` 补三行必测点；README 能力表加「⑧ 长期记忆」并改写订阅代扣行；全库数字统一到 1560/4、40.82s、47 路由、33 表、66 事件、97 测试文件。
+
+### 9. 遗留
+
+1. 记忆抽取只认「稳定偏好与事实」的一句话表达，闲聊与情绪不记；没有向量检索，注入靠 `updated_ms` 取最近 20 条。
+2. 停代扣只停银行侧；商户会员（真正退订）仍需用户自己去商户端，界面已明确写出。
+3. `tests/test_imports.py::_exists` 的路径拼接缺陷仍未修（子模块依赖恒判 False）。
+4. 真实短信/人脸仍是桩；提醒未接系统通知；未 push 远程。

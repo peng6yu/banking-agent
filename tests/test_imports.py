@@ -61,6 +61,10 @@ LAYERS: dict[str, int] = {
     "app.subscriptions": 2,
     # 会话记忆：把每一轮对话落库，只依赖数据层（重启后接得上话）
     "app.chat_history": 1,
+    # 长期记忆：跨会话保存的偏好/事实，与会话记忆同层（仓储 + 提示词块，不碰模型）
+    "app.memory": 1,
+    # 记忆抽取：调模型挑事实，落库仍走 app.memory；失败只降级，不参与业务判断
+    "app.memory_extract": 1,
     # 跨场景计划（P1-9）：状态全在库里，后台节拍推进；action 步只提醒、不代扣
     "app.plans": 2,
     # 生日计划：建计划（账本级预算预留）+ 到期付款走确认/令牌，依赖规划层与工具白名单
@@ -113,6 +117,8 @@ LAYERS: dict[str, int] = {
     "app.handoffs": 5,
     # 接管队列的 HTTP 面：复用 routes 的鉴权依赖，不自己做鉴权
     "app.api.handoffs_api": 5,
+    # 长期记忆的 HTTP 面：和接管队列同层，鉴权复用 routes
+    "app.api.memory_api": 5,
     "app.api.schemas": 5,
     "app.main": 5,
     # 包本身没有逻辑，聚合再导出不算越层
@@ -125,7 +131,7 @@ LAYERS: dict[str, int] = {
 
 #: 模型层是独立叶子：只有这几处允许碰它（意图解析、API 装配、冒烟脚本）。
 LLM_ALLOWED: frozenset[str] = frozenset(
-    {"app.planner.intent", "app.api.routes", "app.main", "app.smoke"}
+    {"app.planner.intent", "app.api.routes", "app.main", "app.smoke", "app.memory_extract"}
 )
 
 #: 允许依赖表：模块 → 它可以 import 的 app 内模块（由代码现状反推，改代码就要改这张表）。
@@ -144,6 +150,9 @@ ALLOWED: dict[str, frozenset[str]] = {
         "app.planner",
         "app.planner.clarify",
         "app.plans",
+        # 长期记忆已接进聊天主链路（注入提示词 + 每轮结束后抽事实），由 lead 接线
+        "app.memory",
+        "app.memory_extract",
         "app.proactive",
         "app.security",
         "app.subscriptions",
@@ -167,6 +176,13 @@ ALLOWED: dict[str, frozenset[str]] = {
     "app.api.schemas": frozenset({"app.models"}),
     # 接管队列的 HTTP 面只依赖数据层与路由里的鉴权依赖
     "app.api.handoffs_api": frozenset({"app.api.routes"}),
+    # 长期记忆的 HTTP 面：数据层 + 记忆仓储 + 单用户口径 + 鉴权依赖
+    "app.api.memory_api": frozenset({
+        "app.api.routes",
+        "app.db",
+        "app.memory",
+        "app.proactive",
+    }),
     "app.audit": frozenset({
         "app.clock",
         "app.log",
@@ -249,6 +265,8 @@ ALLOWED: dict[str, frozenset[str]] = {
         "app.money",
         "app.planner.state",
         "app.policy.engine",
+        # 订阅停止（并行分支）在确认卡上要带能力边界文案 STOPPED_BOUNDARY_TEXT
+        "app.subscriptions",
     }),
     "app.planner.executor": frozenset({
         "app.clock",
@@ -293,6 +311,8 @@ ALLOWED: dict[str, frozenset[str]] = {
         "app.reminder_time",
         # 逐笔核实订阅要读该商户的每一笔流水（只读，推断仍在 subscriptions 里）
         "app.subscriptions",
+        # 提醒类话术要带上「这个人是谁」（称呼/偏好），只读记忆，不改记忆
+        "app.memory",
     }),
     "app.planner.state": frozenset({
         "app.clock",
@@ -421,6 +441,18 @@ ALLOWED: dict[str, frozenset[str]] = {
         "app.clock",
         "app.db",
         "app.money",
+    }),
+    # 长期记忆：落库 + 审计（from app import audit）+ 时间，不碰模型、不碰业务
+    "app.memory": frozenset({
+        "app.clock",
+        "app.db",
+    }),
+    # 抽取层：调模型抽事实，写入仍走 app.memory，异常只记日志
+    "app.memory_extract": frozenset({
+        "app.clock",
+        "app.llm",
+        "app.log",
+        "app.memory",
     }),
     # 会话记忆：只读写 chat_turns/sessions，不碰工具、不碰权限
     "app.chat_history": frozenset({

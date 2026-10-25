@@ -37,7 +37,18 @@ from app.security import envelope, injection
 
 # docs/07 7.1 逐字照抄，测试会逐字比对原文，不要改写、不要润色、不要重排
 SYSTEM_PROMPT: Final[str] = (
-    "你是银行 AI 助手，可以调用工具帮用户查询和操作账户。\n"
+    "你是「小银」，这位用户自己的银行 AI 助手。语气像一个熟悉的柜员：先说结论，再补依据，不客套、不堆术语。\n"
+    "你不是每轮从零开始：上面几轮对话和系统给你的「长期记忆」都算数，但要分清哪些是用户这次亲口说的。\n"
+    "\n"
+    "预设（用户没特别说明时按这个来）：\n"
+    "- 用户在说自己：自己的账户、自己的钱、自己的卡。\n"
+    "- 金额没给就不猜：动钱的请求缺金额就先问，不要拿历史金额顶上。\n"
+    "- 偏好只当默认值：这次说了不同的账户、收款人或金额，以这次为准。\n"
+    "- 你只负责听懂和填槽，执行与拦截都在执行层；没看到工具结果就不要说「已经办好了」。\n"
+    "- 工具是白名单：你手上只有 emit_intent（以及系统提供的查询快路），白名单之外的能力一律没有，别承诺、别假装调用。\n"
+    "\n"
+    "思维顺序（内部照这个走，不要输出这段思考）：\n"
+    "1) 这句是查询、动钱还是管理？2) 真正要办的是哪一件？3) 缺哪个关键槽位？4) 有没有触到硬性规则？5) 再调用 emit_intent，缺的槽位如实写进 missing。\n"
     "\n"
     "硬性规则：\n"
     "1. 你只能通过工具做事。不许自己计算余额，不许编造交易、金额或时间。\n"
@@ -249,9 +260,30 @@ def emit_intent_tool() -> dict[str, Any]:
     }
 
 
-def build_messages(text: str, history: list[dict[str, Any]] | None = None) -> list[dict[str, Any]]:
-    """系统提示 + 最近几轮历史 + 包成 <DATA> 信封的用户原话。"""
+def build_messages(
+    text: str,
+    history: list[dict[str, Any]] | None = None,
+    *,
+    memory_block: str = "",
+) -> list[dict[str, Any]]:
+    """系统提示 + 长期记忆 + 最近几轮历史 + 包成 <DATA> 信封的用户原话。
+
+    memory_block 是 app/memory.py 拼出来的「这个人是谁」：偏好、习惯、常去商户。
+    它单独占一条 system，不拼进 SYSTEM_PROMPT——第一条消息必须逐字等于
+    docs/07 7.1（测试钉住），而且记忆是数据性的默认值，混进硬规则会被模型当成规则。
+    """
     messages: list[dict[str, Any]] = [{"role": "system", "content": SYSTEM_PROMPT}]
+    block = (memory_block or "").strip()
+    if block:
+        messages.append(
+            {
+                "role": "system",
+                "content": (
+                    "以下是你对这位用户的长期记忆（只当默认值；涉及金额、账户、收款人时以本次原话为准）：\n"
+                    + block[:2000]
+                ),
+            }
+        )
     for item in list(history or [])[-HISTORY_TURNS:]:
         role = str(item.get("role") or "user")
         content = str(item.get("content") or "")
@@ -267,6 +299,7 @@ async def parse(
     *,
     adapter: ChatAdapter | None = None,
     session_id: str | None = None,
+    memory_block: str = "",
 ) -> IntentResult:
     """解析一句话；返回结果里带 question 就表示这一轮只能反问。
 
@@ -292,7 +325,7 @@ async def parse(
         return _scan_only(guarded, text)
 
     client = adapter if adapter is not None else _default_adapter()
-    messages = build_messages(text, history)
+    messages = build_messages(text, history, memory_block=memory_block)
     args = _first_call_args(client, messages)
     retried = False
     if args is None:

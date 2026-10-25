@@ -3,7 +3,18 @@
 ## 7.1 system prompt（**逐字使用，不要改写**）
 
 ```
-你是银行 AI 助手，可以调用工具帮用户查询和操作账户。
+你是「小银」，这位用户自己的银行 AI 助手。语气像一个熟悉的柜员：先说结论，再补依据，不客套、不堆术语。
+你不是每轮从零开始：上面几轮对话和系统给你的「长期记忆」都算数，但要分清哪些是用户这次亲口说的。
+
+预设（用户没特别说明时按这个来）：
+- 用户在说自己：自己的账户、自己的钱、自己的卡。
+- 金额没给就不猜：动钱的请求缺金额就先问，不要拿历史金额顶上。
+- 偏好只当默认值：这次说了不同的账户、收款人或金额，以这次为准。
+- 你只负责听懂和填槽，执行与拦截都在执行层；没看到工具结果就不要说「已经办好了」。
+- 工具是白名单：你手上只有 emit_intent（以及系统提供的查询快路），白名单之外的能力一律没有，别承诺、别假装调用。
+
+思维顺序（内部照这个走，不要输出这段思考）：
+1) 这句是查询、动钱还是管理？2) 真正要办的是哪一件？3) 缺哪个关键槽位？4) 有没有触到硬性规则？5) 再调用 emit_intent，缺的槽位如实写进 missing。
 
 硬性规则：
 1. 你只能通过工具做事。不许自己计算余额，不许编造交易、金额或时间。
@@ -328,8 +339,15 @@ for node in topo_sort(dag):
 | POST | `/api/transactions/manual` | `ManualTransactionRequest`（`merchant` 1–40、`amount_fen` 1–1e8、`direction` out/in、`category` 默认「其他」、`note` 0–80） | `{ok, manual:true, notice, transaction, balance_after_fen, audit_seq, idempotent}` | 用户手动补录一笔流水（现金/刷卡单没进本行）：只写本行 `transactions` 与演示余额，不对应任何真实支付；同账户+方向+金额+商户+分类+备注且**同一本地自然日**重复提交复用原流水（`idempotent:true`，不重复扣钱） |
 | GET | `/api/chat/history?session_id=&limit=` | — | `{ok, session_id, found, title, turns[]}` | 某个会话最近几轮原文，刷新页面时把气泡画回来；`found:false` 表示这个会话没记忆 |
 | GET | `/api/chat/latest?limit=` | — | `{ok, session_id, turns[], last_ms, title}` | 最近一次真聊过的会话：首屏没存 `session_id` 时接着它，而不是新开一个空会话 |
+| GET | `/api/memory` | — | `{ok, facts[], count, prompt_block}` | 助手对用户的长期记忆（跨会话）；`prompt_block` 是注入提示词的那一段，前端只展示不参与判断 |
+| POST | `/api/memory` | `MemoryWriteRequest`（`key` 1–40、`value` 1–200、`kind` fact/preference/profile、`source`） | `{ok, fact}` | 手动记一条偏好/事实（同键覆盖写，落审计 `memory.written`） |
+| DELETE | `/api/memory/{key}` | — | `{ok, key, removed}` | 忘掉一条（幂等；落审计 `memory.forgotten`） |
 | POST | `/api/demo/reset` | — | `{ok}` | 重置演示数据 |
 | GET | `/` | — | `index.html` | 静态页 |
+
+**确认帧的 `subscription` 字段（2026-10-25 停代扣联动轮新增）**：`cancel_subscription` 这类「停银行侧代扣」的确认卡，除了原有的 `action_text/amount/...` 之外还带一个 `subscription` 对象——`{merchant, amount_fen, amount_yuan, period, period_label, next_charge_text, boundary_text, status, status_label}`。前端据此把「金额」行写成「不动本金余额（只停银行侧代扣）」，并补出「订阅商户 / 每期金额 / 下次扣费 / 当前状态」四行；`boundary_text` 固定是「只停了银行侧周期性代扣，商户会员需要你自己去商户端取消」。没有这个字段的普通确认卡照旧按金额渲染。
+
+**管理页疑似订阅的 `stopped` 字段**：`GET /api/business/management` 的 `subscriptions.inferred` 除 `items` / `settled` 之外还带 `stopped[]`（`sub_id, merchant, amount_fen, amount_yuan, period, period_label, next_charge_text, status, status_label, boundary_text`）与 `stopped_count`——停掉银行侧代扣的商户**不再进 `items` 待办**，而是列到「已停止银行侧代扣」一栏。
 
 ### 异常 → HTTP 映射（统一在 `main.py` 注册 handler）
 
@@ -410,6 +428,9 @@ for node in topo_sort(dag):
 | `bxInlineFactor(box, cid, sid, onDone)` | 就地补验证：拉 `POST /api/factor/challenge` 渲染口令行 → 带 `proofs` 调 `confirmAction(cid, true, null, proofs, sid)`；用于总览待处理授权 |
 | `bxRenderHandoffs(host, block, tagId)` / `bxHandoffCard(item)` / `bxHandoffPost(item, action, note)` | 人工接管队列：领取 / 要求补充信息（`note` 必填）/ 拒绝（不动钱）/ 取消这一轮，写审计的操作者是 `BX_OPERATOR` |
 | `bxLoadChatHistory()` | 启动时按「有 `sessionStorage` 的 sid 就查 `/api/chat/history`，否则查 `/api/chat/latest`」把上一段对话的气泡画回来；先出「这是上次的对话（标题，最近 N 轮，服务端存着）」再逐轮回放，之后才跑 `bxRestoreSession()` |
+| `bxRenderMemory()` / `bxSaveMemory(btn)` / `bxForgetMemory(key, btn)` / `bxMemoryField(id, label, placeholder)` | 管理页「助手对你的长期记忆」卡：`GET /api/memory` 列出（键/类型/内容/来源/时间）并逐条给「忘掉这条」（`DELETE /api/memory/{key}`），底部表单 `POST /api/memory` 手动补一条 |
+| 聊天流的 `onStart` | 只在「这一轮没带 sid」或「sid 变了」时提示一句：「会话 s_xxx（同一条会话一直用下去，刷新也接得上）」——**不再每轮打印「已建立会话」**，那是在制造「每句话都新开会话」的错觉 |
+| `renderConfirm` 的订阅行 | 确认帧带 `subscription` 时，金额行改「不动本金余额（只停银行侧代扣）」，并追加订阅商户 / 每期金额 / 下次扣费 / 当前状态四行；确认按钮文案也带商户名 |
 | `bxBindManualForm()` / `bxSubmitManualTransaction()` | 账单页「手动记一笔」表单：`POST /api/transactions/manual` → 气泡说明「只进本行流水与演示余额」+ 结果框写流水号/渠道/分类 → 清空输入并刷新账单；同日重复提交由服务端幂等，气泡会明说「这笔今天已经记过，没有重复记账」 |
 | `bxRunAction` 的 `subscription_check` 分支 | 管理页「逐笔核对这几笔」不是死文案：`bxAsk(act.prompt)` 真发一句「帮我核实一下「商户」这几笔是不是订阅」，由快路回逐笔明细 |
 | `bxBindBirthdayForm()` / `bxSubmitBirthdayPlan()` / `bxRenderBirthdayResult(plan)` | 生日计划：`POST /api/plans/birthday` 建单，卡片渲染预算/可支配/预留/到点与逐项状态 |

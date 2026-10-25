@@ -26,8 +26,9 @@ PRAGMAS: Final[tuple[str, ...]] = (
     "PRAGMA busy_timeout=5000;",
 )
 
-# 30 张表（改造前 27 + 本轮 3：用户维度日累计 daily_user_limits、计划一次性授权
-# plan_authorizations、人工接管队列 handoffs；订阅推断字段在 subs、运行元数据在 dag_runs）
+# 33 张表（改造前 27 + 用户维度日累计 daily_user_limits、计划一次性授权
+# plan_authorizations、人工接管队列 handoffs、会话记忆 chat_turns、长期记忆 agent_memory；
+# 订阅推断字段在 subs、运行元数据在 dag_runs）
 TABLE_NAMES: Final[tuple[str, ...]] = (
     "users",
     "accounts",
@@ -61,6 +62,7 @@ TABLE_NAMES: Final[tuple[str, ...]] = (
     "handoffs",
     "subscription_verdicts",
     "chat_turns",
+    "agent_memory",
 )
 
 SCHEMA_SQL: Final[str] = """
@@ -511,6 +513,20 @@ CREATE TABLE IF NOT EXISTS chat_turns (
   PRIMARY KEY (session_id, seq)
 );
 CREATE INDEX IF NOT EXISTS idx_chat_turns_time ON chat_turns(session_id, ts_ms);
+
+-- 长期记忆：用户偏好与事实跨会话持久化，下次对话直接当默认值用。
+-- 与会话记忆（chat_turns）分工：那张表记「这次说过什么」，这张表记「这个人是谁」；
+-- 所以它不绑 session_id，重启、换会话都还在。kind 是闭集，写错当场被库拦下。
+-- 记忆只作默认值，不能作为动钱依据：金额/账户/收款人一律以本次原话与账务表为准。
+CREATE TABLE IF NOT EXISTS agent_memory (
+  user_id    TEXT NOT NULL,
+  mem_key    TEXT NOT NULL,
+  mem_value  TEXT NOT NULL,
+  kind       TEXT NOT NULL DEFAULT 'fact' CHECK (kind IN ('fact','preference','profile')),
+  source     TEXT NOT NULL DEFAULT '',
+  updated_ms INTEGER NOT NULL,
+  PRIMARY KEY (user_id, mem_key)
+);
 
 -- 审计只增不改：UPDATE/DELETE 一律由 SQLite 层拦掉（docs/03 3.2 第 7 张表）
 CREATE TRIGGER IF NOT EXISTS audit_no_update BEFORE UPDATE ON audit_log

@@ -14,6 +14,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from pathlib import Path
 
 import httpx
@@ -180,3 +181,54 @@ def test_chat_endpoint_persists_user_and_assistant_turns(bank: Path) -> None:
     assert len(turns) >= 2
     assert turns[0]["role"] == "user" and turns[0]["content"] == "我有哪些提醒"
     assert turns[-1]["role"] == "assistant" and turns[-1]["content"].strip()
+
+class _Clueless:
+    """模型一律回 unknown：用来钉住「没听懂时也要带着上一句一起问」。"""
+
+    def chat(self, messages: list[dict[str, Any]], **kwargs: Any) -> Any:
+        from app.llm import LLMResponse, ToolCall
+
+        return LLMResponse(
+            content="",
+            reasoning="",
+            tool_calls=[
+                ToolCall(
+                    id="c1",
+                    name="emit_intent",
+                    arguments=json.dumps(
+                        {"intent": "unknown", "confidence": 1.0, "missing": []}, ensure_ascii=False
+                    ),
+                )
+            ],
+            finish_reason="tool_calls",
+            model="scripted",
+        )
+
+
+def test_chat_without_session_id_continues_the_latest_session(bank: Path) -> None:
+    """没带会话号时接上最近一条会话：换个标签页、丢一次 sessionStorage 都不该开新会话。"""
+    call("POST", "/api/chat", {"session_id": "s_continue", "text": "我有哪些提醒"})
+
+    resp = call("POST", "/api/chat", {"text": "我有哪些提醒"})
+
+    assert resp.status_code == 200
+    assert '"session_id": "s_continue"' in resp.text
+
+
+def test_chat_without_any_session_creates_one(bank: Path) -> None:
+    """一条历史都没有时才新开：新会话号必须真的出现在 start 帧里。"""
+    resp = call("POST", "/api/chat", {"text": "查一下我的余额"})
+
+    assert resp.status_code == 200
+    assert '"session_id": "s_' in resp.text
+
+
+def test_unknown_intent_quotes_the_previous_sentence(bank: Path) -> None:
+    """没听懂时把上一句念回来——空口问「你想干什么」等于每一句都从零开始。"""
+    routes.set_adapter(_Clueless())
+    call("POST", "/api/chat", {"session_id": "s_ctx", "text": "帮我看看这个月的账单"})
+
+    resp = call("POST", "/api/chat", {"session_id": "s_ctx", "text": "那个呢"})
+
+    assert "帮我看看这个月的账单" in resp.text
+

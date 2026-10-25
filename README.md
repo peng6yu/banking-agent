@@ -117,7 +117,7 @@ make run     # 启动日志会打印一条带 #token= 的地址，打开那一�
 | 4 | **生日计划一次性预约授权**（P1） | 新增 `plan_authorizations`：绑定 `plan_version` + 账户 + 项目 + 金额，创建计划时用户显式勾选才保存；到点执行前重判，仅**仍合法的黄色**可用预授权自动执行，升级为红色或参数变化必须暂停并要求强验证/用户确认；取消计划即撤销授权，后台不再启动付款 | `tests/test_birthday_authorization.py`、`tests/test_birthday_api_authorization.py`（4 条：预留改变 available 不改 balance、授权行绑定计划版本、到期窗口前后、红日不自动扣） |
 | 5 | **沙箱条款的合规说明**（P1） | 审查完整调用链后确认主 Agent **不执行任意模型生成代码**（无 `eval`/`exec`，模型输出只进结构化参数）；`scripts/prove_no_exec_surface.py` 实测 75 文件 / 25,383 行、代码执行面 0 命中、出网 3 处（仅 `app/llm.py`）、动态 SQL 13 处逐条人工复核、离线 `subprocess` 9 处全部在测试/脚本侧；这是「消除执行面」的替代设计，**不是已部署的容器沙箱**，未宣称已实现沙箱 | `docs/security_sandbox.md`（149 行，含逐跳调用链 file:line 与剩余风险）、`tests/test_no_exec_surface.py`（14 条） |
 | 6 | **A/B 配对统计与浏览器回归**（P1） | 8 轮完整真实 80 例（mock=false）做配对统计：逐轮 intent B−A 为 −1.25 / +2.50 / 0 / +2.50 / +5.00（MiniMax）与 +5.00 / −2.50 / +8.75（DeepSeek），**符号翻转**；同配置 A 组复跑极差 6.25pp / 11.25pp；仅一轮的 +8.75pp 配对 bootstrap CI[+2.50,+16.25] 不含 0，但属单轮单次采样；**稳定成立的是知识引用（B 41–42/51 vs A=0），不宣称知识层稳定提升准确率** | `docs/benchmark/ab_paired_stats.md`、`scripts/ab_stats.py`；浏览器 7 条旅程由当前 `scripts/ui_journeys.py` 实际执行、失败 0（j3 单独用真模型后端，J4/J5 为 API 驱动流程级），见 `docs/交付/browser_journeys.json` 与 `docs/benchmark/browser_journey_audit.md` |
-| 7 | **交付材料统一** | 重新生成 `docs/benchmark/release_manifest.json`（从代码与运行日志取数），README / 验收报告 / 优先级 / 提交物对照表 / PPT 大纲 / 演示方案 / PROGRESS 全部引用同一份事实；旧数字一律标「历史基线」不删除 | 本轮最终验证：**pytest 1521 passed / 4 skipped**、红队 **43/43**、e2e **13/13**、浏览器旅程 **7/7**（全部 exit 0） |
+| 7 | **交付材料统一** | 重新生成 `docs/benchmark/release_manifest.json`（从代码与运行日志取数），README / 验收报告 / 优先级 / 提交物对照表 / PPT 大纲 / 演示方案 / PROGRESS 全部引用同一份事实；旧数字一律标「历史基线」不删除 | 本轮最终验证：**pytest 1560 passed / 4 skipped**、红队 **43/43**、e2e **13/13**、浏览器旅程 **7/7**（全部 exit 0） |
 
 本轮规模（实测）：测试文件 **95**（`tests/test_*.py`；`tests/` 下 `.py` 文件共 100 个，含 5 个夹具/辅助文件）、数据库表 **32**、工具 **35**（只读 13 / 写 22）、审计事件 **64**、权限规则 **13**、API 路径 **45**。
 
@@ -181,8 +181,9 @@ python3.12 -m app.smoke               # 自检：4/4 PASS 才算配好（会打�
 | ② 账单分析 | 月度统计、分类占比、三类异常识别（拆单、凌晨境外、订阅涨价） | ✅ 「看下我上个月的账单流水」实测返回 20,849.00 元 |
 | ③ 理财操作 | 风险测评问卷（5 题 → C1–C5）、产品列表、适当性校验、申购与赎回（R10 红灯：人脸 + 动态口令） | ✅ 没测评 / 超风险等级一律拒买；问卷是演示用简化版，不是监管口径 |
 | ④ 卡片管理 | 查卡（名下所有卡）、申请虚拟卡、调限额、冻结、解冻、挂失 | ✅ 五件套真模型实测：黄灯开卡、红灯冻结均落库 |
-| ⑤ 订阅代扣 | 列出代扣、**从流水推断疑似订阅**（带把握度与依据流水）、近 7 天可能扣费、按名字唯一匹配后一键取消（黄灯确认） | ✅ 「把视频会员自动续费关掉」走通；推断项不给取消按钮，界面写明「只能停银行侧代扣、不能注销商户会员」 |
+| ⑤ 订阅代扣 | 列出代扣、**从流水推断疑似订阅**（带把握度与依据流水、可逐笔核对）、近 7 天可能扣费、按名字唯一匹配后一键取消（黄灯确认） | ✅ 「把视频会员自动续费关掉」走通；确认卡会写出**商户 / 每期金额 / 下次扣费 / 边界句**；停掉后该商户立刻离开「疑似订阅」待办、转到「已停止银行侧代扣」；推断项不给取消按钮 |
 | ⑥ 跨场景联动 | 「下周三我妈生日帮我准备」→ 查人 → 查余额 → 锁预算 → 下单鲜花 | ✅ 真模型实跑：首轮反问补收款人 → 四节点走通，余额 1286050 → 1256050 |
+| ⑧ 长期记忆 | 助手把用户说过的稳定偏好与事实（「记账喜欢按周看」「习惯用招商银行的卡」）自己记下来，跨会话、刷新后仍在，并在后续问句里当默认值用；可在业务管理页查看/手写/忘掉 | ✅ 真模型实测：说一句偏好 → 后台抽出事实并落 `agent_memory`；「你记得我什么」逐条列并给「忘掉」chips；金额/账户/收款人一律以当次原话为准 |
 | ⑦ 持久计划 | 跨天/跨会话的多步计划：条件检查、提醒、资金动作；落库、可暂停、可取消、重启后继续 | ◐ 检查与提醒由后台节拍推进；**通用计划的资金动作不后台执行**，到期只生成待确认提醒；**生日计划**若保存一次性授权，匹配且重判绿/黄才自动付款，红/变更暂停 |
 
 ## 核心设计：三段论
@@ -331,7 +332,7 @@ curl -s http://127.0.0.1:8000/api/audit/verify
 ### 单元与集成测试（实测全绿，用例数持续增补）
 
 ```bash
-python3.12 -m pytest -q tests/            # 1521 passed, 4 skipped（2026-10-25 逐笔核实与会话记忆轮复跑；历史基线为 1336 passed / 4 skipped）
+python3.12 -m pytest -q tests/            # 1560 passed, 4 skipped（2026-10-25 逐笔核实与会话记忆轮复跑；历史基线为 1336 passed / 4 skipped）
 ```
 
 > **数字口径**：本 README 里的工具数、表数、审计事件数、测试通过数与 A/B 轮次，
@@ -405,9 +406,9 @@ python3.12 -m app.smoke                    # 实测 4/4 PASS，主脑延迟约 1
 | `app/policy/` | 裁决引擎与 13 条规则 R01–R13（纯函数，无网络无模型；R13 为可选的绝对日上限，默认不启用） |
 | `app/security/` | 入口访问令牌、能力令牌、签名信封、注入扫描、熔断器 |
 | `app/tools/` | 35 个工具：查人、查余额、账单、卡片、订阅、转账、资金冻结 + 7 个主动财务（只读/需确认，无动钱语义） |
-| `app/api/` | 会话/确认/审计等 45 条 API 路径（44 条 `/api/*` + 根路径 `/`），含人工接管队列 `handoffs_api.py`；另有只读业务视图 `business.py`（overview / bill / management / plans / executions 五个 GET，六个区域的唯一数据来源） |
+| `app/api/` | 会话/确认/审计等 47 条 API 路径（46 条 `/api/*` + 根路径 `/`），含人工接管队列 `handoffs_api.py`；另有只读业务视图 `business.py`（overview / bill / management / plans / executions 五个 GET，六个区域的唯一数据来源） |
 | `web/index.html` | 单文件前端（原生 JS，无框架、无 CDN、零外链） |
-| `tests/` | pytest 用例集（**1521 passed / 4 skipped**，2026-10-25 逐笔核实与会话记忆轮复跑；历史基线 1336）+ 43 条红队 YAML + `tests/eval/` 80 例 A/B 评估集（10-24 共 8 轮真实结果已入库，统计见 `docs/benchmark/ab_paired_stats.md`） |
+| `tests/` | pytest 用例集（**1560 passed / 4 skipped**，2026-10-25 逐笔核实与会话记忆轮复跑；历史基线 1336）+ 43 条红队 YAML + `tests/eval/` 80 例 A/B 评估集（10-24 共 8 轮真实结果已入库，统计见 `docs/benchmark/ab_paired_stats.md`） |
 | `scripts/` | 种子脚本、前端合规检查器、真实 Chromium 冒烟(`browser_smoke.py`)、六区+主线截图(`ui_screenshots.py`) |
 | `docs/` | 交接规格书 00—10（改造前基线，写代码前必读）+ 11—15 改造设计与验收 + 答辩与演示交付件 |
 | `规划/` | 前期选型与模型实测记录 |
@@ -421,7 +422,7 @@ python3.12 -m app.smoke                    # 实测 4/4 PASS，主脑延迟约 1
 | `make setup` | 一键配置新电脑（.venv + 依赖 + .env + 选模型 + 建库 + 自检） | ✅ 幂等；`ARGS="--dry-run"` 可预演 |
 | `make run` | 启动服务（--reload） | ✅ |
 | `make seed` | 建库 + 种子（幂等） | ✅ |
-| `make test` | pytest 全跑 | ✅ 全绿（1521 passed / 4 skipped，2026-10-25 逐笔核实与会话记忆轮实测；历史基线 1336） |
+| `make test` | pytest 全跑 | ✅ 全绿（1560 passed / 4 skipped，2026-10-25 逐笔核实与会话记忆轮实测；历史基线 1336） |
 | `make smoke` | 模型连通性自检 | ✅ 4/4 |
 | `make cov` | 覆盖率（未装 pytest-cov 时自动退回纯跑） | ✅ |
 | `make reset` | `POST /api/demo/reset` 演示前清场 | ✅ |
@@ -487,11 +488,11 @@ python3.12 -m app.smoke                    # 实测 4/4 PASS，主脑延迟约 1
 docs/00_总纲.md                  ← 十条铁律 + 里程碑 DoD
 docs/01_架构与数据流.md           ← 三段论与不变量
 docs/02_目录结构与文件职责.md     ← 每个文件干什么
-docs/03_数据库与种子数据.md       ← 32 张表 DDL（改造前 27 + 本轮 3：daily_user_limits / plan_authorizations / handoffs；以 app/db.py 的 TABLE_NAMES 为准）
+docs/03_数据库与种子数据.md       ← 33 张表 DDL（改造前 27 + 本轮 3：daily_user_limits / plan_authorizations / handoffs；以 app/db.py 的 TABLE_NAMES 为准）
 docs/04_核心模块实现规格.md       ← 逐函数分支表
 docs/05_安全层实现规格.md         ← 12 条规则 R01–R12 + 令牌七步 ★最重要（历史规格；现 13 条，见 rules.py）
 docs/06_工具层与场景实现规格.md   ← 历史规格 19 工具；当前 35 个，以 /api/tools 为准
-docs/07_规划器_API与前端规格.md   ← 历史规格 10 端点；当前 42 个 API 路径
+docs/07_规划器_API与前端规格.md   ← 历史规格 10 端点；当前 47 个 API 路径
 docs/08_编码规范.md               ← 硬性编码要求
 docs/09_工作区与Git规范.md        ← 分支/提交/推送
 docs/10_测试与验收清单.md         ← 43 条红队 + 里程碑验收

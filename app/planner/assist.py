@@ -24,6 +24,7 @@ import app.audit as audit
 import app.plans as plans
 import app.proactive as proactive
 import app.reminder_time as reminder_time
+import app.memory as memory
 import app.subscriptions as subscriptions
 from app.money import fen_to_yuan_str
 
@@ -196,10 +197,16 @@ _SAVINGS_AMOUNT_RE: Final[re.Pattern[str]] = re.compile(r"(?:存|攒)[^，。；
 
 
 def detect(text: str) -> str | None:
-    """返回 'reminder' / 'savings' / 'plan' / 'subscription' / None；只做关键词判定，不碰数据库。"""
+    """返回 'reminder' / 'savings' / 'plan' / 'subscription' / 'memory' / None；只做关键词判定，不碰数据库。"""
     clean = _clean(text)
     if not clean:
         return None
+    # 长期记忆排在最前面：「你记得我什么」里有「记得」，「忘掉记忆「X」」里有「忘」，
+    # 放到提醒后面会被当成建提醒/取消提醒。显式记忆是确定性读写，不该交给模型猜。
+    if _MEM_REMEMBER_RE.search(clean) and not any(word in clean for word in ("提醒", "闹钟", "到点")):
+        return "memory"
+    if _MEM_LIST_RE.search(clean) or _MEM_FORGET_RE.search(clean):
+        return "memory"
     # 提醒优先：「提醒我每月存 100」是提醒，不是建储蓄目标。
     if any(word in clean for word in REMINDER_MARKERS) and not any(
         word in clean for word in REMINDER_EXCLUDES
@@ -229,6 +236,139 @@ def detect(text: str) -> str | None:
     if _PLAN_LIST_RE.search(clean) or _PLAN_CANCEL_RE.search(clean):
         return "plan"
     return None
+
+
+# ------------------------------------------------------------------ 长期记忆
+# 「记住 / 忘掉 / 你记得我什么」是确定性操作：说一句就写、就删、就列，不用模型猜。
+_MEM_LIST_RE: Final[re.Pattern[str]] = re.compile(
+    r"你(?:都)?记得我(?:什么|啥)|我的记忆|你(?:还)?了解我什么|你记住了我(?:什么|啥)|我有哪些记忆"
+)
+_MEM_FORGET_RE: Final[re.Pattern[str]] = re.compile(r"^(?:帮我)?(?:忘掉|忘了|忘记|别记着|不要记着|删掉记忆)")
+_MEM_REMEMBER_RE: Final[re.Pattern[str]] = re.compile(r"^(?:帮我|请)?(?:记住|记一下|记着|记下来)")
+_MEM_PREFERENCE_WORDS: Final[tuple[str, ...]] = ("喜欢", "不喜欢", "讨厌", "偏好", "习惯", "口味", "忌口")
+_MEM_KEY_CHARS: Final[int] = memory.KEY_MAX
+_MEM_VALUE_CHARS: Final[int] = memory.VALUE_MAX
+
+
+def _memory_line(fact: dict[str, Any]) -> str:
+    """一条记忆的人话；键和值相同（「记住我不喜欢电话推销」）时不重复念两遍。"""
+    if str(fact["key"]) == str(fact["value"]):
+        return f"[{fact['kind_label']}] {fact['key']}"
+    return f"[{fact['kind_label']}] {fact['key']}：{fact['value']}"
+
+
+def _memory_choices(facts: list[dict[str, Any]]) -> list[dict[str, str]]:
+    return [
+        {"label": f"忘掉「{fact['key']}」", "value": f"忘掉记忆「{fact['key']}」"}
+        for fact in facts[:8]
+    ]
+
+
+def _handle_memory(conn, text: str, user_id: str) -> dict[str, Any]:
+    """查看 / 忘掉 / 记住：三条都不建图、不动钱，只动 agent_memory 这一张表。"""
+    clean = _clean(text)
+    facts = memory.all_facts(conn, user_id=user_id, limit=50)
+    if _MEM_LIST_RE.search(clean):
+        if not facts:
+            return {
+                "summary": "我现在还没有关于你的记忆。你说一句「记住我不喜欢电话推销」这种，我就记下来，以后按你的习惯来。",
+                "action": "memory_list",
+                "choices": [_MEM_CHOICE_HINT],
+                "data": {"memories": []},
+            }
+        lines = [f"{index}）{_memory_line(fact)}" for index, fact in enumerate(facts, start=1)]
+        return {
+            "summary": "我记着这些关于你的事（都是你自己说过的）：\n" + "\n".join(lines),
+            "action": "memory_list",
+            "choices": _memory_choices(facts),
+            "data": {"memories": facts},
+        }
+    if _MEM_FORGET_RE.search(clean):
+        wanted = clean
+        for prefix in ("帮我", "忘掉", "忘了", "忘记", "别记着", "不要记着", "删掉", "记忆", "关于", "的", "「", "」"):
+            wanted = wanted.replace(prefix, "")
+        wanted = wanted.strip()
+        hits = [fact for fact in facts if wanted and (wanted in fact["key"] or fact["key"] in wanted)]
+        if not hits and wanted:
+            hits = [fact for fact in facts if wanted in fact["value"]]
+        if not hits:
+            return {
+                "summary": (
+                    f"我没找到和「{wanted}」对得上的记忆。"
+                    if wanted
+                    else "要忘掉哪一条？说个关键词，或者先问「你记得我什么」。"
+                ),
+                "action": "memory_forget_none",
+                "choices": _memory_choices(facts),
+                "data": {"memories": facts},
+            }
+        if len(hits) > 1:
+            return {
+                "summary": f"有 {len(hits)} 条都对得上，要忘掉哪一条？",
+                "action": "memory_forget_choose",
+                "choices": _memory_choices(hits),
+                "data": {"memories": hits},
+            }
+        removed = memory.forget(conn, user_id=user_id, key=hits[0]["key"])
+        rest = memory.all_facts(conn, user_id=user_id, limit=50)
+        return {
+            "summary": (
+                f"忘掉了「{hits[0]['key']}」这条记忆，以后不再拿它当默认。"
+                if removed.get("removed")
+                else f"「{hits[0]['key']}」这条刚才已经被忘掉了。"
+            ),
+            "action": "memory_forget",
+            "choices": _memory_choices(rest),
+            "data": {"forgotten": hits[0]["key"], "memories": rest},
+        }
+    if _MEM_REMEMBER_RE.search(clean):
+        body = _MEM_REMEMBER_RE.sub("", clean, count=1)
+        for filler in ("了", "要", "我", "你", "：", ":", "，", ",", " "):
+            body = body.replace(filler, "", 1) if body.startswith(filler) else body
+        body = body.strip()
+        if not body:
+            return {
+                "summary": "要我记住什么？比如「记住我不喜欢电话推销」「记住我常用招商银行那张卡」。",
+                "action": "memory_remember_empty",
+                "choices": [
+                    {"label": "记住我不喜欢电话推销", "value": "记住我不喜欢电话推销"},
+                    {"label": "你记得我什么", "value": "你记得我什么"},
+                ],
+                "data": {"memories": facts},
+            }
+        key = body[:_MEM_KEY_CHARS]
+        kind = "preference" if any(word in body for word in _MEM_PREFERENCE_WORDS) else "fact"
+        fact = memory.remember(
+            conn,
+            user_id=user_id,
+            key=key,
+            value=body[:_MEM_VALUE_CHARS],
+            kind=kind,
+            source="user_said",
+        )
+        return {
+            "summary": (
+                f"记住了：{_memory_line(fact)}。以后我按这个默认来；不想让我记着就说「忘掉「{fact['key']}」」。"
+            ),
+            "action": "memory_remember",
+            "choices": _memory_choices(memory.all_facts(conn, user_id=user_id, limit=50)),
+            "data": {"memory": fact},
+        }
+    return {
+        "summary": "记忆这块我只会三件事：记下来、列出来、忘掉。说一句「记住…」「你记得我什么」「忘掉…」就行。",
+        "action": "memory_hint",
+        "choices": [
+            {"label": "你记得我什么", "value": "你记得我什么"},
+            {"label": "记住我不喜欢电话推销", "value": "记住我不喜欢电话推销"},
+        ],
+        "data": {"memories": facts},
+    }
+
+
+_MEM_CHOICE_HINT: Final[dict[str, str]] = {
+    "label": "记住我不喜欢电话推销",
+    "value": "记住我不喜欢电话推销",
+}
 
 
 # ------------------------------------------------------------------ 储蓄目标
@@ -1208,6 +1348,8 @@ def handle(conn, text: str, *, session_id: str | None = None) -> dict[str, Any] 
         return _handle_plan(conn, text, user_id)
     if kind == "subscription":
         return _handle_subscription(conn, text, user_id)
+    if kind == "memory":
+        return _handle_memory(conn, text, user_id)
     return _handle_savings(conn, text, user_id)
 
 
