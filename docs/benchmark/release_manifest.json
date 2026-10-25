@@ -1,10 +1,10 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-10-25T22:02:05+08:00",
+  "generated_at": "2026-10-25T22:21:17+08:00",
   "git": {
-    "head": "59e6cf489904cc54be37e1aac863f4f557f8c41b",
-    "head_short": "59e6cf4",
-    "subject": "feat(ux): 功能体检轮——选项对齐问句、计划/提醒可建可结束、疑似对象给批准空间",
+    "head": "f62119b3eaa74bc5007eb01a7dbaf90ccdf2e902",
+    "head_short": "f62119b",
+    "subject": "fix(subs): 「确实是我订的」也退出待办——定性两向生效并可撤回",
     "branch": "main",
     "dirty": false,
     "changed_paths": 0
@@ -86,11 +86,11 @@
       "handoffs",
       "subscription_verdicts"
     ],
-    "audit_event_types": 62,
-    "api_paths": 41,
+    "audit_event_types": 63,
+    "api_paths": 42,
     "policy_rules": 13,
     "intent_templates": 9,
-    "test_files": 91,
+    "test_files": 92,
     "knowledge": {
       "version": "2c4fbe8d4be2906c",
       "terms": 40,
@@ -104,11 +104,11 @@
   },
   "tests": {
     "command": ".venv/bin/python -m pytest -q",
-    "passed": 1468,
+    "passed": 1476,
     "failed": 0,
     "skipped": 4,
-    "duration_s": 61.53,
-    "log": "tmp/pytest_round6.log",
+    "duration_s": 48.76,
+    "log": "tmp/pytest_r7.log",
     "parsed": true
   },
   "redteam": {
