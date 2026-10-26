@@ -19,6 +19,8 @@ from tests.tool_fixtures import (
     DEBIT_BALANCE,
     PAYEE_LIJING,
     SUB_ACTIVE,
+    _ms,
+    _tx,
     bank,
     ctx,
 )
@@ -242,16 +244,43 @@ def test_analyze_bill_returns_fixed_shape_and_sums(ctx: ToolContext) -> None:
     data = result.data
     assert {
         "period", "year", "month", "range", "account_tail",
-        "total_out_fen", "total_in_fen", "total_out_yuan", "total_in_yuan",
+        "spend_out_fen", "spend_in_fen", "spend_out_yuan", "spend_in_yuan",
+        "net_fen", "net_yuan", "internal",
         "out_count", "in_count", "by_category", "top_merchants", "anomalies", "summary",
     } <= set(data)
-    assert data["total_out_fen"] == 1_757_150
-    assert data["total_in_fen"] == 0
+    assert data["spend_out_fen"] == 1_757_150
+    assert data["spend_in_fen"] == 0
     assert [item["category"] for item in data["by_category"]] == ["购物", "餐饮", "订阅"]
     assert data["by_category"][0]["amount_fen"] == 1_145_700
     assert data["by_category"][0]["pct"] == 65.2
     assert data["out_count"] == 16
-    assert sum(item["amount_fen"] for item in data["by_category"]) == data["total_out_fen"]
+    assert sum(item["amount_fen"] for item in data["by_category"]) == data["spend_out_fen"]
+    # 内部搬运单列：这份账本没有账户互转/理财，所以 internal 是空的、两口径相等。
+    assert data["internal"]["out_fen"] == 0
+    assert data["total_out_fen"] == data["spend_out_fen"]
+
+
+def test_a_transfer_out_counts_as_spending_but_moving_money_does_not(ctx: ToolContext, bank) -> None:
+    """转给别人的钱是花掉了；在自己卡之间搬（账户互转/理财）不是花掉。
+
+    同一个「支出」全站只认一个定义：钱有没有真的离开你的净资产。这条用例把它钉住，
+    免得哪天有人把「转账」整类又算回内部搬运里（或者反过来把互转算成支出）。
+    """
+    before = registry.execute(
+        "analyze_bill", {"period": "month", "year": 2026, "month": 10}, ctx=ctx
+    ).data
+    _tx(bank, "t_out_gift", _ms(2026, 10, 5, 10), 50_000, "张三", "转账")
+    _tx(bank, "t_self_move", _ms(2026, 10, 5, 11), 70_000, "亲属卡互转", "账户互转")
+    after = registry.execute(
+        "analyze_bill", {"period": "month", "year": 2026, "month": 10}, ctx=ctx
+    ).data
+    assert after["spend_out_fen"] == before["spend_out_fen"] + 50_000
+    assert after["internal"]["out_fen"] == 70_000
+    assert after["total_out_fen"] == after["spend_out_fen"] + 70_000
+    assert after["net_fen"] == before["net_fen"] - 50_000
+    assert after["out_count"] == before["out_count"] + 1
+    assert [item["category"] for item in after["by_category"] if item["category"] == "账户互转"] == []
+    assert [item["category"] for item in after["by_category"] if item["category"] == "转账"] == ["转账"]
 
 
 def test_analyze_bill_detects_all_three_anomalies(ctx: ToolContext) -> None:
@@ -298,7 +327,7 @@ def test_analyze_bill_empty_month_is_ok_with_zeros(ctx: ToolContext) -> None:
     data = registry.execute(
         "analyze_bill", {"period": "month", "year": 2026, "month": 1}, ctx=ctx
     ).data
-    assert data["total_out_fen"] == 0
+    assert data["spend_out_fen"] == 0
     assert data["by_category"] == []
     assert data["top_merchants"] == []
     assert data["anomalies"] == []
@@ -324,7 +353,7 @@ def test_analyze_bill_year_period_and_missing_month(ctx: ToolContext) -> None:
     year = registry.execute("analyze_bill", {"period": "year", "year": 2026}, ctx=ctx)
     assert year.ok is True
     assert year.data["month"] is None
-    assert year.data["total_out_fen"] > 0
+    assert year.data["spend_out_fen"] > 0
     with pytest.raises(ValidationError):
         registry.execute("analyze_bill", {"period": "month", "year": 2026}, ctx=ctx)
 

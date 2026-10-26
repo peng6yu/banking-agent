@@ -117,19 +117,22 @@ def _bill_summary(
     in_rows = [row for row in rows if str(row["direction"]) == "in"]
     total_out = sum(int(row["amount_fen"]) for row in out_rows)
     total_in = sum(int(row["amount_fen"]) for row in in_rows)
-    # 转账/理财是账户内部搬运，两个方向都要单列：前端要把「全部结余」和
-    # 「不含内部搬运的结余」摆在一起说明，否则总览（排除）与账单（不排除）
-    # 会各报一个数，用户不知道该信哪个。
-    internal_out = sum(
-        int(row["amount_fen"]) for row in out_rows
-        if str(row["category"]) in INTERNAL_CATEGORIES
-    )
-    internal_in = sum(
-        int(row["amount_fen"]) for row in in_rows
-        if str(row["category"]) in INTERNAL_CATEGORIES
-    )
-    net_all = total_in - total_out
-    net_external = (total_in - internal_in) - (total_out - internal_out)
+
+    def _is_internal(row: sqlite3.Row) -> bool:
+        return str(row["category"]) in INTERNAL_CATEGORIES
+
+    # 「支出」只认钱真的离开净资产：账户互转（本人名下卡/亲属卡之间）和理财
+    # 申购赎回是钱在自己口袋里换个地方，单列成 internal，不进支出、不进结余。
+    # 对外转账（转给张三）不是内部搬运，照常算支出——以前只有「转账」一个分类，
+    # 只好整类排除，结果「转给别人的钱」从支出里消失，总览与账单各说各话。
+    spend_out_rows = [row for row in out_rows if not _is_internal(row)]
+    internal_rows = [row for row in out_rows if _is_internal(row)]
+    internal_in_rows = [row for row in in_rows if _is_internal(row)]
+    spend_out = sum(int(row["amount_fen"]) for row in spend_out_rows)
+    internal_out = sum(int(row["amount_fen"]) for row in internal_rows)
+    internal_in = sum(int(row["amount_fen"]) for row in internal_in_rows)
+    spend_in = total_in - internal_in
+    net = spend_in - spend_out
     return {
         "period": period,
         "year": int(year),
@@ -142,20 +145,33 @@ def _bill_summary(
             "label": _range_label(period, year, month),
         },
         "account_tail": account_tail,
+        # 主口径：钱真的离开了净资产。
+        "spend_out_fen": spend_out,
+        "spend_out_yuan": fen_to_yuan_str(spend_out),
+        "spend_in_fen": spend_in,
+        "spend_in_yuan": fen_to_yuan_str(spend_in),
+        "net_fen": net,
+        "net_yuan": fen_to_yuan_str(net),
+        "out_count": len(spend_out_rows),
+        "in_count": len(in_rows) - len(internal_in_rows),
+        "by_category": _by_category(spend_out_rows, spend_out),
+        "top_merchants": _top_merchants(spend_out_rows),
+        # 全部流出：账单页要交代「另有 X 元只是换了个地方」，也用来对账。
         "total_out_fen": total_out,
-        "total_in_fen": total_in,
         "total_out_yuan": fen_to_yuan_str(total_out),
+        "total_in_fen": total_in,
         "total_in_yuan": fen_to_yuan_str(total_in),
-        "internal_out_fen": internal_out,
-        "internal_in_fen": internal_in,
-        "net_all_fen": net_all,
-        "net_all_yuan": fen_to_yuan_str(net_all),
-        "net_external_fen": net_external,
-        "net_external_yuan": fen_to_yuan_str(net_external),
-        "out_count": len(out_rows),
-        "in_count": len(in_rows),
-        "by_category": _by_category(out_rows, total_out),
-        "top_merchants": _top_merchants(out_rows),
+        "net_all_fen": total_in - total_out,
+        "net_all_yuan": fen_to_yuan_str(total_in - total_out),
+        "internal": {
+            "out_fen": internal_out,
+            "out_yuan": fen_to_yuan_str(internal_out),
+            "in_fen": internal_in,
+            "in_yuan": fen_to_yuan_str(internal_in),
+            "count": len(internal_rows) + len(internal_in_rows),
+            "items": _by_category(internal_rows, internal_out),
+            "note": "转给自己另一张卡、亲属卡互转、理财申购赎回都是钱在自己口袋里换地方，不算收入也不算支出。",
+        },
         "anomalies": [],
     }
 
@@ -207,10 +223,17 @@ def _summary_text(data: dict[str, Any]) -> str:
     if not data["by_category"]:
         return f"{label}没有任何支出记录。"
     top = data["by_category"][0]
-    return (
-        f"{label}一共支出 {data['total_out_yuan']} 元，共 {data['out_count']} 笔，"
+    text = (
+        f"{label}一共花了 {data['spend_out_yuan']} 元，共 {data['out_count']} 笔，"
         f"花得最多的是{top['category']}（{top['pct']}%）。"
     )
+    internal = data.get("internal") or {}
+    if int(internal.get("out_fen") or 0) > 0:
+        text += (
+            f"另有 {internal['out_yuan']} 元是转给自己另一张卡或买理财，"
+            "钱还在自己名下，没有算进上面这个数。"
+        )
+    return text
 
 
 def _detect_anomalies(

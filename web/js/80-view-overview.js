@@ -20,8 +20,10 @@ function bxRenderOverview(data) {
     } else {
       balHost.appendChild(bxStatCard('账户余额', BX_NA, '后端没有返回账户'));
     }
-    balHost.appendChild(bxStatCard('本月支出', month.total_out_yuan ? textOf(month.total_out_yuan) + ' 元' : BX_NA, bxCount(month.out_count, ' 笔')));
-    balHost.appendChild(bxStatCard('本月收入', month.total_in_yuan ? textOf(month.total_in_yuan) + ' 元' : BX_NA, bxCount(month.in_count, ' 笔')));
+    /* 支出只算钱真的离开净资产的：转给自己另一张卡、买理财是钱换个地方，单列在下面的「内部搬运」。
+       以前总览把内部搬运也算进支出，账单页又把它排除，同一屏两个数谁都不服谁。 */
+    balHost.appendChild(bxStatCard('本月支出', month.spend_out_yuan ? textOf(month.spend_out_yuan) + ' 元' : BX_NA, bxCount(month.out_count, ' 笔') + '，不含账户互转与理财'));
+    balHost.appendChild(bxStatCard('本月收入', month.spend_in_yuan ? textOf(month.spend_in_yuan) + ' 元' : BX_NA, bxCount(month.in_count, ' 笔')));
   }
   setText($('ov-month-tag'), data.month_label || '—');
 
@@ -33,17 +35,21 @@ function bxRenderOverview(data) {
     flowHost.replaceChildren();
     const list = el('div', 'list');
     const window = bxIsObj(month.window) ? month.window : {};
-    list.appendChild(bxRow('收入', textOf(window.label) || textOf(month.label), bxMoney(month, 'total_in')));
-    list.appendChild(bxRow('支出', bxCount(month.out_count, ' 笔'), bxMoney(month, 'total_out')));
-    const trend = bxArr(data.trend);
-    const last = trend.length ? trend[trend.length - 1] : null;
-    if (bxIsObj(last)) {
-      /* 趋势口径不含转账与理财（账户内部搬运），和上面两行的"全部支出"不是一个口径，
-         所以标签里必须写明，否则同一个页面会出现两个对不上的结余。 */
+    list.appendChild(bxRow('收入', textOf(window.label) || textOf(month.label), bxMoney(month, 'spend_in')));
+    list.appendChild(bxRow('支出', bxCount(month.out_count, ' 笔') + '（不含账户互转与理财）', bxMoney(month, 'spend_out')));
+    const internal = bxIsObj(month.internal) ? month.internal : {};
+    if (internal.out_fen > 0) {
       list.appendChild(bxRow(
-        '结余·' + textOf(last.label) + '（不含转账/理财）',
-        last.partial ? '这个月还没过完' : '完整月',
-        textOf(last.net_yuan) + ' 元'
+        '内部搬运·不算收支',
+        bxCount(internal.count, ' 笔') + '（转给自己的卡 / 买理财，钱还在你名下）',
+        textOf(internal.out_yuan) + ' 元'
+      ));
+    }
+    if (month.net_yuan !== undefined && month.net_yuan !== null) {
+      list.appendChild(bxRow(
+        '结余·' + (textOf(window.label) || textOf(month.label)),
+        '收入 − 支出，和账单页同一个口径',
+        textOf(month.net_yuan) + ' 元'
       ));
     }
     flowHost.appendChild(list);
@@ -281,16 +287,25 @@ function bxRenderBill(data) {
   const host = $('bill-summary');
   if (host) {
     host.replaceChildren();
-    host.appendChild(bxStatCard('支出合计', bxMoney(data, 'total_out'), textOf(range.label) + ' · ' + bxCount(data.out_count, ' 笔')));
-    host.appendChild(bxStatCard('收入合计', bxMoney(data, 'total_in'), bxCount(data.in_count, ' 笔')));
-    /* 结余必须交代口径：这张卡含转账/理财，下面的趋势表排除它们（和总览一致）。
-       只说「净结余」就会出现同一屏 -1,311 与 3,476 两个数、谁也不服谁。 */
+    /* 全站只有一个「支出」定义：钱真的离开净资产。账户互转与理财是钱换个地方，
+       单独列在下面的「内部搬运」里；把这两笔混进支出再算结余，就会和总览对不上。 */
+    host.appendChild(bxStatCard('支出合计', bxMoney(data, 'spend_out'), textOf(range.label) + ' · ' + bxCount(data.out_count, ' 笔，不含账户互转与理财')));
+    host.appendChild(bxStatCard('收入合计', bxMoney(data, 'spend_in'), bxCount(data.in_count, ' 笔')));
     const netAll = bxMoney(data, 'net_all');
-    const netExt = bxMoney(data, 'net_external');
-    const netHint = netExt === BX_NA
-      ? '全部收支相减（含转账/理财）'
-      : '全部收支相减（含转账/理财）。不算转账/理财是 ' + netExt + '，和总览同一个口径';
-    host.appendChild(bxStatCard('净结余', netAll, netHint));
+    const netHint = netAll === BX_NA
+      ? '收入 − 支出，和总览同一个口径'
+      : '收入 − 支出，和总览同一个口径。把内部搬运也算进去是 ' + netAll + '（明细见下方「内部搬运」）';
+    host.appendChild(bxStatCard('净结余', bxMoney(data, 'net'), netHint));
+
+    const internal = bxIsObj(data.internal) ? data.internal : {};
+    const internalItems = bxArr(internal.items);
+    if (internalItems.length) {
+      const inner = el('div', 'card-note');
+      inner.textContent = '内部搬运：' + internalItems.map(function (item) {
+        return textOf(item.category) + ' ' + textOf(item.amount_yuan) + ' 元';
+      }).join('、') + '（共 ' + bxCount(internal.count, ' 笔') + '）。' + textOf(internal.note);
+      host.appendChild(inner);
+    }
   }
 
   const catHost = $('bill-cats');
@@ -317,7 +332,7 @@ function bxRenderBill(data) {
     } else {
       trendHost.replaceChildren();
       trendHost.appendChild(bxTable(
-        ['月份', '收入', '支出', '结余（不含转账/理财）', '笔数'],
+        ['月份', '收入', '支出', '结余（不含账户互转与理财）', '收支笔数'],
         trend.map(function (row) {
           return [
             textOf(row.label) + (row.partial ? '（未完）' : ''),

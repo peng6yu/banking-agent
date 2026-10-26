@@ -743,6 +743,19 @@ def _migrate_monitor_rules(conn: sqlite3.Connection) -> None:
         conn.execute("PRAGMA foreign_keys = ON")
 
 
+def _migrate_transfer_category(conn: sqlite3.Connection) -> None:
+    """把老库里「亲属卡互转」这类内部搬运从 `转账` 改名成 `账户互转`（幂等）。
+
+    原来只有一个 `转账` 分类，把「转给别人的钱」和「转到自己另一张卡」混在一起，
+    结果收支统计只能整类排除——对外转账因此从「本月支出」里消失。
+    拆开后：对外转账 = 支出，账户互转 = 内部搬运（继续排除）。
+    历史行靠对手方名识别，只有种子/演示数据里的「亲属卡互转」属于内部搬运。
+    """
+    conn.execute(
+        "UPDATE transactions SET category = '账户互转' WHERE category = '转账' AND counterparty = '亲属卡互转'"
+    )
+
+
 def _drop_legacy(conn: sqlite3.Connection) -> None:
     """删掉后来被证明是多余的结构（只跑一次，重复执行无副作用）。
 
@@ -790,6 +803,7 @@ def init_db(conn: sqlite3.Connection) -> None:
     conn.executescript(SCHEMA_SQL)
     _ensure_columns(conn)
     _migrate_monitor_rules(conn)
+    _migrate_transfer_category(conn)
     _drop_legacy(conn)
 
 

@@ -86,12 +86,14 @@ def test_overview_balance_and_month_totals_come_from_the_database(bank: Path) ->
     try:
         row = conn.execute(
             "SELECT COALESCE(SUM(amount_fen), 0) AS total, COUNT(*) AS n FROM transactions"
-            " WHERE account_id = ? AND direction = 'out' AND ts_ms >= ? AND ts_ms < ?",
+            " WHERE account_id = ? AND direction = 'out' AND ts_ms >= ? AND ts_ms < ?"
+            " AND category NOT IN ('账户互转', '理财')",
             (account["account_id"], window["start_ms"], window["end_ms"]),
         ).fetchone()
     finally:
         conn.close()
-    assert month["total_out_fen"] == int(row["total"])
+    # 支出只认钱真的离开净资产的：账户互转与理财单列，不进这一个数。
+    assert month["spend_out_fen"] == int(row["total"])
     assert month["out_count"] == int(row["n"])
     for cat in month["by_category"]:
         # 分类只保证金额是分，不保证有 yuan 字段——前端按 amount_fen 格式化

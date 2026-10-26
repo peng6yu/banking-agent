@@ -59,6 +59,17 @@ function bxMessageFeedback(btnKey, msg) {
   });
 }
 
+/* 顶部导航的待看徽标：不点开总览也知道助手有几条话要说。计数就是 status=new 的条数，
+   点了「我去处理 / 这次不用 / 这类别再提醒」之后自然减少，不做「已读」这种假状态。 */
+function bxMessagesBadge(count) {
+  const badge = $('nav-messages-badge');
+  if (!badge) { return; }
+  const n = Math.max(0, Number(count) || 0);
+  badge.textContent = n > 9 ? '9+' : String(n);
+  badge.hidden = n === 0;
+  badge.setAttribute('aria-label', n ? ('助手提醒待看 ' + n + ' 条') : '没有待看的助手提醒');
+}
+
 function bxRenderMessages(data) {
   const host = $('ov-messages');
   if (!host) { return; }
@@ -66,6 +77,7 @@ function bxRenderMessages(data) {
   bxMessagesTag(data);
   const items = bxArr(data.items);
   const counts = bxIsObj(data.counts) ? data.counts : {};
+  bxMessagesBadge(counts.new);
   host.replaceChildren();
   if (!items.length) {
     bxEmpty(host, '现在没有要提醒你的事',

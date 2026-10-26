@@ -24,7 +24,7 @@ from app.tools.base import (
 )
 
 CATEGORIES: Final[tuple[str, ...]] = (
-    "餐饮", "交通", "购物", "生活缴费", "娱乐", "医疗", "工资", "理财", "转账", "订阅",
+    "餐饮", "交通", "购物", "生活缴费", "娱乐", "医疗", "工资", "理财", "转账", "账户互转", "订阅",
 )
 DEFAULT_DAYS: Final[int] = 30
 MAX_DAYS: Final[int] = 365

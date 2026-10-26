@@ -51,7 +51,7 @@ def summarize(tool: str, data: dict[str, Any]) -> str:
     if tool == "query_transactions":
         return f"共查到 {data.get('count', 0)} 笔交易"
     if tool == "analyze_bill":
-        return f"账单支出合计 {data.get('total_out_yuan', '0.00')} 元（{_bill_range_label(data)}）"
+        return f"账单支出合计 {data.get('spend_out_yuan', '0.00')} 元（{_bill_range_label(data)}，不含账户互转与理财）"
     if tool == "list_subs":
         return f"在订订阅 {data.get('count', 0)} 项，每月 {data.get('monthly_total_yuan', '0.00')} 元"
     if tool == "list_cards":

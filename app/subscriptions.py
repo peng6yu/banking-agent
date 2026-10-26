@@ -35,7 +35,7 @@ YEARLY_GAP_DAYS: Final[tuple[int, int]] = (350, 380)
 #: 金额波动容忍度：最高一笔 / 最低一笔 <= 1.25 就算"差不多同一笔钱"。
 AMOUNT_SPREAD: Final[float] = 1.25
 #: 不算订阅的分类：转账是人对人，理财是本人内部划转。
-EXCLUDED_CATEGORIES: Final[tuple[str, ...]] = ("转账", "理财")
+EXCLUDED_CATEGORIES: Final[tuple[str, ...]] = ("转账", "账户互转", "理财")
 #: 续费提醒默认提前几天。
 UPCOMING_DAYS: Final[int] = 7
 MAX_CANDIDATES: Final[int] = 10

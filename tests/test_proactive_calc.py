@@ -135,7 +135,7 @@ def test_analyze_cashflow_without_history_is_unknown_not_zero_confidence() -> No
 
 def test_analyze_cashflow_ignores_internal_transfers_and_bad_amounts() -> None:
     rows = [
-        _tx("t1", "in", 5_000_000, "转账", _ms(2026, 9, 3)),
+        _tx("t1", "in", 5_000_000, "账户互转", _ms(2026, 9, 3)),
         _tx("t2", "out", 5_000_000, "理财", _ms(2026, 9, 4)),
         _tx("t3", "out", 0, "餐饮", _ms(2026, 9, 5)),
         _tx("t4", "out", -400_000, "餐饮", _ms(2026, 9, 6)),

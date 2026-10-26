@@ -1,13 +1,13 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-10-26T23:40:59+08:00",
+  "generated_at": "2026-10-27T00:06:22+08:00",
   "git": {
-    "head": "1db54ee410dd7f5b06e78382dd9348b6948ca279",
-    "head_short": "1db54ee",
-    "subject": "test(api): 钉住 SSE 各帧的键集合",
+    "head": "18359d89b9b91565c7efbdd0dfac49bd4b1bd602",
+    "head_short": "18359d8",
+    "subject": "docs(audit): 记最后一轮（超时文案、SSE 帧键集合、满数据复验）+ 孤儿端点定性",
     "branch": "main",
     "dirty": true,
-    "changed_paths": 1
+    "changed_paths": 30
   },
   "code": {
     "tools": {
@@ -108,10 +108,10 @@
   },
   "tests": {
     "command": ".venv/bin/python -m pytest -q",
-    "passed": 1780,
+    "passed": 1781,
     "failed": 0,
     "skipped": 4,
-    "duration_s": 18.96,
+    "duration_s": 20.42,
     "log": "tmp/pytest_final.log",
     "parsed": true
   },

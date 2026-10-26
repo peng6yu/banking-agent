@@ -26,6 +26,32 @@ from app.views.queue import (
 from app.views.labels import DEFAULT_TREND_MONTHS, QUICK_ACTIONS
 
 
+def _month_scope(bill_data: dict[str, Any]) -> dict[str, Any]:
+    """本期收支：和账单页同一个口径。
+
+    「支出」只算钱真的离开净资产的；账户互转（本人卡间、亲属卡）与理财申购赎回
+    是钱在自己名下换个地方，单列进 internal，不进支出也不进结余。
+    """
+    return {
+        "label": bill_data.get("range", {}).get("label"),
+        "window": bill_data.get("range"),
+        "spend_out_fen": bill_data.get("spend_out_fen", 0),
+        "spend_out_yuan": bill_data.get("spend_out_yuan", "0.00"),
+        "spend_in_fen": bill_data.get("spend_in_fen", 0),
+        "spend_in_yuan": bill_data.get("spend_in_yuan", "0.00"),
+        "net_fen": bill_data.get("net_fen", 0),
+        "net_yuan": bill_data.get("net_yuan", "0.00"),
+        "out_count": bill_data.get("out_count", 0),
+        "in_count": bill_data.get("in_count", 0),
+        "internal": bill_data.get("internal") or {
+            "out_fen": 0, "out_yuan": "0.00", "in_fen": 0, "in_yuan": "0.00",
+            "count": 0, "items": [], "note": "",
+        },
+        "by_category": list(bill_data.get("by_category") or [])[:6],
+        "summary": bill_data.get("summary"),
+    }
+
+
 def overview_view(conn: sqlite3.Connection) -> dict[str, Any]:
     """财务总览：一张脸看清"我有多少钱、钱在往哪走、有什么事要处理"。"""
     stamp = now_ms()
@@ -59,18 +85,7 @@ def overview_view(conn: sqlite3.Connection) -> dict[str, Any]:
         "month_label": bill_data.get("range", {}).get("label"),
         "account": next((a for a in accounts if a["account_id"] == account_id), None),
         "accounts": accounts,
-        "this_month": {
-            "label": bill_data.get("range", {}).get("label"),
-            "window": bill_data.get("range"),
-            "total_out_fen": bill_data.get("total_out_fen", 0),
-            "total_out_yuan": bill_data.get("total_out_yuan", "0.00"),
-            "total_in_fen": bill_data.get("total_in_fen", 0),
-            "total_in_yuan": bill_data.get("total_in_yuan", "0.00"),
-            "out_count": bill_data.get("out_count", 0),
-            "in_count": bill_data.get("in_count", 0),
-            "by_category": list(bill_data.get("by_category") or [])[:6],
-            "summary": bill_data.get("summary"),
-        },
+        "this_month": _month_scope(bill_data),
         "trend": trend,
         "anomalies": {
             "items": anomalies[:3],

@@ -22,7 +22,7 @@
   </div>
 
   <nav class="nav" id="nav" role="tablist" aria-label="主导航">
-    <button class="nav-tab" type="button" role="tab" data-view="overview" aria-selected="true">财务总览</button>
+    <button class="nav-tab" type="button" role="tab" data-view="overview" aria-selected="true">财务总览<span class="nav-badge" id="nav-messages-badge" hidden></span></button>
     <button class="nav-tab" type="button" role="tab" data-view="assistant" aria-selected="false">AI 助手</button>
     <button class="nav-tab" type="button" role="tab" data-view="bill" aria-selected="false">账单分析</button>
     <button class="nav-tab" type="button" role="tab" data-view="plans" aria-selected="false">计划与提醒</button>
@@ -57,7 +57,7 @@
         <div class="card">
           <div class="card-head"><h3>主要支出类别</h3></div>
           <div id="ov-cats"></div>
-          <div class="card-note">占比是占本月「全部支出」的比例，含转账、理财这类账户内部搬运，和上面的支出总数同一口径。</div>
+          <div class="card-note">占比是占本月「全部支出」的比例，含账户互转、理财这类账户内部搬运，和上面的支出总数同一口径。</div>
         </div>
       </div>
 

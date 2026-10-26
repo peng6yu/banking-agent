@@ -210,7 +210,7 @@ def test_manual_entry_counts_in_the_bill(bank: Path) -> None:
     before = call("GET", "/api/business/bill?period=month").json()
     call("POST", "/api/transactions/manual", _body(amount_fen=12345, category="餐饮"))
     after = call("GET", "/api/business/bill?period=month").json()
-    assert after["total_out_fen"] == before["total_out_fen"] + 12345
+    assert after["spend_out_fen"] == before["spend_out_fen"] + 12345
     assert after["out_count"] == before["out_count"] + 1
 
 

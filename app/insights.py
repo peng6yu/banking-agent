@@ -62,9 +62,9 @@ _CATALOG_CORE: Final[tuple[dict[str, str], ...]] = (
      "source": "savings_goals（目标金额、截止日、已存）", "severity": "info"},
     {"id": "I4_payday_saving", "title": "发薪先存一笔",
      "why": "本月有一笔 5000 元以上的收入到账",
-     "source": "transactions（direction=in，排除转账/理财）", "severity": "info"},
+     "source": "transactions（direction=in，排除账户互转/理财）", "severity": "info"},
     {"id": "I2_spending_pace", "title": "花得比上月快",
-     "why": "本月至今的支出（不含转账/理财）比上月同期高 20% 以上",
+     "why": "本月至今的支出（不含账户互转与理财）比上月同期高 20% 以上",
      "source": "transactions（排除账户内部搬运）", "severity": "info"},
 )
 
@@ -332,7 +332,7 @@ def _spend_since(conn: sqlite3.Connection, user_id: str, start: int, end: int) -
 
 
 def _spending_candidate(conn: sqlite3.Connection, user_id: str, now: int) -> dict[str, Any] | None:
-    """支出节奏：本月至今 vs 上月同一天数窗口，排除转账/理财。"""
+    """支出节奏：本月至今 vs 上月同一天数窗口，排除账户互转/理财。"""
     cur_start = _period_start_ms(now)
     prev_start = _prev_month_start(now)
     prev_end = min(prev_start + (now - cur_start), cur_start)
@@ -353,7 +353,7 @@ def _spending_candidate(conn: sqlite3.Connection, user_id: str, now: int) -> dic
         "title": f"这个月比上月同期多花了 {facts['hike_pct']}%",
         "body": (
             f"本月到目前为止花了 {facts['spent_yuan']} 元，上月同期是 {facts['previous_yuan']} 元"
-            f"（+{facts['hike_pct']}%，都不含转账和理财）。想管住的话，可以先去账单分析看看"
+            f"（+{facts['hike_pct']}%，都不含账户互转与理财）。想管住的话，可以先去账单分析看看"
             "是哪一类涨得最多。"
         ),
         "facts": facts,
