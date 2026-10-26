@@ -1,10 +1,10 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-10-26T13:03:26+08:00",
+  "generated_at": "2026-10-26T13:19:58+08:00",
   "git": {
-    "head": "1575a18dd48e8d1076ff4aa9f7350a6548769a00",
-    "head_short": "1575a18",
-    "subject": "feat(W1): 立规矩 + 资金不变量——架构报告/守卫测试/业务边界/停代扣联动收口",
+    "head": "c9bb4d53a7166f2a6aef5522ba5572479eb9b1aa",
+    "head_short": "c9bb4d5",
+    "subject": "refactor(W2): 统一底座——连接/时间/金额各归一处，标签字典改由守卫测试钉住",
     "branch": "main",
     "dirty": false,
     "changed_paths": 0
@@ -92,7 +92,7 @@
     "api_paths": 47,
     "policy_rules": 13,
     "intent_templates": 9,
-    "test_files": 100,
+    "test_files": 102,
     "knowledge": {
       "version": "2c4fbe8d4be2906c",
       "terms": 40,
@@ -106,11 +106,11 @@
   },
   "tests": {
     "command": ".venv/bin/python -m pytest -q",
-    "passed": 1618,
+    "passed": 1632,
     "failed": 0,
     "skipped": 4,
-    "duration_s": 17.62,
-    "log": "tmp/pytest_w1e.log",
+    "duration_s": 18.73,
+    "log": "tmp/pytest_w2.log",
     "parsed": true
   },
   "redteam": {

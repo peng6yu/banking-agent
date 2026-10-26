@@ -65,7 +65,7 @@ docs/交付/截图/信息架构/browser_report.json 由 scripts/ui_screenshots.p
 
 ## 4. release_manifest 的引用关系
 
-当轮（2026-10-24）的 docs/benchmark/release_manifest.json（generated_at 2026-10-24T23:34:56+08:00，git head 6124667，dirty=false）里；现行清单已于 2026-10-26T13:03:26+08:00 以 head 1575a18 重生成，journeys 块未变：
+当轮（2026-10-24）的 docs/benchmark/release_manifest.json（generated_at 2026-10-24T23:34:56+08:00，git head 6124667，dirty=false）里；现行清单已于 2026-10-26T13:19:58+08:00 以 head c9bb4d5 重生成，journeys 块未变：
 
 - journeys.report 指向 docs/交付/browser_journeys.json，status=pass，items 是 j1/j2/j4/j5/j6/j7/j3 全 pass，demo_db_unchanged=true —— 与归档 JSON（20:38 那轮 7/7）逐字段一致。
 - 生成脚本 scripts/release_manifest.py:207-215 是读 journey JSON 现算的，不是手填；limits 里的「浏览器旅程」行已从硬编码的「5 条流程级」改为「7 条（j1/j2/j4/j5/j6/j7 + j3）」，并注明 J1/J2/J6/J7 点击级、J4/J5 API 驱动流程级，与归档一致。
