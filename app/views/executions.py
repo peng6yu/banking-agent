@@ -37,7 +37,6 @@ def executions_view(
     ).fetchall()
     chain_ok = audit.verify_chain(conn)
     return {
-        "generated_ms": stamp,
         "generated_text": timefmt.maybe_minute_text(stamp),
         "sessions": session_items,
         "handoffs": _handoffs_view(conn, limit=20),

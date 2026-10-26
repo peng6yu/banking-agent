@@ -140,9 +140,7 @@ def _candidate(rows: list[Any]) -> dict[str, Any] | None:
         "occurrences": len(rows),
         "avg_amount_fen": avg_fen,
         "avg_amount_yuan": fen_to_yuan_str(avg_fen),
-        "last_amount_fen": amounts[-1],
         "last_amount_yuan": fen_to_yuan_str(amounts[-1]),
-        "first_ms": times[0],
         "first_text": timefmt.date_text(times[0]),
         "last_ms": times[-1],
         "last_text": timefmt.date_text(times[-1]),
@@ -321,7 +319,6 @@ def detect_recurring(
         "items": candidates,
         "count": len(candidates),
         "lookback_months": lookback_months,
-        "as_of_ms": as_of,
         "note": INFERRED_NOTE,
         "boundary": "推断结果不是本行代扣授权，也不是商户会员状态；处理前请先核对每一笔流水。",
     }

@@ -40,7 +40,6 @@ def plans_view(conn: sqlite3.Connection) -> dict[str, Any]:
     charges = subscriptions.upcoming(conn, str(account["id"]))
     persisted = plans.list_plans(conn, user_id=user_id, limit=10)
     return {
-        "generated_ms": stamp,
         "generated_text": timefmt.maybe_minute_text(stamp),
         "scheduler": _scheduler_block(),
         "state_legend": [

@@ -1,13 +1,13 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-10-26T18:45:58+08:00",
+  "generated_at": "2026-10-26T20:40:01+08:00",
   "git": {
-    "head": "06163bd3272f7eeb2fc0c449bb54b763e15af654",
-    "head_short": "06163bd",
-    "subject": "fix(view): 结余交代口径、快捷入口只填不发、执行记录按轮次分组",
+    "head": "242038f721fcc0f8a087c653e7648ab0c92de1d1",
+    "head_short": "242038f",
+    "subject": "docs(audit): 全盘检查数据与接口（DB/写端点/读端点/前端）+ 数据字典保留真实响应样本",
     "branch": "main",
     "dirty": true,
-    "changed_paths": 38
+    "changed_paths": 15
   },
   "code": {
     "tools": {
@@ -109,10 +109,10 @@
   },
   "tests": {
     "command": ".venv/bin/python -m pytest -q",
-    "passed": 1754,
+    "passed": 1755,
     "failed": 0,
     "skipped": 4,
-    "duration_s": 17.04,
+    "duration_s": 18.75,
     "log": "tmp/pytest_final.log",
     "parsed": true
   },

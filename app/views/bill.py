@@ -40,7 +40,6 @@ def bill_view(
     ).data
     anomalies = _enrich_anomalies(conn, list(data.get("anomalies") or []))
     return {
-        "generated_ms": stamp,
         "generated_text": timefmt.maybe_minute_text(stamp),
         "period": period,
         "year": int(year),
@@ -51,13 +50,7 @@ def bill_view(
         "total_out_yuan": data.get("total_out_yuan", "0.00"),
         "total_in_fen": data.get("total_in_fen", 0),
         "total_in_yuan": data.get("total_in_yuan", "0.00"),
-        # 结余要同时给「全部收支」与「不含转账/理财」两个口径：账单页含它们，
-        # 总览的趋势行排除它们，只给一个数就会出现同屏两个结余互相打脸。
-        "internal_out_fen": data.get("internal_out_fen", 0),
-        "internal_in_fen": data.get("internal_in_fen", 0),
-        "net_all_fen": data.get("net_all_fen"),
         "net_all_yuan": data.get("net_all_yuan"),
-        "net_external_fen": data.get("net_external_fen"),
         "net_external_yuan": data.get("net_external_yuan"),
         "out_count": data.get("out_count", 0),
         "in_count": data.get("in_count", 0),
@@ -82,10 +75,7 @@ def bill_view(
         },
         "method": {
             "currency": "CNY",
-            "money_unit": "所有金额以整数分计算与返回，同时给 yuan 字符串",
             "categories": list(queries.CATEGORIES),
-            "internal_transfer_note": "转账/理财属于账户内部搬运，收支统计与趋势里不计入。",
-            "anomaly_window": "拆单与凌晨境外只扫当前账期；订阅涨价会带上一个自然月的基线。",
         },
     }
 

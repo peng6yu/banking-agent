@@ -33,7 +33,6 @@ def management_view(conn: sqlite3.Connection) -> dict[str, Any]:
     user_id = str(account["user_id"])
     products, holdings_summary = _products_view(conn, user_id)
     return {
-        "generated_ms": stamp,
         "accounts": _accounts(conn),
         "cards": _cards_view(conn, user_id),
         "subscriptions": _subscriptions_view(conn, account_id, user_id),
@@ -100,10 +99,6 @@ def _subscriptions_view(
     return {
         "items": subs_items,
         "count": len(subs_items),
-        "monthly_active_fen": sum(
-            int(row["amount_fen"]) for row in sub_rows
-            if str(row["period"]) == "monthly" and str(row["status"]) == "active"
-        ),
         "boundary": "订阅数据来自本行代扣记录，不是商户会员系统。",
         # 已知代扣之外：疑似订阅（流水推断）与近期扣费窗口。
         "inferred": _inferred_view(conn, account_id, user_id),
@@ -206,7 +201,6 @@ def _products_view(
                 "min_buy_fen": int(row["min_buy_fen"]),
                 "min_buy_yuan": fen_to_yuan_str(int(row["min_buy_fen"])),
                 "nav_micro": int(row["nav_micro"]),
-                "nav_updated_ms": int(row["nav_updated_ms"]),
                 "nav_updated_text": timefmt.maybe_minute_text(int(row["nav_updated_ms"])),
                 "description": str(row["description"]),
                 "holding_shares_milli": shares,
@@ -258,7 +252,6 @@ def _investments_view(
             "suitability": {
                 "assessed": profile is not None,
                 "profile": profile,
-                "question_count": len(suitability.QUESTIONS),
                 # 题目跟着画像一起下发：界面不用为了填表再单独请求一次。
                 "questions": [
                     {
@@ -284,7 +277,6 @@ def _investments_view(
                 else f"已测评：{profile['level']}（{profile['level_label']}），"
                      f"{profile['capacity_label']} 风险的产品。"
             ),
-            "execution": "申购/赎回走 buy_fund / redeem_fund，均为写操作，需要能力令牌。",
     }
 
 

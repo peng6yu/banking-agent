@@ -365,7 +365,6 @@ def generate(conn: sqlite3.Connection, user_id: str | None = None, now: int | No
         "skipped": skipped,
         "used": used,
         "cap": MAX_PER_DAY,
-        "generated_ms": now,
     }
 
 

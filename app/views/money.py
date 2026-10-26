@@ -57,7 +57,6 @@ def _accounts(conn: sqlite3.Connection) -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
     for row in rows:
         view = queries.account_view(row)
-        view["type_label"] = "储蓄卡" if view["type"] == "debit" else "信用卡"
         if view["type"] == "debit":
             # 可支配金额不是账面余额：在途 hold 和生日预算预留都不能再花。
             # 查询接口与资金写操作读同一个 funds.available_fen，避免两套口径。
@@ -195,7 +194,6 @@ def _trend(
                 "label": f"{key[1]} 月",
                 "income_fen": bucket["income_fen"],
                 "income_yuan": fen_to_yuan_str(bucket["income_fen"]),
-                "expense_fen": bucket["expense_fen"],
                 "expense_yuan": fen_to_yuan_str(bucket["expense_fen"]),
                 "net_fen": net,
                 # 亏损月要带负号：以前这里取了 abs()，趋势表会把 -1,311.00 显示成

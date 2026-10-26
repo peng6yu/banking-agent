@@ -281,13 +281,9 @@ def _scheduled_tasks(
                 "executed_text": timefmt.maybe_minute_text(row["executed_ms"]),
             }
         )
-    pending = [i for i in items if i["status"] == "scheduled"]
     return {
         "items": items,
         "count": len(items),
-        "scheduled_count": len(pending),
-        "overdue_count": sum(1 for i in pending if i["overdue"]),
-        "needs_verification_count": sum(1 for i in items if i["needs_verification"]),
         "empty_reason": None if items else "还没有任何预约任务。",
     }
 
@@ -378,7 +374,6 @@ def _scheduler_block() -> dict[str, Any]:
         "monitor": {
             "auto": True,
             "interval_ms": proactive.monitor_interval_ms(),
-            "trigger_field": "monitor_runs.trigger",
             "note": (
                 "储蓄目标监测：只有你自己打开监测开关的目标才会被节拍器唤起，"
                 "同一个目标按上面的间隔节流（默认 6 小时一次），只写提醒、不动钱。"

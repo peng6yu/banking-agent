@@ -202,7 +202,7 @@ def test_management_reports_the_suitability_gate_honestly(bank: Path) -> None:
     assert invest["suitability_assessed"] is False
     gate = invest["suitability"]
     assert gate["assessed"] is False
-    assert gate["question_count"] == 5
+    assert len(gate["questions"]) == 5
     assert {band["level"] for band in gate["level_bands"]} == {"C1", "C2", "C3", "C4", "C5"}
     assert "不是监管口径" in gate["disclaimer"]
     note = invest["suitability_note"]
