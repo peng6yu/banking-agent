@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import asyncio
+import re
 import time
 from pathlib import Path
 from typing import Any
@@ -311,3 +312,31 @@ def test_business_views_require_the_api_token(
             )
 
     assert asyncio.run(with_token()).status_code == 200
+
+# ------------------------------------------------- 前端拼出来的字段名
+
+def test_every_dynamic_money_key_has_a_backend_field() -> None:
+    """前端用 bxMoney(obj, 'base') 拼出 'base_fen' / 'base_yuan'。
+
+    键名是运行时拼的，静态 grep 'base_fen' 查不到，于是「这个字段没人读、
+    可以删」的判断会误伤（订阅的 monthly_active 就这样被删过一次，页面变成
+    「月合计 暂不可用」）。这里把 web/js 里所有拼出来的 base 跟后端字面量
+    对一遍，删字段时能立刻被挡住。
+    """
+    root = Path(__file__).resolve().parents[1]
+    pattern = re.compile(r"bxMoney\(\s*[^,()]+?,\s*'([a-z0-9_]+)'")
+    bases: dict[str, str] = {}
+    for js in sorted((root / "web" / "js").glob("*.js")):
+        for line_no, line in enumerate(js.read_text(encoding="utf-8").splitlines(), 1):
+            for match in pattern.finditer(line):
+                bases.setdefault(match.group(1), f"{js.name}:{line_no}")
+    assert bases, "一个 bxMoney 都没扫到，说明前端改了写法，这条守卫需要跟着改"
+    backend = "\n".join(
+        path.read_text(encoding="utf-8") for path in sorted((root / "app").rglob("*.py"))
+    )
+    missing = [
+        f"{base} ({where})"
+        for base, where in sorted(bases.items())
+        if f'"{base}_fen"' not in backend and f'"{base}_yuan"' not in backend
+    ]
+    assert not missing, f"前端拼出来的金额字段后端没有：{missing}"

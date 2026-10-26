@@ -1,13 +1,13 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-10-26T20:40:01+08:00",
+  "generated_at": "2026-10-26T20:42:57+08:00",
   "git": {
-    "head": "242038f721fcc0f8a087c653e7648ab0c92de1d1",
-    "head_short": "242038f",
-    "subject": "docs(audit): 全盘检查数据与接口（DB/写端点/读端点/前端）+ 数据字典保留真实响应样本",
+    "head": "694753d26161356a9a5c4e5f3b7cb7ddb1382b1b",
+    "head_short": "694753d",
+    "subject": "refactor(views): 删掉没人读的响应字段（-23 个字段 / -35 行代码）",
     "branch": "main",
     "dirty": true,
-    "changed_paths": 15
+    "changed_paths": 2
   },
   "code": {
     "tools": {
@@ -109,10 +109,10 @@
   },
   "tests": {
     "command": ".venv/bin/python -m pytest -q",
-    "passed": 1755,
+    "passed": 1756,
     "failed": 0,
     "skipped": 4,
-    "duration_s": 18.75,
+    "duration_s": 17.72,
     "log": "tmp/pytest_final.log",
     "parsed": true
   },
