@@ -6,7 +6,7 @@
 > **报告生成时（2026-10-24 20:10）尚未 push 远程**；后续文档/PPT 与清单收口提交已推送至公开 GitHub（`origin/main`）。发布清单在干净工作区上生成。
 > 本报告里的每个数字都来自本次实际执行，命令见 §3；与 `release_manifest.json` 冲突时以清单为准。
 > 2026-10-24 晚间的文档/PPT 收口提交（`6124667` / `df8c2d0` 等）只改文档与 PPT，未重跑全量测试。
-> **2026-10-25 四轮复跑**：19:46「快路口语轮」新增 45 条用例（assist 快路 26 / reminder_time 8 / reminder_api 11）后全量 **1464 passed / 4 skipped，37.50s**（日志 `tmp/pytest_final.log` / `tmp/redteam_final.log` / `tmp/e2e_final.log`，19:46–19:47）；21:51「功能体检轮」再补 4 条（生日付款补验证 2 / 同名消歧 2）后 **1468 passed / 4 skipped，61.53s**（`tmp/pytest_round6.log`）；22:21「订阅定性口径修正」补 8 条后 **1476 passed / 4 skipped，48.76s**（`tmp/pytest_r7.log`）；23:00「逐笔核实与会话记忆轮」补上逐笔核实、会话记忆、手动补录三组用例后全量 **1669 passed / 4 skipped，19.73s**（`tmp/pytest_r9.log`），四轮红队 43/43、e2e 13/13、前端 66/66 全部 exit 0。本报告 §3 的数字即最新一次复跑结果，原 2026-10-24 的 1415 口径降为历史基线。
+> **2026-10-25 至 10-26 八轮复跑**（每一轮都是全量 `pytest -q` 实测，旧的靠前的轮次保留作历史）：19:46「快路口语轮」新增 45 条用例（assist 快路 26 / reminder_time 8 / reminder_api 11）后 **1464 passed / 4 skipped，37.50s**（`tmp/pytest_final.log`）；21:51「功能体检轮」再补 4 条（生日付款补验证 2 / 同名消歧 2）后 **1468 / 4，61.53s**（`tmp/pytest_round6.log`）；22:21「订阅定性口径修正」补 8 条后 **1476 / 4，48.76s**（`tmp/pytest_r7.log`）；23:00「逐笔核实与会话记忆轮」补三组（逐笔核实 13 / 会话记忆 13 / 手动补录 18）后 **1521 / 4，55.62s**（`tmp/pytest_r9.log`）；10-26「W1 立规矩 + 资金不变量」**1618 / 4**（`1575a18`）；「W2 统一底座」**1632 / 4**（`c9bb4d5`）；「W3 用例层」补 `tests/test_use_cases.py` 7 条并收口全表后 **1669 / 4，19.73s**（`tmp/pytest_w3d.log`）；「W4 分层收口」跨层违规清零、路由拆 9 块、视图搬 `app/views/` 后 **1709 / 4，19.02s**（`tmp/pytest_w4d.log`）。红队 43/43、e2e 13/13、前端 66/66 在 W3 / W4 两轮各自串行复跑，全部 exit 0。本报告 §3 的数字即最新一次复跑结果，2026-10-24 的 1415 与 10-25 早间的 1464 / 1468 / 1476 口径一律降为历史基线。
 > 历史轮次数字（1336 passed / 33 工具 / 22 表 / 29 事件 / 62 测试文件）保留在 §11，标注为**历史基线**。
 
 ---
@@ -47,7 +47,7 @@
 
 | # | 命令 | 结果 |
 |---|---|---|
-| 1 | `.venv/bin/python -m pytest -q tests/` | **1669 passed, 4 skipped, 1 warning**（19.73s，2026-10-26 W3 用例层轮复跑，`tmp/pytest_w3d.log`）；4 个 skip 是浏览器冒烟默认关闭 |
+| 1 | `.venv/bin/python -m pytest -q tests/` | **1709 passed, 4 skipped, 1 warning**（19.02s，2026-10-26 W4 分层收口轮复跑，`tmp/pytest_w4d.log`）；4 个 skip 是浏览器冒烟默认关闭 |
 | 2 | `RUN_BROWSER_SMOKE=1 .venv/bin/python -m pytest tests/test_browser_smoke.py -q` | **4 passed**（固定模型） |
 | 3 | `.venv/bin/python scripts/check_frontend.py` | **前端检查通过：66/66** |
 | 4 | `.venv/bin/python -m scripts.redteam` | **43 条：PASS 43 / FAIL 0** |
@@ -295,7 +295,7 @@ python3.12 scripts/ab_stats.py --results tests/eval/results --iters 10000 --seed
 
 | 指标 | 历史基线（2026-10-23 / 上一轮） | 本轮实测（2026-10-25） |
 |---|---|---|
-| pytest | 1336 passed / 4 skipped | **1669 passed / 4 skipped** |
+| pytest | 1336 passed / 4 skipped | **1709 passed / 4 skipped** |
 | 工具 | 33 | **35** |
 | 数据表 | 22 | **30** |
 | 审计事件类型 | 29 | **61** |

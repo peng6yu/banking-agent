@@ -20,8 +20,8 @@ from typing import Any, get_args
 import pytest
 
 from app import db, handoffs, memory, plans
-from app.api import business
 from app.models import RiskLevel
+from app.views import labels as view_labels
 from app.planner import assist
 from app.planner.events import LEVEL_LABELS
 from app.subscriptions import CHANNEL_LABELS, VERDICT_ACTIONS, VERDICT_LABELS
@@ -91,7 +91,8 @@ def test_memory_kind_labels_cover_kinds() -> None:
 
 def test_handoff_status_labels_cover_every_status() -> None:
     every = set(handoffs.ACTIVE_STATUSES) | set(handoffs.TERMINAL_STATUSES)
-    labels = set(business.HANDOFF_STATUS_LABELS)
+    # W4 起视图常量搬进 app/views/labels.py：标签是给界面用的，跟路由不再同文件。
+    labels = set(view_labels.HANDOFF_STATUS_LABELS)
     assert every == labels, f"接管单状态与标签不一致：少 {sorted(every - labels)}，多 {sorted(labels - every)}"
 
 

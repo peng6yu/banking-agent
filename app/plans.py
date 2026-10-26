@@ -23,7 +23,7 @@ from __future__ import annotations
 import json
 from typing import Any, Final
 
-from app import audit, clock, db, ids, proactive, reminder_time, timefmt
+from app import audit, clock, db, ids, plan_hooks, proactive, reminder_time, timefmt
 
 PLAN_STATUSES: Final[tuple[str, ...]] = ("active", "paused", "completed", "cancelled", "failed")
 STEP_KINDS: Final[tuple[str, ...]] = ("check", "action", "reminder")
@@ -310,7 +310,7 @@ def update(
             )
             # 预算预留/一次性授权必须跟计划状态一起收尾：取消要释放额度、改参数要让
             # 旧授权对不上版本。放在同一事务里，避免「计划取消了、额度还占着」。
-            _birthday_sync(conn, plan_id, status=status, changes=changes)
+            _notify_plan_changed(conn, plan_id, status=status, changes=changes)
     return view_plan(conn, plan_id)
 
 
@@ -475,21 +475,20 @@ def _run_step(conn, row: Any, now: int) -> dict[str, Any]:
     return {"outcome": "skipped", "detail": {"alert_id": alert_id, "needs_user": True}}
 
 
-def _birthday_sync(
+def _notify_plan_changed(
     conn,
     plan_id: str,
     *,
     status: str | None = None,
     changes: tuple[str, ...] | list[str] = (),
 ) -> None:
-    """通知生日模块做预算/授权收尾（延迟导入，避免 plans ↔ birthday 循环导入）。
+    """广播「计划变了」，让关心计划的模块（生日预算/授权）做收尾。
 
-    这里不做「是不是生日计划」的判断：计划类型和 meta 的解读归生日模块管，
-    on_plan_updated 对非生日计划直接 return。
+    走 app/plan_hooks.py 的注册表而不是 import 具体计划类型：plans 在第 2 层、
+    生日计划在第 5 层，直连就是反向依赖。这里也不判断「是不是生日计划」——
+    类型与 meta 的解读归登记进来的实现自己管，非生日计划直接 return。
     """
-    from app import birthday
-
-    birthday.on_plan_updated(conn, plan_id, status=status, changes=changes)
+    plan_hooks.notify_plan_updated(conn, plan_id, status=status, changes=changes)
 
 
 def _settle_plan(conn, plan_id: str, now: int) -> None:
@@ -514,7 +513,7 @@ def _settle_plan(conn, plan_id: str, now: int) -> None:
     if settled is not None and str(settled["status"]) in ("completed", "failed"):
         # 计划收尾（完成/失败）同样要释放还没付掉的预留，否则额度跟着一个结束的计划
         # 一直占着。钩子内部按当前状态判断，重复调用是幂等的。
-        _birthday_sync(conn, plan_id, status=str(settled["status"]), changes=("status",))
+        _notify_plan_changed(conn, plan_id, status=str(settled["status"]), changes=("status",))
 
 
 def run_due(conn, *, now: int | None = None, plan_id: str | None = None) -> dict[str, Any]:

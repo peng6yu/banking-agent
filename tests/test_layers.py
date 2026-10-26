@@ -26,6 +26,9 @@ from tests.test_imports import _actual, _exists
 
 APP_DIR = Path(__file__).resolve().parents[1] / "app"
 API_DIR = APP_DIR / "api"
+#: W4 起视图装配搬到 app/views/，但「只往外说事实、不在这里判定」的规矩跟着文件走：
+#: 扫描范围同时覆盖 api 与 views，否则把代码挪个位置就悄悄绕过了这条铁律。
+VIEWS_DIR = APP_DIR / "views"
 
 #: API 层不许出现的判定入口。前两个是「做决定」，后两个是「能不能做」。
 POLICY_DECISION_TOKENS: tuple[str, ...] = (
@@ -36,16 +39,16 @@ POLICY_DECISION_TOKENS: tuple[str, ...] = (
 )
 
 #: 文本级命中的白名单：只允许「响应 JSON 的字段名」，不允许真正的判定调用。
-#: 出处（2026-10-26 快照）：
-#:   app/api/business.py:454  "can_confirm_here": not expired   ← 响应字段
-#:   app/api/business.py:459  "can_verify_here": ...            ← 响应字段
-#:   app/api/business.py:596  "can_verify_here": ...            ← 响应字段
+#: 出处（2026-10-26 W4 视图归位后快照）：
+#:   app/views/queue.py:147  "can_confirm_here": not expired    ← 响应字段
+#:   app/views/queue.py:152  "can_verify_here": not expired     ← 响应字段
+#:   app/views/queue.py:289  "can_verify_here": bool(...)       ← 响应字段
 #: 这些是给前端看的布尔字段名，不是策略调用；真要判定仍走 planner/policy。
-#: TODO(W4 视图归位)：business.py 拆成 view 组件后，字段改名 *_allowed 之类的正向名，
-#:                    本表应随之变空。
+#: 视图已经搬出 api 层，但字段名是前端契约（web/index.html 直接读），所以豁免跟着
+#: 文件一起挪到这里，而不是随 business.py 一起消失。
 API_TEXT_WHITELIST: dict[tuple[str, str], int] = {
-    ("app/api/business.py", "can_confirm_here"): 1,
-    ("app/api/business.py", "can_verify_here"): 2,
+    ("app/views/queue.py", "can_confirm_here"): 1,
+    ("app/views/queue.py", "can_verify_here"): 2,
 }
 
 #: 调用级（ast 解析出的真实 Call）零容忍：一条都不许。
@@ -102,7 +105,7 @@ def _rel(path: Path) -> str:
 
 
 def _api_files() -> list[Path]:
-    return sorted(API_DIR.rglob("*.py"))
+    return sorted(API_DIR.rglob("*.py")) + sorted(VIEWS_DIR.rglob("*.py"))
 
 
 def _code_lines(path: Path) -> list[tuple[int, str]]:

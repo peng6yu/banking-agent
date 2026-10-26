@@ -749,3 +749,39 @@ W3 的目标是「契约 + 用例」：所有写操作从「每个端点自己�
 - `app/api/business.py`（1377 行）的只读视图要搬 `app/views/`、`routes.py`（1320 行）按域拆分 —— W4
 - `web/index.html` 5954 行 → 壳 + js/css 模块（目标 ≤600 行）—— W5
 - 文档手抄数字 ~20 处（39 path / 44 operation 等历史口径仍在 `docs/技术文档.md`、`docs/10`、`docs/09`、`docs/架构图.mmd`）—— W6 由 `scripts/check_docs_numbers.py` 统一
+
+---
+
+## v3.0.0 W4 分层收口：跨层违规清零、路由拆 9 块、视图搬出 api（2026-10-26）
+
+### 目标（承接 v2.9.0 的遗留）
+
+W3 把写操作收到一条路径，W4 处理**依赖方向**与**文件体量**：跨层反向依赖 4 条清零、`app/api/business.py`（1377 行）的只读视图搬 `app/views/`、`app/api/routes.py`（1320 行）按「一次请求关心什么」拆开。验收口径写在 `docs/01` §1.4 的层表与 `docs/00` §0.4 第 12 条铁律里。
+
+### 后端改动
+
+- **`app/plan_hooks.py`（新，第 1 层，只依赖标准库）**：计划钩子注册表。`register_plan_updated()` / `register_due_authorized()` / `notify_plan_updated()` / `run_due_authorized()` / `registered()`。原来 `app/plans.py` 与 `app/planner/ticker.py` 都要 import `app/birthday.py`（两条反向依赖），现在低层只发通知、生日模块自己往上登记实现；单个实现抛错只记 `plan_hooks.due_authorized_failed`，不拖垮整轮节拍。
+- **`app/handoff_store.py`（新，第 2 层仓储，600 行）**：接管单的建/查/状态迁移/快照与 12 个错误类。原来 `app/handoffs.py` 既被 `planner/runner.py` 与 `planner/conflict.py` import（第 5 层反向），又要 import 执行器去恢复；现在仓储留在第 2 层，`app/handoffs.py` 只留「要动执行器的那一半」（恢复、取消、过期清扫），两条反向依赖一起消掉。
+- **`app/views/`（新包，第 5 层只读）**：`labels`（计划/预约/接管/预警四处共用的状态标签）、`money`、`queue`、`overview`、`bill`、`management`、`plans`、`executions`。`app/api/business.py` 只剩壳，每区一行 `views.<区>.build(conn, user_id)`；视图不写库、不做权限判断。
+- **`app/api/routes.py` 1320 行 → 9 块 + 60 行装配门面**：`auth`(50) `chat_state`(56) `chat_hints`(196) `chat_trace`(231) `chat_flow`(351) `chat_api`(238) `core_api`(93) `plans_api`(181) `money_api`(176)。门面只建 `router`、挂令牌依赖、`include_router` 四个分组，并把脚本与测试一直用的名字原样再导出；openapi 仍是 **47 path / 53 operation**。
+- 顺手修掉两个真问题：`_choices_for`（原 108 行）拆成 9 个槽位小函数 + `_fill_slot` 分派表；`tests/test_api.py` 的「未捕获异常不泄漏栈」用例原先把补丁打在 `routes.get_adapter`，拆分后聊天主流程在 `chat_flow`，改成打 `chat_flow.get_adapter`。
+- `tests/test_imports.py` 同步：LAYERS 补 9 个分组模块与 `plan_hooks`(1) / `handoff_store`(2)，ALLOWED 按实测依赖逐条写，`LLM_ALLOWED` 换成 `app.api.chat_flow` + `app.api.chat_state`；**`UPWARD_EXCEPTIONS` 清空为 `{}`**（4 条存量全消）。
+
+### 文档改动
+
+- `docs/00` §0.4 加第 12 条铁律「层间只能向下依赖」，标题改「十二条铁律」；`docs/01` §1.4 从一张 ASCII 箭头图改成 L0—L5 层表（把仓储、钩子注册表、视图层的位置写清）+ 约束表（反向依赖豁免必须为空）。
+- `docs/02` 登记 4 行 W4 新模块（`plan_hooks.py`、`handoff_store.py`、`views/*`、9 个 api 分组），`routes.py` 行改写为装配门面、`sse.py` 落点的 `frame()` 改到 `chat_state.py`。
+- `docs/security_sandbox.md` §4.2 按实测 13 处动态 SQL 重写整张表（行号随搬包全部更新，取数脚本 `scripts/prove_no_exec_surface.py` 的 `scan_tree`）。
+
+### 验收（2026-10-26 实测）
+
+- 全量 `.venv/bin/python -m pytest -q` → **1709 passed, 4 skipped, 1 warning in 19.02s**（`tmp/pytest_w4d.log`；W3 基线 1669 + 各轮补测）
+- 架构体检：模块 **118**、app 总行 31079、长函数(>80) **26**、重名函数组 **52 组（多出 59）**、**跨层违规 0 条**、未登记依赖 0、前端缺失 id 0、超限文件 0；基线用 `scripts/arch_report.py --write-baseline` 重生成（`app/birthday.py` 1818 行属加钩子注册代码的合理增长）
+- 规模：openapi **47 path / 53 operation**、表 **33 张**、审计事件 **66 类**、`tests/test_*.py` **103 个**
+- `scripts/check_frontend.py` **66/66**；内联 `<script>` 抽出后 `node --check` 通过
+
+### 遗留（W5—W6）
+
+- `web/index.html` **5954 行** → 壳 + js/css 模块（目标 ≤600 行）—— W5
+- 文档手抄数字（历史 39 path / 44 operation / 30 表 等口径散在 `docs/技术文档.md`、`docs/10`、`docs/09`、`docs/架构图.mmd`）—— W6 由 `scripts/check_docs_numbers.py` 统一，写不进代码的事实只留在 `release_manifest.json`
+- 最长函数仍是 `app/handoffs.py:254 resume`（286 行）、`app/birthday.py:1143 pay_item`（247 行），待后续按分支拆

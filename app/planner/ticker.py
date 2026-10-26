@@ -30,7 +30,7 @@ import logging
 import os
 from typing import Any, Final
 
-from app import birthday, db, plans, proactive
+from app import db, plan_hooks, plans, proactive
 from app.tools import scheduled
 
 log = logging.getLogger(__name__)
@@ -82,16 +82,19 @@ def run_monitor_once(now: int | None = None) -> dict[str, Any]:
 def run_plans_once(now: int | None = None) -> dict[str, Any]:
     """按一次节拍推进跨场景计划（check / reminder 自动走，action 交回用户）。
 
-    顺序：先跑已授权的生日付款，再跑通用计划推进。先付的好处是通用推进里
-    「到今天该提醒了」那一步看到的是付款后的真实状态，不会刚提醒完又自动付。
-    和上面两个也分开：计划推进失败不该把预约转账或目标监测一起带停。
+    顺序：先跑已授权的到点付款（生日计划等），再跑通用计划推进。先付的好处是
+    通用推进里「到今天该提醒了」那一步看到的是付款后的真实状态，不会刚提醒完又
+    自动付。和上面两个也分开：计划推进失败不该把预约转账或目标监测一起带停。
+
+    已授权付款走 app/plan_hooks.py 的注册表：ticker 在第 4 层，生日计划在第 5 层，
+    直连就是反向依赖。没有登记任何实现时返回的是全零报告，不是 None。
 
     返回 plans.run_due 的 {executed, count}，另加 authorized 子报告，
     保持既有调用方（tests 里断言 count）不受影响。
     """
     conn = db.connect()
     try:
-        authorized = birthday.run_due_authorized(conn, now_ms=now)
+        authorized = plan_hooks.run_due_hooks(conn, now_ms=now)
         result = plans.run_due(conn, now=now)
         result["authorized"] = authorized
         return result

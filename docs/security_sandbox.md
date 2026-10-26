@@ -74,21 +74,19 @@ scripts/prove_no_exec_surface.py 因此对 app/ 下每个 .py 做 AST 遍历，�
 
 | # | 位置 | 拼进去的是什么 | 复核结论 |
 | --- | --- | --- | --- |
-| 1 | app/api/business.py:182 | marks = len(clean) 个占位符 | 占位符个数，值走参数绑定 |
-| 2 | app/db.py:537 | SAVEPOINT + savepoint | savepoint 名由内部计数器生成 |
-| 3 | app/db.py:541 | ROLLBACK TO + savepoint | 同上，同一内部变量 |
-| 4 | app/db.py:542 | RELEASE + savepoint | 同上 |
-| 5 | app/db.py:544 | RELEASE + savepoint | 同上 |
-| 6 | app/db.py:592 | PRAGMA table_info + table | table 来自模块级 _ADDED_COLUMNS 常量 |
-| 7 | app/db.py:596 | ALTER TABLE + table + column + ddl | 三个值全部来自 _ADDED_COLUMNS 常量表 |
+| 1 | app/views/money.py:87 | marks = len(clean) 个占位符 | 占位符个数，值走参数绑定（W4 从 app/api/business.py 搬来，逻辑未变） |
+| 2 | app/db.py:596 | SAVEPOINT + savepoint | savepoint 名由内部计数器生成 |
+| 3 | app/db.py:600 | ROLLBACK TO + savepoint | 同上，同一内部变量 |
+| 4 | app/db.py:601 | RELEASE + savepoint | 同上 |
+| 5 | app/db.py:603 | RELEASE + savepoint | 同上 |
+| 6 | app/db.py:651 | PRAGMA table_info + table | table 来自模块级 _ADDED_COLUMNS 常量 |
+| 7 | app/db.py:655 | ALTER TABLE + table + column + ddl | 三个值全部来自 _ADDED_COLUMNS 常量表 |
 | 8 | app/planner/recover.py:52 | 逗号连 N 个占位符 | 占位符个数，值走参数绑定 |
-| 9 | app/plans.py:307 | fields 全字面量拼接 | 无变量，等价于常量串 |
+| 9 | app/plans.py:302 | fields 全字面量拼接 | 无变量，等价于常量串 |
 | 10 | app/proactive.py:1106 | 二选一常量片段（rule_id IS NULL / rule_id = 占位符） | 常量片段 |
 | 11 | app/tools/products.py:97 | 列名常量（risk_level = ? / category = ?） | 列名是常量；category 值先过 CATEGORY_LABELS 白名单 |
-| 12 | app/birthday.py:540 | 逗号连 N 个占位符（keys） | 只拼占位符个数，plan_id/keys 走参数绑定 |
-| 13 | app/handoffs.py:370 | 逗号连 N 个占位符（expect） | 同上；sets 只追加常量片段，值全部占位符 |
-
-另外 13 处 execute(变量) 是「整串常量 SQL 存变量」，不是动态拼接，已逐一人工核实：app/api/business.py:399；app/db.py:505（PRAGMAS）/611（SCHEMA_SQL）；app/plans.py:241/491；app/proactive.py:498/543/945；app/tools/queries.py:178/205/216/226（where 子句只有 user_id = ? 或 1 = 1，LIKE 值经 _escape_like）；app/tools/subs.py:33（_SUBS_SQL 常量）。
+| 12 | app/birthday.py:535 | 逗号连 N 个占位符（keys） | 只拼占位符个数，plan_id/keys 走参数绑定 |
+| 13 | app/handoff_store.py:418 | 逗号连 N 个占位符（expect）+ 条件 UPDATE 的 sets 常量片段 | 同上；sets 只追加常量片段，值全部占位符（W4 从 app/handoffs.py 搬来，逻辑未变） |
 
 规则：新增动态 SQL 会让 tests/test_no_exec_surface.py 的 test_dynamic_sql_is_reported_and_documented 变红，直到本文补上对应文件的复核结论。这是有意为之——拼接是「未来可能把用户文本送进语法位」的唯一入口。
 

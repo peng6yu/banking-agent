@@ -31,7 +31,7 @@ import json
 import logging
 from typing import Any, Final
 
-from app import audit, clock, db, funds, timefmt
+from app import audit, clock, db, funds, plan_hooks, timefmt
 from app.clock import BankError, InsufficientFunds, ValidationError
 from app import ids
 from app.ids import new_id
@@ -1807,3 +1807,12 @@ __all__ = [
     "run_due_authorized",
     "trigger_at",
 ]
+
+
+# ------------------------------------------------------------------ 计划钩子登记
+# plans.py（第 2 层）与 planner/ticker.py（第 4 层）不能 import 本模块（第 5 层：
+# 这里要驱动执行器、确认卡与能力令牌）。它们通过 app/plan_hooks.py 的注册表找到
+# 下面两个实现——调用方向是依赖倒置，不是循环依赖。
+# 登记放在文件末尾：必须确保两个函数都已定义；重复 import 只会登记一次。
+plan_hooks.register_plan_updated(on_plan_updated)
+plan_hooks.register_due_authorized(run_due_authorized)

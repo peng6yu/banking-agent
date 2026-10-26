@@ -17,7 +17,7 @@ import httpx
 import pytest
 
 from app import db
-from app.api import routes
+from app.api import chat_flow, routes
 from app.llm import LLMError, LLMResponse, ToolCall
 from app.main import app
 from app.planner import executor
@@ -345,7 +345,9 @@ def test_unhandled_error_is_500_without_a_stack(monkeypatch: pytest.MonkeyPatch,
     def boom() -> Any:
         raise RuntimeError("secret internal detail")
 
-    monkeypatch.setattr(routes, "get_adapter", boom)
+    # W4 拆分后聊天主流程在 app/api/chat_flow.py：它 import 的是那个模块里的
+    # get_adapter，补丁要打在真正被调用的模块上（打 routes 上的副本不会生效）。
+    monkeypatch.setattr(chat_flow, "get_adapter", boom)
     resp = call("POST", "/api/chat", json={"session_id": "s_api_x", "text": "你好"}, raise_app_exceptions=False)
     assert resp.status_code == 500
     assert resp.json() == {"code": "INTERNAL", "user_text": "系统开小差了，已经记录。"}

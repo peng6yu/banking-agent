@@ -100,7 +100,7 @@ async def _settle(state: RunState, node: Any, rec: NodeRec, result: ToolResult, 
         # 而不是只活在内存的 state.question 里（重启后那条线索就断了）。
         # 建单失败绝不能打断对话：用户要的是一句追问，不是 500，所以整段旁路 try/except。
         try:
-            from app import handoffs as handoffs_mod
+            from app import handoff_store as handoffs_mod
 
             reason = "PAYEE_AMBIGUOUS" if (data.get("candidates") or []) else "PAYEE_NOT_FOUND"
             handoffs_mod.create(
