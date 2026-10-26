@@ -1,13 +1,13 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-10-27T00:06:22+08:00",
+  "generated_at": "2026-10-27T00:06:43+08:00",
   "git": {
-    "head": "18359d89b9b91565c7efbdd0dfac49bd4b1bd602",
-    "head_short": "18359d8",
-    "subject": "docs(audit): 记最后一轮（超时文案、SSE 帧键集合、满数据复验）+ 孤儿端点定性",
+    "head": "b4d69fbbd4e6453c0acb12b693d82979889360d6",
+    "head_short": "b4d69fb",
+    "subject": "refactor(money): 「转账」拆成对外转账与账户互转，支出/结余全站只剩一个定义",
     "branch": "main",
-    "dirty": true,
-    "changed_paths": 30
+    "dirty": false,
+    "changed_paths": 0
   },
   "code": {
     "tools": {
