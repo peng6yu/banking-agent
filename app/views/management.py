@@ -8,9 +8,11 @@ from __future__ import annotations
 import sqlite3
 from typing import Any, Final
 
+from app import memory
 from app import subscriptions
 from app import suitability
 from app import timefmt
+from app.proactive import default_user_id
 from app.money import fen_to_yuan_str
 from app.clock import now_ms
 from app.tools.base import primary_account
@@ -336,3 +338,19 @@ CAPABILITIES: Final[dict[str, dict[str, Any]]] = {
         "notes": ["冲正是模拟账务，不代表真实银行追回；真实追回需要人工受理。"],
     },
 }
+
+
+#: 一次最多回多少条：演示库的记忆量很小，50 足够，也避免接口被刷。
+MEMORY_LIMIT: Final[int] = 50
+
+
+def memory_view(conn: sqlite3.Connection) -> dict[str, Any]:
+    """这个用户现在被记住了什么（业务管理页的「长期记忆」卡）。"""
+    user_id = default_user_id(conn)
+    facts = memory.all_facts(conn, user_id=user_id, limit=MEMORY_LIMIT)
+    return {
+        "ok": True,
+        "facts": facts,
+        "count": len(facts),
+        "prompt_block": memory.prompt_block(conn, user_id=user_id),
+    }

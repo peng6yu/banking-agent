@@ -115,15 +115,26 @@ def latest(conn, *, limit: int = DEFAULT_LIMIT) -> dict[str, Any]:
         " GROUP BY session_id ORDER BY last_ms DESC LIMIT 1"
     ).fetchone()
     if head is None:
-        return {"session_id": "", "turns": [], "last_ms": 0, "last_text": None, "title": ""}
+        return {
+            "session_id": "",
+            "turns": [],
+            "last_ms": 0,
+            "last_text": None,
+            "title": "",
+            "total": 0,
+        }
     sid = str(head["session_id"])
     last_ms = int(head["last_ms"])
+    total_row = conn.execute(
+        "SELECT COUNT(*) AS n FROM chat_turns WHERE session_id = ?", (sid,)
+    ).fetchone()
     return {
         "session_id": sid,
         "turns": recent(conn, sid, limit=limit),
         "last_ms": last_ms,
         "last_text": timefmt.maybe_minute_text(last_ms),
         "title": title(conn, sid),
+        "total": int(total_row["n"]) if total_row is not None else 0,
     }
 
 

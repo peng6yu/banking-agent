@@ -181,8 +181,15 @@ def _handoffs_view(conn: sqlite3.Connection, *, limit: int = 10) -> dict[str, An
     """
     try:
         rows = handoffs.list_handoffs(conn, limit=max(1, min(int(limit), 20)))
+        total = _handoff_total(conn)
     except Exception:  # noqa: BLE001 - 队列读不到不能让整个首页返回 500
-        return {"ok": True, "items": [], "count": 0, "empty_reason": "接管队列暂时读不到。"}
+        return {
+            "ok": True,
+            "items": [],
+            "count": 0,
+            "total": 0,
+            "empty_reason": "接管队列暂时读不到。",
+        }
     items: list[dict[str, Any]] = []
     for row in rows:
         status = str(row.get("status") or "")
@@ -229,6 +236,7 @@ def _handoffs_view(conn: sqlite3.Connection, *, limit: int = 10) -> dict[str, An
         "ok": True,
         "items": items,
         "count": len(items),
+        "total": total,
         "empty_reason": None if items else "现在没有需要人工接管的单。",
         "source": "handoffs 表（收款人歧义或找不到时会自动挂单）",
     }
@@ -394,3 +402,62 @@ def _scheduler_block() -> dict[str, Any]:
             "没打开开关的目标不会自动跑，需要手动点一次。"
         ),
     }
+
+
+def _handoff_total(conn: sqlite3.Connection, status: str | None = None) -> int:
+    """接管单的总张数（不受 limit 影响）：页面上的「共 N 张」用它。"""
+    if status is None:
+        row = conn.execute("SELECT COUNT(*) AS n FROM handoffs").fetchone()
+    else:
+        row = conn.execute(
+            "SELECT COUNT(*) AS n FROM handoffs WHERE status = ?", (status,)
+        ).fetchone()
+    return int(row["n"]) if row is not None else 0
+
+
+def handoff_list_view(
+    conn: sqlite3.Connection, *, status: str | None = None, limit: int = 50
+) -> dict[str, Any]:
+    """接管单列表：只给操作员列表页需要的字段。
+
+    单张详情才带 DAG、失败节点、裁决与授权快照；列表上这些既没用又容易把
+    库里的内部 JSON 直接摊到接口上。total 是不受 limit 影响的真实张数。
+    """
+    rows = handoffs.list_handoffs(conn, status=status, limit=limit)
+    items: list[dict[str, Any]] = []
+    for row in rows:
+        status_text = str(row.get("status") or "")
+        reason = str(row.get("reason") or "")
+        failure = row.get("failure") if isinstance(row.get("failure"), dict) else {}
+        created_ms = int(row.get("created_ms") or 0)
+        items.append(
+            {
+                "handoff_id": str(row.get("id") or ""),
+                "run_id": str(row.get("run_id") or ""),
+                "session_id": str(row.get("session_id") or ""),
+                "status": status_text,
+                "status_label": HANDOFF_STATUS_LABELS.get(status_text, status_text),
+                "reason": reason,
+                "reason_label": HANDOFF_REASON_LABELS.get(reason, reason or "需要人工看一眼"),
+                "request_text": str(row.get("request_text") or "")[:400],
+                "failure_text": str(
+                    failure.get("user_text") or failure.get("message") or ""
+                )[:200],
+                "operator": str(row.get("operator") or ""),
+                "note": str(row.get("note") or "")[:500],
+                "created_ms": created_ms,
+                "created_text": timefmt.maybe_minute_text(created_ms) if created_ms else "",
+            }
+        )
+    return {
+        "ok": True,
+        "handoffs": items,
+        "count": len(items),
+        "total": _handoff_total(conn, status=status),
+        "note": "列表只给列表页需要的字段；DAG、失败节点、裁决与授权在单张详情里。",
+    }
+
+
+def handoff_detail_view(conn: sqlite3.Connection, handoff_id: str) -> dict[str, Any]:
+    """单张工单：DAG、失败节点、裁决、授权快照都保留，操作员恢复时要看。"""
+    return {"ok": True, "handoff": handoffs.get(conn, handoff_id)}

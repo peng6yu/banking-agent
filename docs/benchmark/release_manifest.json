@@ -1,13 +1,13 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-10-26T21:54:08+08:00",
+  "generated_at": "2026-10-26T22:10:50+08:00",
   "git": {
-    "head": "1194beef3bcce3fcb175ec8c803608cfe77d9d24",
-    "head_short": "1194bee",
-    "subject": "refactor(contract): 读端点统一形状、数据层清死结构（L5 六类 + L1 五类）",
+    "head": "05f80dd10dcaa086ca800634ab6355620a71ccc8",
+    "head_short": "05f80dd",
+    "subject": "docs(benchmark): 清单按 1194bee 重生成（tables 35 / paths 50 / 20.72s）并对齐取数口径",
     "branch": "main",
-    "dirty": false,
-    "changed_paths": 0
+    "dirty": true,
+    "changed_paths": 30
   },
   "code": {
     "tools": {
@@ -108,11 +108,11 @@
   },
   "tests": {
     "command": ".venv/bin/python -m pytest -q",
-    "passed": 1768,
+    "passed": 1770,
     "failed": 0,
     "skipped": 4,
-    "duration_s": 20.72,
-    "log": "tmp/pytest_final.log",
+    "duration_s": 20.95,
+    "log": "tmp/pytest_full5.log",
     "parsed": true
   },
   "redteam": {

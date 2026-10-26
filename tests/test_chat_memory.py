@@ -86,6 +86,7 @@ def test_latest_on_empty_library_is_honest(conn) -> None:
         "last_ms": 0,
         "last_text": None,
         "title": "",
+        "total": 0,
     }
 
 

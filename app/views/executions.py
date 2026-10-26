@@ -13,6 +13,10 @@ from app import audit
 from app import timefmt
 from app.clock import now_ms
 
+from app.money import fen_to_yuan_str
+from app.models import Action, Decision
+from app.planner import events as planner_events
+
 from app.views.queue import _handoffs_view
 from app.views.labels import DENIAL_REASON_LABELS, MAX_LIST, TASK_STATE_LABELS
 
@@ -149,4 +153,141 @@ def _session_view(conn: sqlite3.Connection, row: sqlite3.Row) -> dict[str, Any]:
             }
             for c in confs
         ],
+    }
+
+
+def _card_view(conn: sqlite3.Connection, row: Any) -> dict[str, Any]:
+    """一条确认记录 -> 前端能直接渲染的卡片。
+
+    刷新页面时服务端如果只回确认号，用户就得在看不见金额和收款人的情况下再签一次字。
+    所以这里把 action_json 与 dag_nodes.decision_json 重新拼回一张完整的卡：
+    字段和第一次推送时是同一套（planner.events.confirmation_frame），不是另写一份文案。
+    历史数据解析不出来时 card 为 None，前端退回「只有确认号」的提示，不假装能签字。
+    """
+    item: dict[str, Any] = {
+        "confirmation_id": str(row["id"]),
+        "node_id": str(row["node_id"]),
+        "status": str(row["status"]),
+        "expires_ms": int(row["expires_ms"]),
+        "expired": int(row["expires_ms"]) <= now_ms(),
+        "card": None,
+    }
+    try:
+        action = Action.model_validate_json(row["action_json"])
+        node = conn.execute(
+            "SELECT tool, decision_json FROM dag_nodes WHERE run_id = ? AND node_id = ?",
+            (row["run_id"], row["node_id"]),
+        ).fetchone()
+        raw = (node["decision_json"] if node else None) or ""
+        if not raw:
+            return item
+        saved = json.loads(raw)
+        # 老数据里只有 level/rule_id/required_factors（当时没存理由），缺的键补空串，
+        # 不要用严格模型校验把整张卡判死；理由缺了就退回「看执行记录」的指引。
+        decision = Decision(
+            level=str(saved.get("level") or "yellow"),
+            rule_id=str(saved.get("rule_id") or ""),
+            reason_code=str(saved.get("reason_code") or ""),
+            reason_text=str(saved.get("reason_text") or ""),
+            required_factors=[str(factor) for factor in (saved.get("required_factors") or [])],
+            limit_fen=saved.get("limit_fen"),
+            spent_today_fen=saved.get("spent_today_fen"),
+        )
+        remaining = int(row["expires_ms"]) - now_ms()
+        item["card"] = planner_events.confirmation_frame(
+            conn,
+            confirmation_id=str(row["id"]),
+            node_id=str(row["node_id"]),
+            tool=str(node["tool"]),
+            action=action,
+            decision=decision,
+            expires_in_s=max(0, remaining // 1000),
+            status=str(row["status"]),
+        )
+    except Exception:  # noqa: BLE001 - 历史数据缺字段：宁可只回确认号，也不编卡片
+        return item
+    return item
+
+
+def session_detail_view(conn: sqlite3.Connection, session_id: str) -> dict[str, Any]:
+    """一个会话的现场：最近一轮的节点、确认卡、当前余额。"""
+    head = conn.execute("SELECT * FROM sessions WHERE id = ?", (session_id,)).fetchone()
+    if head is None:
+        return {"ok": True, "session_id": session_id, "found": False}
+    nodes = [
+        {
+            "node_id": row["node_id"],
+            "tool": row["tool"],
+            "state": row["state"],
+            "state_label": TASK_STATE_LABELS.get(str(row["state"]), str(row["state"])),
+            "decision": json.loads(row["decision_json"] or "null"),
+            "result": json.loads(row["result_json"] or "null"),
+            "ts_ms": int(row["ts_ms"]) if row["ts_ms"] else None,
+            "ts_text": timefmt.maybe_minute_text(row["ts_ms"]),
+        }
+        for row in conn.execute(
+            "SELECT * FROM dag_nodes WHERE run_id = (SELECT id FROM dag_runs WHERE session_id = ?"
+            " ORDER BY created_ms DESC LIMIT 1) ORDER BY node_id",
+            (session_id,),
+        )
+    ]
+    cards = [
+        _card_view(conn, row)
+        for row in conn.execute(
+            "SELECT * FROM confirmations WHERE session_id = ? ORDER BY created_ms", (session_id,)
+        )
+    ]
+    balance = conn.execute(
+        "SELECT balance_fen FROM accounts ORDER BY CASE type WHEN 'debit' THEN 0 ELSE 1 END, id LIMIT 1"
+    ).fetchone()
+    balance_fen = int(balance["balance_fen"]) if balance is not None else None
+    return {
+        "ok": True,
+        "session_id": session_id,
+        "found": True,
+        "status": str(head["status"]),
+        "created_ms": int(head["created_ms"]),
+        "created_text": timefmt.maybe_minute_text(int(head["created_ms"])),
+        "last_ms": int(head["last_ms"]),
+        "last_text": timefmt.maybe_minute_text(int(head["last_ms"])),
+        "nodes": nodes,
+        "confirmations": cards,
+        "balance_fen": balance_fen,
+        "balance_yuan": fen_to_yuan_str(balance_fen) if balance_fen is not None else None,
+    }
+
+
+def audit_trail_view(
+    conn: sqlite3.Connection, session_id: str, *, limit: int = 100
+) -> dict[str, Any]:
+    """审计链：链还完不完整 + 这条会话每一步为什么这么判。
+
+    total 是这条会话的全部事件数，不受 limit 影响：页面上的「共 N 条」必须是真的总数。
+    """
+    rows = conn.execute(
+        "SELECT seq, ts_ms, event_type, payload_json FROM audit_log WHERE session_id = ?"
+        " ORDER BY seq LIMIT ?",
+        (session_id, limit),
+    ).fetchall()
+    events = [
+        {
+            "seq": int(row["seq"]),
+            "ts_ms": int(row["ts_ms"]),
+            "ts_text": timefmt.maybe_minute_text(int(row["ts_ms"])),
+            "event_type": str(row["event_type"]),
+            "payload": json.loads(row["payload_json"]),
+        }
+        for row in rows
+    ]
+    total_row = conn.execute(
+        "SELECT COUNT(*) AS n FROM audit_log WHERE session_id = ?", (session_id,)
+    ).fetchone()
+    return {
+        "ok": True,
+        "session_id": session_id,
+        "count": len(events),
+        "total": int(total_row["n"]) if total_row is not None else 0,
+        "events": events,
+        "chain_ok": audit.verify_chain(conn),
+        "chain_head": audit.chain_head(conn),
     }

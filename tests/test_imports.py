@@ -239,9 +239,9 @@ ALLOWED: dict[str, frozenset[str]] = {
     # 聊天主流程：解析→澄清→建图→执行，唯一该碰模型与执行器的端点模块
     "app.api.chat_flow": _deps("app.api.chat_hints app.api.chat_state app.api.chat_trace app.audit app.chat_history app.clock app.db app.ids app.llm app.memory app.memory_extract app.planner app.planner.assist app.planner.clarify app.planner.dag app.planner.executor app.planner.intent app.planner.payment_guard app.planner.recover app.planner.ticker app.proactive app.scope"),
     # 聊天端点：只把请求转给主流程，外加会话回看与确认卡
-    "app.api.chat_api": _deps("app.api.chat_flow app.api.chat_state app.api.chat_trace app.api.http app.api.schemas app.audit app.chat_history app.clock app.db app.models app.money app.planner app.planner.assist app.planner.clarify app.planner.events app.planner.executor app.planner.intent app.planner.payment_guard app.planner.recover app.planner.ticker app.timefmt app.use_cases app.views.labels"),
+    "app.api.chat_api": _deps("app.api.chat_flow app.api.chat_state app.api.chat_trace app.api.http app.api.schemas app.chat_history app.db app.models app.planner app.planner.assist app.planner.clarify app.planner.executor app.planner.intent app.planner.payment_guard app.planner.recover app.planner.ticker app.use_cases app.views.executions"),
     # 基础端点：健康、工具清单、审计链、根路径
-    "app.api.core_api": _deps("app.api.chat_trace app.audit app.clock app.db app.planner app.planner.assist app.planner.executor app.planner.intent app.planner.payment_guard app.planner.recover app.planner.ticker app.timefmt app.tools.registry"),
+    "app.api.core_api": _deps("app.api.chat_trace app.audit app.clock app.db app.planner app.planner.assist app.planner.executor app.planner.intent app.planner.payment_guard app.planner.recover app.planner.ticker app.timefmt app.tools.registry app.views.executions"),
     # 计划端点：计划/生日/预约/提醒，写操作只经用例层
     "app.api.plans_api": _deps("app.api.http app.api.schemas app.audit app.birthday app.clock app.db app.planner app.planner.assist app.planner.executor app.planner.intent app.planner.payment_guard app.planner.recover app.planner.ticker app.plans app.proactive app.use_cases"),
     # 钱端点：储蓄/订阅/理财/预警/手动记账/重置，写操作只经用例层
@@ -258,15 +258,15 @@ ALLOWED: dict[str, frozenset[str]] = {
     "app.views.queue": _deps("app.clock app.handoffs app.money app.planner app.planner.ticker app.proactive app.timefmt app.tools app.tools.scheduled app.views.labels"),
     "app.views.overview": _deps("app.clock app.planner app.planner.assist app.proactive app.timefmt app.tools.base app.views.labels app.views.money app.views.queue"),
     "app.views.bill": _deps("app.clock app.proactive app.timefmt app.tools app.tools.base app.tools.bill app.tools.queries app.views.labels app.views.money"),
-    "app.views.management": _deps("app.clock app.money app.subscriptions app.suitability app.timefmt app.tools.base app.views.money app.views.queue"),
+    "app.views.management": _deps("app.clock app.memory app.money app.proactive app.subscriptions app.suitability app.timefmt app.tools.base app.views.money app.views.queue"),
     "app.views.plans": _deps("app.clock app.planner app.planner.assist app.plans app.subscriptions app.timefmt app.tools.base app.views.labels app.views.queue"),
-    "app.views.executions": _deps("app.audit app.clock app.timefmt app.views.labels app.views.queue"),
+    "app.views.executions": _deps("app.audit app.clock app.money app.models app.planner app.planner.events app.timefmt app.views.labels app.views.queue"),
     # 入参模型里 FactorProof 复用公共契约（多因子凭证与 /api/confirm 同构）
     "app.api.schemas": _deps("app.models"),
     # 接管队列的 HTTP 面只依赖数据层与路由里的鉴权依赖
-    "app.api.handoffs_api": _deps("app.api.http app.api.routes app.db app.handoffs app.use_cases app.use_cases.handoffs"),
+    "app.api.handoffs_api": _deps("app.api.http app.api.routes app.db app.handoffs app.use_cases app.use_cases.handoffs app.views.queue"),
     # 长期记忆的 HTTP 面：数据层 + 记忆仓储 + 单用户口径 + 鉴权依赖
-    "app.api.memory_api": _deps("app.api.http app.api.routes app.db app.memory app.proactive app.use_cases"),
+    "app.api.memory_api": _deps("app.api.http app.api.routes app.db app.memory app.use_cases app.views.management"),
     "app.api.messages_api": _deps("app.api.http app.api.routes app.db app.use_cases app.use_cases.messages app.views.messages"),
     "app.messages": _deps("app.audit app.clock app.db app.ids app.insights"),
     "app.insights": _deps("app.money"),
@@ -333,7 +333,7 @@ ALLOWED: dict[str, frozenset[str]] = {
     # 适当性：问卷与匹配是纯函数，落库只依赖 audit；错误类型用 app.clock
     "app.suitability": _deps("app.audit app.clock"),
     # 订阅推断：只读流水 + 用户的定性结论（写这张表要审计，错误类型用 clock）
-    "app.plans": _deps("app.audit app.clock app.db app.ids app.plan_hooks app.proactive app.reminder_time app.subscriptions app.timefmt"),
+    "app.plans": _deps("app.audit app.clock app.db app.ids app.money app.plan_hooks app.proactive app.reminder_time app.subscriptions app.timefmt"),
     # 生日计划：钱走 executor（确认/令牌），商户白名单复用工具层常量
     "app.birthday": _deps("app.audit app.clock app.db app.funds app.ids app.money app.plan_hooks app.planner app.planner.dag app.planner.executor app.plans app.policy.engine app.policy.rules app.timefmt app.tools.base app.tools.transfers"),
     # 人工接管单仓储：条件 UPDATE + 审计 + 快照，只依赖数据层

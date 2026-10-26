@@ -6,9 +6,8 @@ from fastapi import APIRouter
 
 from typing import Any, Final
 from fastapi.responses import FileResponse, StreamingResponse
-import json
 
-from app.models import Action, ChatRequest, ConfirmRequest, Decision, FactorChallengeRequest
+from app.models import ChatRequest, ConfirmRequest, FactorChallengeRequest
 from app.api.schemas import (
     AlertResolveRequest,
     BirthdayPayRequest,
@@ -33,12 +32,9 @@ from app.api.schemas import (
 from app.planner.clarify import augment as augment_clarification
 from app.planner.clarify import forget as forget_clarification
 import app.chat_history as chat_history
-from app import timefmt
-from app.money import fen_to_yuan_str
-from app.views.labels import TASK_STATE_LABELS
-from app import audit, clock, db
+from app import db
 from app.planner import assist, executor, intent, payment_guard, recover, ticker
-from app.planner import events as planner_events
+from app.views.executions import session_detail_view
 from app.api.http import payload
 import app.use_cases as use_cases
 
@@ -123,104 +119,11 @@ async def cancel(request: CancelRequest) -> dict[str, Any]:
     return await executor.cancel(request.session_id, request.reason)
 
 
-def _card_view(conn: Any, row: Any) -> dict[str, Any]:
-    """一条确认记录 → 前端能直接渲染的卡片。
-
-    刷新页面时服务端如果只回确认号，用户就得在看不见金额和收款人的情况下再签一次字。
-    所以这里把 action_json 与 dag_nodes.decision_json 重新拼回一张完整的卡：
-    字段和第一次推送时是同一套（planner.events.confirmation_frame），不是另写一份文案。
-    历史数据解析不出来时 card 为 None，前端退回「只有确认号」的提示，不假装能签字。
-    """
-    item: dict[str, Any] = {
-        "confirmation_id": str(row["id"]),
-        "node_id": str(row["node_id"]),
-        "status": str(row["status"]),
-        "expires_ms": int(row["expires_ms"]),
-        "expired": int(row["expires_ms"]) <= clock.now_ms(),
-        "card": None,
-    }
-    try:
-        action = Action.model_validate_json(row["action_json"])
-        node = conn.execute(
-            "SELECT tool, decision_json FROM dag_nodes WHERE run_id = ? AND node_id = ?",
-            (row["run_id"], row["node_id"]),
-        ).fetchone()
-        raw = (node["decision_json"] if node else None) or ""
-        if not raw:
-            return item
-        saved = json.loads(raw)
-        # 老数据里只有 level/rule_id/required_factors（当时没存理由），缺的键补空串，
-        # 不要用严格模型校验把整张卡判死；理由缺了就退回「看执行记录」的指引。
-        decision = Decision(
-            level=str(saved.get("level") or "yellow"),
-            rule_id=str(saved.get("rule_id") or ""),
-            reason_code=str(saved.get("reason_code") or ""),
-            reason_text=str(saved.get("reason_text") or ""),
-            required_factors=[str(factor) for factor in (saved.get("required_factors") or [])],
-            limit_fen=saved.get("limit_fen"),
-            spent_today_fen=saved.get("spent_today_fen"),
-        )
-        remaining = int(row["expires_ms"]) - clock.now_ms()
-        item["card"] = planner_events.confirmation_frame(
-            conn,
-            confirmation_id=str(row["id"]),
-            node_id=str(row["node_id"]),
-            tool=str(node["tool"]),
-            action=action,
-            decision=decision,
-            expires_in_s=max(0, remaining // 1000),
-            status=str(row["status"]),
-        )
-    except Exception:  # noqa: BLE001 - 历史数据缺字段：宁可只回确认号，也不编卡片
-        return item
-    return item
-
-
 @router.get("/api/session/{session_id}")
 async def session(session_id: str) -> dict[str, Any]:
     """查会话：节点状态、待确认卡片、当前余额。"""
     with db.open_conn() as conn:
-        head = conn.execute("SELECT * FROM sessions WHERE id = ?", (session_id,)).fetchone()
-        if head is None:
-            return {"session_id": session_id, "found": False}
-        nodes = [
-            {
-                "node_id": row["node_id"],
-                "tool": row["tool"],
-                "state": row["state"],
-                "state_label": TASK_STATE_LABELS.get(str(row["state"]), str(row["state"])),
-                "decision": json.loads(row["decision_json"] or "null"),
-                "result": json.loads(row["result_json"] or "null"),
-                "ts_ms": int(row["ts_ms"]) if row["ts_ms"] else None,
-                "ts_text": timefmt.maybe_minute_text(row["ts_ms"]),
-            }
-            for row in conn.execute(
-                "SELECT * FROM dag_nodes WHERE run_id = (SELECT id FROM dag_runs WHERE session_id = ?"
-                " ORDER BY created_ms DESC LIMIT 1) ORDER BY node_id",
-                (session_id,),
-            )
-        ]
-        cards = [_card_view(conn, row) for row in conn.execute(
-            "SELECT * FROM confirmations WHERE session_id = ? ORDER BY created_ms", (session_id,)
-        )]
-        balance = conn.execute(
-            "SELECT balance_fen FROM accounts ORDER BY CASE type WHEN 'debit' THEN 0 ELSE 1 END, id LIMIT 1"
-        ).fetchone()
-    balance_fen = int(balance["balance_fen"]) if balance is not None else None
-    return {
-        "ok": True,
-        "session_id": session_id,
-        "found": True,
-        "status": str(head["status"]),
-        "created_ms": int(head["created_ms"]),
-        "created_text": timefmt.maybe_minute_text(int(head["created_ms"])),
-        "last_ms": int(head["last_ms"]),
-        "last_text": timefmt.maybe_minute_text(int(head["last_ms"])),
-        "nodes": nodes,
-        "confirmations": cards,
-        "balance_fen": balance_fen,
-        "balance_yuan": fen_to_yuan_str(balance_fen) if balance_fen is not None else None,
-    }
+        return session_detail_view(conn, session_id)
 
 
 @router.get("/api/chat/history")

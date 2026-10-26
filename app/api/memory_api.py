@@ -22,7 +22,7 @@ import app.memory as memory
 import app.use_cases as use_cases
 from app.api.http import payload
 from app.api.routes import require_api_token
-from app.proactive import default_user_id
+from app.views.management import memory_view
 
 router = APIRouter(
     prefix="/api/memory",
@@ -30,8 +30,6 @@ router = APIRouter(
     dependencies=[Depends(require_api_token)],
 )
 
-#: 一次最多回多少条：演示库的记忆量很小，50 足够，也避免接口被刷。
-LIST_LIMIT: Final[int] = 50
 #: source 是「谁写的凭据」，不是正文，长成这样足够。
 SOURCE_MAX: Final[int] = 120
 
@@ -51,14 +49,7 @@ class MemoryWriteRequest(BaseModel):
 def list_memory() -> dict[str, Any]:
     """这个用户现在被记住了什么。prompt_block 原样给前端，方便对照提示词里到底注入了什么。"""
     with db.open_conn() as conn:
-        user_id = default_user_id(conn)
-        facts = memory.all_facts(conn, user_id=user_id, limit=LIST_LIMIT)
-        return {
-            "ok": True,
-            "facts": facts,
-            "count": len(facts),
-            "prompt_block": memory.prompt_block(conn, user_id=user_id),
-        }
+        return memory_view(conn)
 
 
 @router.post("")

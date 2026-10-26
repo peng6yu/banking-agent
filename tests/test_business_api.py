@@ -390,6 +390,21 @@ def test_every_read_endpoint_answers_with_ok(bank: Path) -> None:
         assert body.get("ok") is True, f"{url} 的响应缺少 ok=true：{list(body)[:6]}"
 
 
+def test_truncated_lists_say_how_many_there_really_are(bank: Path) -> None:
+    """会截断的列表必须带 total：页面上的「共 N 条」不能只是本页条数。"""
+    conn = db.connect()
+    try:
+        session_id = str(conn.execute("SELECT id FROM sessions LIMIT 1").fetchone()["id"])
+    finally:
+        conn.close()
+    audit = get(f"/api/audit?session_id={session_id}").json()
+    assert audit["total"] >= audit["count"]
+    handoffs = get("/api/handoffs").json()
+    assert handoffs["total"] >= handoffs["count"]
+    latest = get("/api/chat/latest").json()
+    assert isinstance(latest.get("total"), int)
+
+
 def test_every_fen_and_ms_field_has_a_readable_twin(bank: Path) -> None:
     """有 _fen 就要有 _yuan，有 _ms 就要有 _text：前端不该自己做除法和时间格式化。"""
     conn = db.connect()

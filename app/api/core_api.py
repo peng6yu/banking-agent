@@ -7,7 +7,6 @@ from fastapi import APIRouter
 from typing import Any, Final
 from fastapi.responses import FileResponse, StreamingResponse
 from pathlib import Path
-import json
 
 from app.tools.registry import TOOL_NAMES, tool_schemas
 from app import audit, clock, db, timefmt
@@ -17,6 +16,7 @@ from app.api.chat_trace import (
     _db_ok,
     _model_name,
 )
+from app.views.executions import audit_trail_view
 
 #: 每个端点文件自带一个空 router，由 app/api/routes.py 统一挂到 /api 下。
 router = APIRouter()
@@ -52,29 +52,7 @@ async def list_tools() -> dict[str, Any]:
 async def audit_trail(session_id: str, limit: int = 100) -> dict[str, Any]:
     """审计链：既能看链还完不完整，也能看这条会话每一步为什么这么判。"""
     with db.open_conn() as conn:
-        rows = conn.execute(
-            "SELECT seq, ts_ms, event_type, payload_json FROM audit_log WHERE session_id = ?"
-            " ORDER BY seq LIMIT ?",
-            (session_id, limit),
-        ).fetchall()
-        events = [
-            {
-                "seq": int(row["seq"]),
-                "ts_ms": int(row["ts_ms"]),
-                "ts_text": timefmt.maybe_minute_text(int(row["ts_ms"])),
-                "event_type": str(row["event_type"]),
-                "payload": json.loads(row["payload_json"]),
-            }
-            for row in rows
-        ]
-        return {
-            "ok": True,
-            "session_id": session_id,
-            "count": len(events),
-            "events": events,
-            "chain_ok": audit.verify_chain(conn),
-            "chain_head": audit.chain_head(conn),
-        }
+        return audit_trail_view(conn, session_id, limit=limit)
 
 
 @router.get("/api/audit/verify")

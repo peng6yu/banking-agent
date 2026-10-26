@@ -72,7 +72,7 @@ function bxRenderPersistedPlans(block) {
     if (isBirthday) {
       box.appendChild(el('div', 'card-note',
         '生日 ' + (textOf(planMeta.birthday) || '—') +
-        ' · 预算 ' + (bxNum(planMeta.budget_fen) ? (bxNum(planMeta.budget_fen) / 100) : '—') +
+        ' · 预算 ' + (textOf(planMeta.budget_yuan) || '—') +
         ' 元 · 到点 ' + (textOf(planMeta.trigger_text) || '—') +
         '（预算已占用可支配金额，余额没动）'));
     }

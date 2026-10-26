@@ -19,6 +19,7 @@ from app import db, handoffs
 from app.api.http import payload
 from app.api.routes import require_api_token
 from app.use_cases import handoffs as handoff_cases
+from app.views.queue import handoff_detail_view, handoff_list_view
 
 router = APIRouter(prefix="/api/handoffs", tags=["handoffs"],
                    dependencies=[Depends(require_api_token)])
@@ -58,15 +59,14 @@ def api_list(
 ) -> dict[str, Any]:
     """按状态列工单（新单在前）；不带 status 就是全量最近 N 张。"""
     with db.open_conn() as conn:
-        rows = handoffs.list_handoffs(conn, status=status, limit=limit)
-    return {"ok": True, "handoffs": rows, "count": len(rows)}
+        return handoff_list_view(conn, status=status, limit=limit)
 
 
 @router.get("/{handoff_id}")
 def api_get(handoff_id: str) -> dict[str, Any]:
     """单张工单：原请求、DAG、已完成/失败节点、裁决、授权与备注都在里面。"""
     with db.open_conn() as conn:
-        return {"ok": True, "handoff": handoffs.get(conn, handoff_id)}
+        return handoff_detail_view(conn, handoff_id)
 
 
 @router.post("")

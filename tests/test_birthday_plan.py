@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import datetime as _dt
+import json
 from pathlib import Path
 
 import pytest
@@ -386,3 +387,34 @@ def test_wrong_factor_code_keeps_item_retryable(bank) -> None:
     assert flowers["status"] == "reserved"
     assert _balance() == SEED_BALANCE_FEN
     assert not _events("plan.item_paid")
+
+def test_budget_amounts_stay_present_without_an_account(bank) -> None:
+    """A2：计划没绑账户时，预算里的六个金额键仍在（值为 None）。
+
+    缺键和「值为 None」对前端是两件事：读不到键会整块退回「暂不可用」，
+    值为 None 才能照实显示「这块暂时算不出来」。
+    """
+    plan = _create(bank)
+    with db.tx(bank):
+        row = bank.execute(
+            "SELECT meta_json FROM plans WHERE id = ?", (plan["plan_id"],)
+        ).fetchone()
+        meta = json.loads(row["meta_json"])
+        meta.pop("account_id", None)
+        bank.execute(
+            "UPDATE plans SET meta_json = ? WHERE id = ?",
+            (json.dumps(meta, ensure_ascii=False), plan["plan_id"]),
+        )
+        bank.execute("DELETE FROM plan_budgets WHERE plan_id = ?", (plan["plan_id"],))
+    view = birthday.plan_with_budgets(bank, plan["plan_id"])
+    budget = view["budget"]
+    for key in (
+        "balance_fen",
+        "balance_yuan",
+        "reserved_budget_fen",
+        "reserved_budget_yuan",
+        "available_fen",
+        "available_yuan",
+    ):
+        assert key in budget, key
+        assert budget[key] is None, key

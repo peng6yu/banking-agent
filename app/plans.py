@@ -24,6 +24,7 @@ import json
 from typing import Any, Final
 
 from app import audit, clock, db, ids, plan_hooks, proactive, reminder_time, timefmt
+from app.money import fen_to_yuan_str
 
 PLAN_STATUSES: Final[tuple[str, ...]] = ("active", "paused", "completed", "cancelled", "failed")
 STEP_KINDS: Final[tuple[str, ...]] = ("check", "action", "reminder")
@@ -94,6 +95,25 @@ def step_view(row: Any) -> dict[str, Any]:
     }
 
 
+#: meta 里以「分」存的金额键；下发时补一份同名的 _yuan，前端不用自己除以 100。
+_MONEY_META_KEYS: Final[tuple[str, ...]] = ("budget_fen",)
+
+
+def _meta_view(meta: Any) -> Any:
+    """meta 原样下发，只给金额补一份可读值（不改动原键，老前端照样能读）。"""
+    if not isinstance(meta, dict):
+        return meta
+    view = dict(meta)
+    for key in _MONEY_META_KEYS:
+        value = view.get(key)
+        if not isinstance(value, int) or isinstance(value, bool):
+            continue
+        base = key[:-4] if key.endswith("_fen") else key
+        if base + "_yuan" not in view:
+            view[base + "_yuan"] = fen_to_yuan_str(value)
+    return view
+
+
 def plan_view(conn, row: Any) -> dict[str, Any]:
     steps = [
         step_view(item)
@@ -108,7 +128,7 @@ def plan_view(conn, row: Any) -> dict[str, Any]:
         "status": str(row["status"]),
         "created_ms": int(row["created_ms"]),
         "updated_ms": int(row["updated_ms"]),
-        "meta": _load(row["meta_json"]),
+        "meta": _meta_view(_load(row["meta_json"])),
         "steps": steps,
         "step_count": len(steps),
         "finished_steps": done,
