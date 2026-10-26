@@ -1,13 +1,13 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-10-26T21:51:26+08:00",
+  "generated_at": "2026-10-26T21:54:08+08:00",
   "git": {
-    "head": "2742f2bf1db9faa8bd61feb81a81e0be2ef4ca24",
-    "head_short": "2742f2b",
-    "subject": "feat(insights): 助手提醒从 3 类扩到 8 类，事实层独立成 app/insights.py",
+    "head": "1194beef3bcce3fcb175ec8c803608cfe77d9d24",
+    "head_short": "1194bee",
+    "subject": "refactor(contract): 读端点统一形状、数据层清死结构（L5 六类 + L1 五类）",
     "branch": "main",
-    "dirty": true,
-    "changed_paths": 38
+    "dirty": false,
+    "changed_paths": 0
   },
   "code": {
     "tools": {
@@ -111,7 +111,7 @@
     "passed": 1768,
     "failed": 0,
     "skipped": 4,
-    "duration_s": 22.04,
+    "duration_s": 20.72,
     "log": "tmp/pytest_final.log",
     "parsed": true
   },
