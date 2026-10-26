@@ -1,13 +1,13 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-10-26T22:10:50+08:00",
+  "generated_at": "2026-10-26T22:11:00+08:00",
   "git": {
-    "head": "05f80dd10dcaa086ca800634ab6355620a71ccc8",
-    "head_short": "05f80dd",
-    "subject": "docs(benchmark): 清单按 1194bee 重生成（tables 35 / paths 50 / 20.72s）并对齐取数口径",
+    "head": "a4727754cc7c75f7a90b98daf265accec4cdbcbf",
+    "head_short": "a472775",
+    "subject": "refactor(api): 截断列表给 total、路由 SQL 搬进视图、生日 meta 补预算元",
     "branch": "main",
-    "dirty": true,
-    "changed_paths": 30
+    "dirty": false,
+    "changed_paths": 0
   },
   "code": {
     "tools": {
