@@ -97,7 +97,7 @@
 | 沙箱条款 | 采用「消除执行面」设计：主 Agent 不执行模型生成代码，提供静态调用链与 0 命中的实证，**不冒充已部署容器沙箱** | `docs/security_sandbox.md`、`scripts/prove_no_exec_surface.py` |
 | 评测证据 | A/B 改为 8 轮配对统计并明确「方向不稳定、不宣称提升」；浏览器 7 条旅程由当前脚本实际执行 | `docs/benchmark/ab_paired_stats.md`、`docs/交付/browser_journeys.json` |
 
-> 口径提醒：本节数字与 `docs/benchmark/release_manifest.json` 同源（pytest 1756 passed / 4 skipped、红队 43/43、e2e 13/13、旅程 7/7）；若与旧章节冲突，以清单与本轮验收报告为准。
+> 口径提醒：本节数字与 `docs/benchmark/release_manifest.json` 同源（pytest 1763 passed / 4 skipped、红队 43/43、e2e 13/13、旅程 7/7）；若与旧章节冲突，以清单与本轮验收报告为准。
 ---
 
 ## 二、功能取舍

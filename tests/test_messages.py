@@ -12,12 +12,13 @@
 from __future__ import annotations
 
 import re
+import time
 
 import pytest
 
 from app import messages
 from app.clock import NotFound, ValidationError
-from tests.tool_fixtures import DEBIT_ID, FROZEN_MS, USER_ID, _tx, bank
+from tests.tool_fixtures import DEBIT_ID, FROZEN_MS, PAYEE_LIJING, USER_ID, _tx, bank
 
 __all__ = ["bank"]
 
@@ -58,8 +59,9 @@ def test_detect_reports_night_spend_and_subscription_hike(bank) -> None:
 
 
 def test_detect_returns_nothing_on_an_empty_ledger(bank) -> None:
-    """没有任何消费时不许编一条提醒出来。"""
-    bank.execute("DELETE FROM transactions")
+    """账本、收款人、目标、代扣都没有时不许编一条提醒出来。"""
+    for table in ("transactions", "payees", "subs", "scheduled_transfers", "monitor_rules", "savings_goals"):
+        bank.execute(f"DELETE FROM {table}")
     assert messages.detect_insights(bank, USER_ID, NOW) == []
 
 
@@ -75,6 +77,81 @@ def test_night_ignores_a_small_late_night_charge(bank) -> None:
     bank.execute("UPDATE transactions SET amount_fen = 12000 WHERE id IN ('t_ovs_local', 't_ovs')")
     found = messages.detect_insights(bank, USER_ID, NOW)
     assert "I3_night_large" not in [item["insight_id"] for item in found]
+
+
+def _found(bank) -> dict:
+    return {item["insight_id"]: item for item in messages.detect_insights(bank, USER_ID, NOW)}
+
+
+def test_payee_duplicate_reports_both_tails(bank) -> None:
+    """种子里有两个张三（尾号 4417 / 6620），转账前该被提醒一次。"""
+    item = _found(bank)["I7_payee_duplicate"]
+    assert item["facts"]["name"] == "张三"
+    assert {item["facts"]["tail_a"], item["facts"]["tail_b"]} == {"4417", "6620"}
+    assert item["facts"]["count"] == "2"
+
+
+def test_cash_gap_warns_only_when_scheduled_exceeds_balance(bank) -> None:
+    """未来 7 天的预约转账超过活期余额才说；差多少必须算出来。"""
+    bank.execute(
+        "INSERT INTO scheduled_transfers (id, user_id, account_id, payee_id, amount_fen, note,"
+        " due_ms, recurrence, status, created_ms, idempotency_key)"
+        " VALUES ('st_gap', ?, ?, ?, ?, '', ?, 'once', 'scheduled', ?, 'idem-gap')",
+        (USER_ID, DEBIT_ID, PAYEE_LIJING, 1_300_000, NOW + 3 * DAY, NOW),
+    )
+    item = _found(bank)["I5_cash_gap"]
+    # 活期 12,860.50 元、要出去 13,000.00 元 → 差 139.50 元
+    assert item["facts"]["short_yuan"] == "139.50"
+    bank.execute("UPDATE scheduled_transfers SET amount_fen = 10000 WHERE id = 'st_gap'")
+    assert "I5_cash_gap" not in _found(bank)
+
+
+def test_goal_behind_uses_the_calendar_not_just_the_ratio(bank) -> None:
+    """存了 10% 但时间已过 77% 才算落后；存到 80% 就追上了，不该再说。"""
+    deadline = time.strftime("%Y-%m-%d", time.localtime((NOW + 30 * DAY) / 1000))
+    bank.execute(
+        "INSERT INTO savings_goals (id, user_id, name, target_fen, target_date, saved_fen,"
+        " status, created_ms, updated_ms) VALUES ('sg_behind', ?, '换电脑', 1000000, ?, 100000,"
+        " 'active', ?, ?)",
+        (USER_ID, deadline, NOW - 100 * DAY, NOW),
+    )
+    item = _found(bank)["I6_goal_behind"]
+    assert item["facts"]["progress_pct"] == "10"
+    assert int(item["facts"]["expected_pct"]) > 70
+    # 截止日按当天 0 点算，中午看还剩 29 个整天
+    assert item["facts"]["days_left"] == "29"
+    bank.execute("UPDATE savings_goals SET saved_fen = 800000 WHERE id = 'sg_behind'")
+    assert "I6_goal_behind" not in _found(bank)
+
+
+def test_budget_pace_warns_before_the_month_is_half_over(bank) -> None:
+    """预算用掉八成、时间才过一半多：这是提前预警，不是超支后的马后炮。"""
+    bank.execute(
+        "INSERT INTO savings_goals (id, user_id, name, target_fen, target_date, saved_fen,"
+        " status, created_ms, updated_ms) VALUES ('sg_budget', ?, '月度预算', 5000000,"
+        " '2027-06-30', 0, 'active', ?, ?)",
+        (USER_ID, NOW, NOW),
+    )
+    bank.execute(
+        "INSERT INTO monitor_rules (id, goal_id, kind, threshold, period, enabled, created_ms)"
+        " VALUES ('mr_budget', 'sg_budget', 'budget', 1000000, 'monthly', 1, ?)",
+        (NOW,),
+    )
+    item = _found(bank)["I8_budget_pace"]
+    assert int(item["facts"]["used_pct"]) >= 80
+    assert int(item["facts"]["elapsed_pct"]) <= 60
+    bank.execute("UPDATE monitor_rules SET threshold = 100000000 WHERE id = 'mr_budget'")
+    assert "I8_budget_pace" not in _found(bank)
+
+
+def test_payday_suggests_a_tenth_of_the_income(bank) -> None:
+    """工资到账 8,000 元 → 建议先留 800 元；只有 1,000 元的小额收入不该说。"""
+    _tx(bank, "t_pay", NOW - 2 * DAY, 800_000, "工资", "工资", direction="in")
+    item = _found(bank)["I4_payday_saving"]
+    assert item["facts"]["income_yuan"] == "8,000.00"
+    assert item["facts"]["suggest_yuan"] == "800.00"
+    bank.execute("UPDATE transactions SET amount_fen = 100000 WHERE id = 't_pay'")
+    assert "I4_payday_saving" not in _found(bank)
 
 
 # ---------------------------------------------------------------- 落库与频控
@@ -101,7 +178,7 @@ def test_generate_is_idempotent_within_a_week(bank) -> None:
     second = messages.generate(bank, USER_ID, now=NOW)
     assert second["created"] == []
     reasons = {item["reason"] for item in second["skipped"]}
-    assert reasons <= {"QUIET", "DUPLICATE"}
+    assert reasons <= {"QUIET", "DUPLICATE", "DAILY_CAP"}
     assert len(messages.list_messages(bank, USER_ID)) == len(first["created"])
 
 

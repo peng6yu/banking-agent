@@ -1,13 +1,12 @@
-"""助手主动提醒（消息）基座：探测 → 频控 → 落库 → 反馈。
+"""助手主动提醒（消息）基座：频控 → 落库 → 反馈。
 
-为什么单独做一层：提醒最容易变成噪音。没有出处、没有去重、没有封顶，
-同一条涨价就会天天冒出来，用户两周内学会无视全部提醒——这比不提醒更糟。
-所以这里把关三层：
+为什么需要这一层：提醒最容易变成噪音。没有去重、没有封顶，同一条涨价就会
+天天冒出来，用户两周内学会无视全部提醒——这比不提醒更糟。所以这里把关：
 
-1. **事实层**（探测器）：只读账务表，确定性计算，不调模型、不猜。
-   每条提醒都带 facts（数字的唯一出处），正文里的每个数字都必须来自 facts。
-2. **时机层**（频控）：每日封顶 3 条；同一类洞察 7 天内不重复；
+1. **时机层**（本模块）：每日封顶 3 条；同一类洞察 7 天内不重复；
    用户忽略 3 次或点「不再提醒」→ 这一类长期静默（message_insight_state）。
+2. **事实层**（app/insights.py）：探测器只读账务表，确定性计算，不调模型、不猜。
+   每条提醒都带 facts（数字的唯一出处），正文里的每个数字都必须来自 facts。
 3. **语言层**：文案由 facts 拼出来，只描述事实与可选动作，不替用户下结论；
    「值得核实」不等于「欺诈认定」，「可以这样处理」不等于「必须这样」。
 
@@ -19,12 +18,11 @@ from __future__ import annotations
 
 import json
 import sqlite3
-import time
 from typing import Any, Final
 
 from app import audit, db, ids
 from app.clock import NotFound, ValidationError, now_ms
-from app.money import INTERNAL_CATEGORIES, fen_to_yuan_str
+from app.insights import CATALOG, DAY_MS, day_start_ms, detect_insights
 
 #: 每天最多主动说三条：再多就从「提醒」变成「骚扰」。
 MAX_PER_DAY: Final[int] = 3
@@ -33,8 +31,7 @@ QUIET_MS: Final[int] = 7 * 24 * 3600 * 1000
 #: 连续忽略 3 次视为「这类我不想看」。
 MUTE_AFTER_IGNORES: Final[int] = 3
 #: 「不再提醒」写成很远的将来，而不是删掉状态：以后想恢复只改这一行。
-MUTE_FOREVER_MS: Final[int] = 100 * 365 * 24 * 3600 * 1000
-DAY_MS: Final[int] = 24 * 3600 * 1000
+MUTE_FOREVER_MS: Final[int] = 100 * 365 * DAY_MS
 
 STATUS_LABELS: Final[dict[str, str]] = {
     "new": "待你看",
@@ -47,58 +44,6 @@ FEEDBACK_LABELS: Final[dict[str, str]] = {
     "dismissed": "这次不用",
     "muted": "这类别再提醒",
 }
-
-#: 洞察目录：用户问「你凭什么想到这个」时，页面能直接摊开数据来源。
-CATALOG: Final[tuple[dict[str, str], ...]] = (
-    {
-        "id": "I1_subscription_hike",
-        "title": "订阅扣费涨价",
-        "why": "同一个商户本月的订阅扣款比上月高 30% 以上",
-        "source": "transactions（分类=订阅）",
-        "severity": "warning",
-    },
-    {
-        "id": "I2_spending_pace",
-        "title": "花得比上月快",
-        "why": "本月至今的支出（不含转账/理财）比上月同期高 20% 以上",
-        "source": "transactions（排除账户内部搬运）",
-        "severity": "info",
-    },
-    {
-        "id": "I3_night_large",
-        "title": "凌晨的大额消费",
-        "why": "本月 0-5 点出现单笔 500 元以上的支出",
-        "source": "transactions（按本地时间取 0-5 点）",
-        "severity": "warning",
-    },
-)
-
-
-# ---------------------------------------------------------------- 时间小工具
-
-
-def _local_time(ms: int) -> time.struct_time:
-    return time.localtime(ms / 1000)
-
-
-def _date_ms(year: int, month: int, day: int) -> int:
-    return int(time.mktime((year, month, day, 0, 0, 0, 0, 0, -1)) * 1000)
-
-
-def _period_start_ms(ms: int) -> int:
-    lt = _local_time(ms)
-    return _date_ms(lt.tm_year, lt.tm_mon, 1)
-
-
-def _prev_month_start(ms: int) -> int:
-    lt = _local_time(ms)
-    year, month = (lt.tm_year, lt.tm_mon - 1) if lt.tm_mon > 1 else (lt.tm_year - 1, 12)
-    return _date_ms(year, month, 1)
-
-
-def _month_tag(ms: int) -> str:
-    lt = _local_time(ms)
-    return f"{lt.tm_year}-{lt.tm_mon:02d}"
 
 
 # ---------------------------------------------------------------- 用户与频控
@@ -115,7 +60,7 @@ def first_user_id(conn: sqlite3.Connection) -> str:
 def _today_count(conn: sqlite3.Connection, user_id: str, now: int) -> int:
     row = conn.execute(
         "SELECT COUNT(*) AS n FROM messages WHERE user_id = ? AND created_ms >= ?",
-        (user_id, _date_ms(*_local_time(now)[:3])),
+        (user_id, day_start_ms(now)),
     ).fetchone()
     return int(row["n"] if row else 0)
 
@@ -155,153 +100,6 @@ def muted_insights(conn: sqlite3.Connection, user_id: str, now: int | None = Non
         (user_id, now),
     ).fetchall()
     return [str(row["insight_id"]) for row in rows]
-
-
-# ---------------------------------------------------------------- 洞察探测
-
-
-def _hike_candidate(conn: sqlite3.Connection, user_id: str, now: int) -> dict[str, Any] | None:
-    """订阅类扣款：本月已扣 vs 上月同商户，涨 30% 以上才说。"""
-    cur_start = _period_start_ms(now)
-    prev_start = _prev_month_start(now)
-    rows = conn.execute(
-        "SELECT t.counterparty AS merchant,"
-        " SUM(CASE WHEN t.ts_ms >= ? THEN t.amount_fen ELSE 0 END) AS cur_fen,"
-        " SUM(CASE WHEN t.ts_ms < ? THEN t.amount_fen ELSE 0 END) AS prev_fen"
-        " FROM transactions t JOIN accounts a ON a.id = t.account_id"
-        " WHERE a.user_id = ? AND t.direction = 'out' AND t.category = '订阅'"
-        " AND t.ts_ms >= ? AND t.ts_ms < ?"
-        " GROUP BY t.counterparty",
-        (cur_start, cur_start, user_id, prev_start, now),
-    ).fetchall()
-    best: dict[str, Any] | None = None
-    for row in rows:
-        cur, prev = int(row["cur_fen"] or 0), int(row["prev_fen"] or 0)
-        if cur <= 0 or prev <= 0 or cur * 10 < prev * 13:
-            continue
-        if best is None or cur - prev > best["_delta"]:
-            best = {"_delta": cur - prev, "merchant": str(row["merchant"]), "cur": cur, "prev": prev}
-    if best is None:
-        return None
-    pct = int(round((best["cur"] - best["prev"]) * 100 / best["prev"]))
-    merchant = best["merchant"]
-    facts = {
-        "merchant": merchant,
-        "previous_yuan": fen_to_yuan_str(best["prev"]),
-        "current_yuan": fen_to_yuan_str(best["cur"]),
-        "hike_pct": str(pct),
-    }
-    return {
-        "insight_id": "I1_subscription_hike",
-        "dedupe_key": f"I1:{merchant}:{_month_tag(now)}",
-        "severity": "warning",
-        "title": f"{merchant}这个月的扣费涨了 {facts['hike_pct']}%",
-        "body": (
-            f"{merchant}的订阅扣费从 {facts['previous_yuan']} 元涨到 {facts['current_yuan']} 元"
-            f"（+{facts['hike_pct']}%）。如果这不是你要的套餐，可以去业务管理把银行侧代扣停掉；"
-            "停的是银行代扣，会员本身还要去商户那边退订。"
-        ),
-        "facts": facts,
-        "actions": [
-            {"key": "ask", "kind": "ask", "label": "让助手帮我停掉",
-             "prompt": f"帮我把{merchant}的银行侧代扣停掉"},
-            {"key": "goto", "kind": "goto", "label": "去看看订阅", "view": "manage"},
-        ],
-    }
-
-
-def _spending_candidate(conn: sqlite3.Connection, user_id: str, now: int) -> dict[str, Any] | None:
-    """支出节奏：本月至今 vs 上月同一天数窗口，排除转账/理财。"""
-    cur_start = _period_start_ms(now)
-    prev_start = _prev_month_start(now)
-    prev_end = min(prev_start + (now - cur_start), cur_start)
-    exclude = ",".join("?" * len(INTERNAL_CATEGORIES))
-    sql = (
-        "SELECT COALESCE(SUM(t.amount_fen), 0) AS fen"
-        " FROM transactions t JOIN accounts a ON a.id = t.account_id"
-        " WHERE a.user_id = ? AND t.direction = 'out' AND t.category NOT IN (" + exclude + ")"
-        " AND t.ts_ms >= ? AND t.ts_ms < ?"
-    )
-    base = (user_id, *INTERNAL_CATEGORIES)
-    cur = int(conn.execute(sql, (*base, cur_start, now)).fetchone()["fen"])
-    prev = int(conn.execute(sql, (*base, prev_start, prev_end)).fetchone()["fen"])
-    if prev <= 0 or cur * 10 < prev * 12:
-        return None
-    pct = int(round((cur - prev) * 100 / prev))
-    facts = {
-        "spent_yuan": fen_to_yuan_str(cur),
-        "previous_yuan": fen_to_yuan_str(prev),
-        "hike_pct": str(pct),
-    }
-    return {
-        "insight_id": "I2_spending_pace",
-        "dedupe_key": f"I2:{_month_tag(now)}",
-        "severity": "info",
-        "title": f"这个月比上月同期多花了 {facts['hike_pct']}%",
-        "body": (
-            f"本月到目前为止花了 {facts['spent_yuan']} 元，上月同期是 {facts['previous_yuan']} 元"
-            f"（+{facts['hike_pct']}%，都不含转账和理财）。想管住的话，可以先去账单分析看看"
-            "是哪一类涨得最多。"
-        ),
-        "facts": facts,
-        "actions": [
-            {"key": "goto", "kind": "goto", "label": "看支出分类", "view": "bill"},
-            {"key": "ask", "kind": "ask", "label": "让助手帮我定预算",
-             "prompt": "帮我看下这个月哪类支出涨得最多，能不能定个预算"},
-        ],
-    }
-
-
-def _night_candidate(conn: sqlite3.Connection, user_id: str, now: int) -> dict[str, Any] | None:
-    """凌晨大额：0-5 点、单笔 500 元以上。只提醒核实，不判定盗刷。"""
-    cur_start = _period_start_ms(now)
-    rows = conn.execute(
-        "SELECT t.id, t.counterparty, t.amount_fen, t.ts_ms FROM transactions t"
-        " JOIN accounts a ON a.id = t.account_id"
-        " WHERE a.user_id = ? AND t.direction = 'out' AND t.ts_ms >= ? AND t.ts_ms < ?"
-        " AND t.amount_fen >= 50000"
-        " AND CAST(strftime('%H', t.ts_ms / 1000, 'unixepoch', 'localtime') AS INTEGER) BETWEEN 0 AND 5",
-        (user_id, cur_start, now),
-    ).fetchall()
-    if not rows:
-        return None
-    total = sum(int(row["amount_fen"]) for row in rows)
-    largest = max(int(row["amount_fen"]) for row in rows)
-    facts = {
-        "count": str(len(rows)),
-        "total_yuan": fen_to_yuan_str(total),
-        "largest_yuan": fen_to_yuan_str(largest),
-        # 门槛也是「依据」的一部分：正文里出现的每个数字都要能在 facts 里查到，
-        # 否则语言层白名单形同虚设（用户没法复核 500 是从哪来的）。
-        "min_yuan": fen_to_yuan_str(50000),
-    }
-    return {
-        "insight_id": "I3_night_large",
-        "dedupe_key": f"I3:{_month_tag(now)}",
-        "severity": "warning",
-        "title": f"凌晨有 {facts['count']} 笔大额消费，先确认是不是你本人",
-        "body": (
-            f"本月凌晨时段出现了 {facts['count']} 笔单笔超过 {facts['min_yuan']} 元的支出，合计 {facts['total_yuan']} 元，"
-            f"最大一笔 {facts['largest_yuan']} 元。这不是欺诈认定，只是一条值得核实的线索："
-            "如果不是你本人操作，先去业务管理把卡临时冻结，再逐笔确认。"
-        ),
-        "facts": facts,
-        "actions": [
-            {"key": "goto", "kind": "goto", "label": "去账单里核对", "view": "bill"},
-            {"key": "ask", "kind": "ask", "label": "让助手帮我冻结卡",
-             "prompt": "帮我先把这张卡临时冻结，我要核对几笔凌晨的消费"},
-        ],
-    }
-
-
-def detect_insights(conn: sqlite3.Connection, user_id: str, now: int) -> list[dict[str, Any]]:
-    """按重要度跑三个探测器；任何一个探不到就跳过，不编。"""
-    found: list[dict[str, Any]] = []
-    for probe in (_night_candidate, _hike_candidate, _spending_candidate):
-        item = probe(conn, user_id, now)
-        if item is not None:
-            found.append(item)
-    return found
 
 
 # ---------------------------------------------------------------- 落库与生成
@@ -461,7 +259,7 @@ __all__ = [
     "STATUS_LABELS",
     "FEEDBACK_LABELS",
     "first_user_id",
-    "detect",
+    "detect_insights",
     "generate",
     "list_messages",
     "get_message",

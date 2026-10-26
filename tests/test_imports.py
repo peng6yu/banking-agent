@@ -155,6 +155,8 @@ LAYERS: dict[str, int] = {
     "app.api.memory_api": 5,
     # 助手主动提醒：探测器只读账务表 + 频控落库，不认识 planner/tools（同存储级）
     "app.messages": 2,
+    # 提醒的事实层（探测器 + 洞察目录）：只读账务表，不碰频控与落库
+    "app.insights": 2,
     "app.views.messages": 5,
     "app.api.messages_api": 5,
     "app.api.schemas": 5,
@@ -266,7 +268,8 @@ ALLOWED: dict[str, frozenset[str]] = {
     # 长期记忆的 HTTP 面：数据层 + 记忆仓储 + 单用户口径 + 鉴权依赖
     "app.api.memory_api": _deps("app.api.http app.api.routes app.db app.memory app.proactive app.use_cases"),
     "app.api.messages_api": _deps("app.api.http app.api.routes app.db app.use_cases app.use_cases.messages app.views.messages"),
-    "app.messages": _deps("app.audit app.clock app.db app.ids app.money"),
+    "app.messages": _deps("app.audit app.clock app.db app.ids app.insights"),
+    "app.insights": _deps("app.money"),
     "app.views.messages": _deps("app.messages app.timefmt"),
     "app.audit": _deps("app.clock app.log"),
     "app.clock": _deps(""),

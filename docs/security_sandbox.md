@@ -68,7 +68,7 @@ scripts/prove_no_exec_surface.py 因此对 app/ 下每个 .py 做 AST 遍历，�
 - getattr 动态属性 5 处，第二参全是字面量、只取数据字段，不取可调用对象：app/llm.py:155 fallback_targets、app/llm.py:220 retryable、app/planner/executor.py:411 patterns、app/security/injection.py:243 content、app/security/breaker.py:76 hasattr(model_dump)。
 - 已知误报（保留说明，避免后人重蹈）：app/planner/kb_bridge.py:472 的 code.group(0) 里 code 是局部 re.Match 变量，不是内置 compile。前缀匹配会把这类名字误判，精确点分名才是对的。
 
-### 4.2 动态 SQL：13 处，全部是内部常量或占位符生成，无用户文本进语法位
+### 4.2 动态 SQL：15 处，全部是内部常量或占位符生成，无用户文本进语法位
 
 扫描口径：conn.execute / executemany / executescript 的首参是 f-string 或 + 拼接。数量与行号会随代码演进漂移（测试只冻结「必须被报告 + 必须被文档复核」，不冻结数字）。
 
@@ -87,6 +87,8 @@ scripts/prove_no_exec_surface.py 因此对 app/ 下每个 .py 做 AST 遍历，�
 | 11 | app/tools/products.py:97 | 列名常量（risk_level = ? / category = ?） | 列名是常量；category 值先过 CATEGORY_LABELS 白名单 |
 | 12 | app/birthday.py:535 | 逗号连 N 个占位符（keys） | 只拼占位符个数，plan_id/keys 走参数绑定 |
 | 13 | app/handoff_store.py:418 | 逗号连 N 个占位符（expect）+ 条件 UPDATE 的 sets 常量片段 | 同上；sets 只追加常量片段，值全部占位符（W4 从 app/handoffs.py 搬来，逻辑未变） |
+| 14 | app/insights.py:_spend_since | 逗号连 N 个占位符（INTERNAL_CATEGORIES） | 只拼占位符个数，分类常量来自 app/money.py，金额与时间走参数绑定（原 app/messages.py 的同一段搬来） |
+| 15 | app/insights.py:_payday_candidate | 逗号连 N 个占位符（INTERNAL_CATEGORIES） | 同上；只有一个 IN 子句，其它条件全是字面量与占位符 |
 
 规则：新增动态 SQL 会让 tests/test_no_exec_surface.py 的 test_dynamic_sql_is_reported_and_documented 变红，直到本文补上对应文件的复核结论。这是有意为之——拼接是「未来可能把用户文本送进语法位」的唯一入口。
 
