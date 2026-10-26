@@ -1,10 +1,10 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-10-25T23:52:22+08:00",
+  "generated_at": "2026-10-26T13:03:26+08:00",
   "git": {
-    "head": "9337e6539d579ad14493a7cfc7ab79cb8d622ba4",
-    "head_short": "9337e65",
-    "subject": "feat: 长期记忆 + 停代扣联动 + 提示词 v2（人格/预设/思考步骤）",
+    "head": "1575a18dd48e8d1076ff4aa9f7350a6548769a00",
+    "head_short": "1575a18",
+    "subject": "feat(W1): 立规矩 + 资金不变量——架构报告/守卫测试/业务边界/停代扣联动收口",
     "branch": "main",
     "dirty": false,
     "changed_paths": 0
@@ -92,7 +92,7 @@
     "api_paths": 47,
     "policy_rules": 13,
     "intent_templates": 9,
-    "test_files": 97,
+    "test_files": 100,
     "knowledge": {
       "version": "2c4fbe8d4be2906c",
       "terms": 40,
@@ -106,11 +106,11 @@
   },
   "tests": {
     "command": ".venv/bin/python -m pytest -q",
-    "passed": 1560,
+    "passed": 1618,
     "failed": 0,
     "skipped": 4,
-    "duration_s": 40.82,
-    "log": "tmp/pytest_r11.log",
+    "duration_s": 17.62,
+    "log": "tmp/pytest_w1e.log",
     "parsed": true
   },
   "redteam": {
