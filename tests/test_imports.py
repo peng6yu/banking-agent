@@ -15,6 +15,7 @@ docs/02 §2.4 要求每个新增文件登记进本表的允许依赖表。这里
 from __future__ import annotations
 
 import ast
+from functools import lru_cache
 from pathlib import Path
 
 import pytest
@@ -44,6 +45,8 @@ LAYERS: dict[str, int] = {
     "app.security.envelope": 0,
     # 提醒时间：纯日历计算（下次到点/文案），只依赖标准库
     "app.reminder_time": 0,
+    # 边界守门（W1-A）：只有标准库依赖的纯函数与常量，被 api/planner/memory_extract 共用
+    "app.scope": 0,
     "app.security.api_auth": 1,
     "app.security.breaker": 1,
     "app.security.injection": 1,
@@ -129,6 +132,26 @@ LAYERS: dict[str, int] = {
     "app.tools": 3,
 }
 
+#: 存量反向依赖豁免表：(上层模块, 它反向 import 的模块) -> 为什么暂时留着。
+#: 分层铁律没有例外，这张表只是「债」的登记簿：每条都写清消债阶段，还清就删。
+#: tests/test_imports.py::test_upward_exceptions_are_still_real 会检查过期条目。
+#: TODO(W4 视图归位 + 拆包)：本表应在 W4 收口时变空。
+UPWARD_EXCEPTIONS: dict[tuple[str, str], str] = {
+    ("app.planner.conflict", "app.handoffs"): (
+        "冲突检测要读接管队列的行级状态。TODO(W4)：handoffs 拆成 domain/use_cases 后改依赖 use_cases，本行删除。"
+    ),
+    ("app.planner.runner", "app.handoffs"): (
+        "跑偏时把执行权交给接管队列（函数内 lazy import 避开模块级环）。"
+        "TODO(W4)：handoffs 拆出 domain 层后改依赖 use_cases，本行删除。"
+    ),
+    ("app.planner.ticker", "app.birthday"): (
+        "节拍器顺带推进生日计划到期。TODO(W4)：生日到期推进下沉到 use_cases 后由 ticker 调 use_cases，本行删除。"
+    ),
+    ("app.plans", "app.birthday"): (
+        "计划步会引用生日计划的预算预留。TODO(W4)：birthday 拆成 domain/use_cases 后改依赖 use_cases，本行删除。"
+    ),
+}
+
 #: 模型层是独立叶子：只有这几处允许碰它（意图解析、API 装配、冒烟脚本）。
 LLM_ALLOWED: frozenset[str] = frozenset(
     {"app.planner.intent", "app.api.routes", "app.main", "app.smoke", "app.memory_extract"}
@@ -137,24 +160,39 @@ LLM_ALLOWED: frozenset[str] = frozenset(
 #: 允许依赖表：模块 → 它可以 import 的 app 内模块（由代码现状反推，改代码就要改这张表）。
 ALLOWED: dict[str, frozenset[str]] = {
     "app": frozenset(),
+    # 边界守门：纯函数 + 常量，只有标准库依赖（被多方共用，所以必须待在 0 层）
+    "app.scope": frozenset(),
     "app.api": frozenset(),
     "app.api.routes": frozenset({
         "app.api.schemas",
+        "app.audit",
         "app.birthday",
         "app.clock",
         "app.config",
+        "app.db",
         "app.ids",
         "app.llm",
         "app.money",
         "app.models",
         "app.planner",
+        "app.planner.assist",
         "app.planner.clarify",
+        "app.planner.dag",
+        "app.planner.events",
+        "app.planner.executor",
+        "app.planner.intent",
+        "app.planner.payment_guard",
+        "app.planner.recover",
+        "app.planner.ticker",
         "app.plans",
         # 长期记忆已接进聊天主链路（注入提示词 + 每轮结束后抽事实），由 lead 接线
         "app.memory",
         "app.memory_extract",
         "app.proactive",
+        "app.scope",
         "app.security",
+        "app.security.api_auth",
+        "app.security.factors",
         "app.subscriptions",
         "app.suitability",
         "app.chat_history",
@@ -165,17 +203,33 @@ ALLOWED: dict[str, frozenset[str]] = {
     }),
     "app.api.business": frozenset({
         "app.api.routes",
+        "app.audit",
         "app.clock",
+        "app.db",
+        "app.funds",
+        "app.handoffs",
         "app.money",
         "app.planner",
+        "app.planner.assist",
+        "app.planner.ticker",
+        "app.plans",
+        "app.proactive",
+        "app.subscriptions",
+        "app.suitability",
         "app.tools",
         "app.tools.base",
         "app.tools.bill",
+        "app.tools.queries",
+        "app.tools.scheduled",
     }),
     # 入参模型里 FactorProof 复用公共契约（多因子凭证与 /api/confirm 同构）
     "app.api.schemas": frozenset({"app.models"}),
     # 接管队列的 HTTP 面只依赖数据层与路由里的鉴权依赖
-    "app.api.handoffs_api": frozenset({"app.api.routes"}),
+    "app.api.handoffs_api": frozenset({
+        "app.api.routes",
+        "app.db",
+        "app.handoffs",
+    }),
     # 长期记忆的 HTTP 面：数据层 + 记忆仓储 + 单用户口径 + 鉴权依赖
     "app.api.memory_api": frozenset({
         "app.api.routes",
@@ -190,15 +244,19 @@ ALLOWED: dict[str, frozenset[str]] = {
     "app.clock": frozenset(),
     "app.config": frozenset(),
     "app.db": frozenset({
+        "app.audit",
         "app.clock",
     }),
     "app.funds": frozenset({
+        "app.audit",
+        "app.channels",
         "app.clock",
         "app.db",
         "app.ids",
         "app.log",
         "app.models",
         "app.security",
+        "app.security.token",
     }),
     "app.ids": frozenset({
         "app.clock",
@@ -235,10 +293,17 @@ ALLOWED: dict[str, frozenset[str]] = {
     }),
     "app.main": frozenset({
         "app.api",
+        "app.api.business",
+        "app.api.handoffs_api",
+        "app.api.memory_api",
+        "app.api.routes",
         "app.clock",
+        "app.db",
         "app.llm",
         "app.planner",
+        "app.planner.ticker",
         "app.security",
+        "app.security.api_auth",
     }),
     "app.models": frozenset(),
     "app.money": frozenset({
@@ -247,8 +312,18 @@ ALLOWED: dict[str, frozenset[str]] = {
     "app.planner": frozenset(),
     "app.planner.due": frozenset({"app.clock"}),
     "app.planner.split_plan": frozenset({"app.clock", "app.ids", "app.models"}),
-    "app.planner.ticker": frozenset({"app.tools"}),
+    "app.planner.ticker": frozenset({
+        "app.birthday",
+        "app.db",
+        "app.plans",
+        "app.proactive",
+        "app.tools",
+        "app.tools.scheduled",
+    }),
     "app.planner.dag": frozenset({
+        "app.audit",
+        "app.clock",
+        "app.db",
         "app.ids",
         "app.models",
         "app.planner.card_actions",
@@ -269,16 +344,26 @@ ALLOWED: dict[str, frozenset[str]] = {
         "app.subscriptions",
     }),
     "app.planner.executor": frozenset({
+        "app.audit",
         "app.clock",
+        "app.db",
+        "app.funds",
         "app.models",
         "app.planner",
+        "app.planner.conflict",
+        "app.planner.dag",
         "app.planner.events",
+        "app.planner.recover",
         "app.planner.runner",
         "app.planner.state",
         "app.policy.engine",
         "app.policy.rules",
         "app.security",
+        "app.security.breaker",
+        "app.security.factors",
+        "app.security.injection",
         "app.tools",
+        "app.tools.base",
     }),
     "app.planner.intent": frozenset({
         "app.llm",
@@ -286,59 +371,88 @@ ALLOWED: dict[str, frozenset[str]] = {
         "app.planner",
         "app.planner.card_actions",
         "app.planner.intent_schema",
+        "app.planner.kb_bridge",
+        "app.planner.payment_guard",
+        "app.planner.refusal",
         "app.security",
+        "app.security.envelope",
+        "app.security.injection",
     }),
     "app.planner.refusal": frozenset(),
     "app.planner.intent_schema": frozenset(),
     "app.planner.runner": frozenset({
+        "app.audit",
         "app.clock",
+        "app.funds",
+        "app.handoffs",
         "app.models",
         "app.planner",
         "app.planner.clarify",
+        "app.planner.dag",
         "app.planner.events",
         "app.planner.state",
         "app.policy.engine",
         "app.policy.rules",
         "app.security",
+        "app.security.token",
         "app.tools",
+        "app.tools.base",
+        "app.tools.registry",
     }),
     # 识别即执行：只读账户、建计划/提醒，钱一律走原有的确认与令牌路径
     "app.planner.assist": frozenset({
         "app.audit",
+        "app.clock",
         "app.money",
         "app.plans",
         "app.proactive",
         "app.reminder_time",
+        "app.scope",
         # 逐笔核实订阅要读该商户的每一笔流水（只读，推断仍在 subscriptions 里）
         "app.subscriptions",
         # 提醒类话术要带上「这个人是谁」（称呼/偏好），只读记忆，不改记忆
         "app.memory",
     }),
     "app.planner.state": frozenset({
+        "app.audit",
         "app.clock",
+        "app.db",
+        "app.funds",
         "app.ids",
         "app.models",
         "app.money",
         "app.security",
+        "app.security.breaker",
         "app.tools",
+        "app.tools.base",
     }),
     "app.planner.kb_bridge": frozenset({
         "app.knowledge",
         "app.knowledge.models",
+        "app.knowledge.normalize",
+        "app.knowledge.retrieve",
     }),
     "app.planner.payment_guard": frozenset(),
     # 冲突闸门：查库、写一条 run.conflict 审计、读工具清单，不驱动任何执行
     "app.planner.conflict": frozenset({
+        "app.audit",
+        "app.clock",
+        "app.db",
+        "app.handoffs",
         "app.models",
         "app.tools.registry",
     }),
     # 重启恢复：只重建状态、接着驱动，不重新解析意图也不重新裁决
     "app.planner.recover": frozenset({
+        "app.audit",
         "app.clock",
+        "app.db",
         "app.models",
         "app.planner.executor",
         "app.planner.state",
         "app.security",
+        "app.security.factors",
+        "app.security.token",
         # 账户要按运行时的同一条规则补回来（primary_account）：
         # 老库没有 meta_json，硬用空串会让令牌必然 ACCOUNT_MISMATCH
         "app.tools.base",
@@ -382,6 +496,7 @@ ALLOWED: dict[str, frozenset[str]] = {
     }),
     "app.security": frozenset(),
     "app.security.breaker": frozenset({
+        "app.audit",
         "app.clock",
         "app.ids",
         "app.log",
@@ -392,14 +507,17 @@ ALLOWED: dict[str, frozenset[str]] = {
     "app.security.api_auth": frozenset(),
     # 多因子挑战：签发/校验只碰审计、时钟、ID 生成
     "app.security.factors": frozenset({
+        "app.audit",
         "app.clock",
         "app.ids",
     }),
     "app.security.injection": frozenset({
+        "app.clock",
         "app.log",
         "app.models",
     }),
     "app.security.token": frozenset({
+        "app.audit",
         "app.clock",
         "app.ids",
         "app.log",
@@ -415,14 +533,28 @@ ALLOWED: dict[str, frozenset[str]] = {
         "app.clock",
     }),
     # 订阅推断：只读流水 + 用户的定性结论（写这张表要审计，错误类型用 clock）
-    "app.plans": frozenset(),
+    "app.plans": frozenset({
+        "app.audit",
+        "app.birthday",
+        "app.clock",
+        "app.db",
+        "app.ids",
+        "app.proactive",
+        "app.reminder_time",
+        "app.subscriptions",
+    }),
     # 生日计划：钱走 executor（确认/令牌），商户白名单复用工具层常量
     "app.birthday": frozenset({
+        "app.audit",
         "app.clock",
+        "app.db",
+        "app.funds",
         "app.ids",
         "app.money",
         "app.planner",
         "app.planner.dag",
+        "app.planner.executor",
+        "app.plans",
         # 到期执行要按当下重新裁决、并复用工具的 action 构造
         "app.policy.engine",
         "app.policy.rules",
@@ -431,9 +563,13 @@ ALLOWED: dict[str, frozenset[str]] = {
     }),
     # 人工接管：状态机只搬库里的事实；恢复交给 planner.recover（延迟导入）
     "app.handoffs": frozenset({
+        "app.audit",
         "app.clock",
+        "app.db",
+        "app.funds",
         "app.ids",
         "app.planner",
+        "app.planner.recover",
         "app.planner.runner",
     }),
     "app.subscriptions": frozenset({
@@ -444,6 +580,7 @@ ALLOWED: dict[str, frozenset[str]] = {
     }),
     # 长期记忆：落库 + 审计（from app import audit）+ 时间，不碰模型、不碰业务
     "app.memory": frozenset({
+        "app.audit",
         "app.clock",
         "app.db",
     }),
@@ -453,6 +590,7 @@ ALLOWED: dict[str, frozenset[str]] = {
         "app.llm",
         "app.log",
         "app.memory",
+        "app.scope",
     }),
     # 会话记忆：只读写 chat_turns/sessions，不碰工具、不碰权限
     "app.chat_history": frozenset({
@@ -470,6 +608,7 @@ ALLOWED: dict[str, frozenset[str]] = {
         "app.models",
         "app.policy.rules",
         "app.security",
+        "app.security.token",
     }),
     "app.tools.bill": frozenset({
         "app.clock",
@@ -536,6 +675,8 @@ ALLOWED: dict[str, frozenset[str]] = {
         "app.policy",
         "app.policy.rules",
         "app.security",
+        "app.security.factors",
+        "app.security.token",
         "app.tools.base",
     }),
     "app.tools.split": frozenset({
@@ -546,9 +687,12 @@ ALLOWED: dict[str, frozenset[str]] = {
         "app.tools.base",
     }),
     "app.tools.subs": frozenset({
+        "app.audit",
         "app.clock",
+        "app.db",
         "app.models",
         "app.money",
+        "app.subscriptions",
         "app.tools.base",
     }),
     "app.tools.tool_specs": frozenset({
@@ -572,6 +716,7 @@ ALLOWED: dict[str, frozenset[str]] = {
         "app.models",
         "app.money",
         "app.security",
+        "app.security.token",
         "app.tools.base",
     }),
 }
@@ -585,7 +730,18 @@ def _module_name(path: Path) -> str:
 
 
 def _exists(dotted: str) -> bool:
-    rel = Path(*dotted.split("."))
+    """dotted 是 app 内的完整模块路径（如 app.audit），判断它在 app/ 下真的存在。
+
+    注意：APP_DIR 已经指向仓库里的 app/，所以拼路径前必须先剥掉前缀 "app"，
+    否则 app.audit 会被拼成 app/app/audit、永远不存在 —— 那会让 "from app import audit"
+    这类写法永远解析不出子模块，整张分层表形同虚设（2026-10-26 修）。
+    """
+    parts = dotted.split(".")
+    if parts and parts[0] == "app":
+        parts = parts[1:]
+    if not parts:  # 裸包名（app 本身），没有子模块可判
+        return True
+    rel = Path(*parts)
     return (APP_DIR / rel).with_suffix(".py").exists() or (APP_DIR / rel / "__init__.py").exists()
 
 
@@ -609,7 +765,9 @@ def _imports_of(path: Path) -> frozenset[str]:
     return frozenset(deps)
 
 
+@lru_cache(maxsize=1)
 def _actual() -> dict[str, frozenset[str]]:
+    """全量扫一遍 app/（结果缓存：本文件有 ~170 个参数化用例，别重复解析 84 个模块）。"""
     return {
         _module_name(path): _imports_of(path)
         for path in sorted(APP_DIR.rglob("*.py"))
@@ -646,10 +804,34 @@ def test_imports_stay_inside_the_allowed_table(module: str) -> None:
 
 @pytest.mark.parametrize("module", sorted(ALLOWED))
 def test_layers_never_depend_upward(module: str) -> None:
-    """分层只允许上层引用下层：app/main.py 这类顶层模块不许被底层 import。"""
+    """分层只允许上层引用下层：底层模块不许 import 更高层的模块。
+
+    存量债（4 条 lazy import）逐条登记在 UPWARD_EXCEPTIONS 并写明消债阶段；
+    新增一条反向依赖就会失败 —— 别往豁免表里加，先想能不能下沉。
+    """
     own = _rank(module)
     upward = sorted(dep for dep in _actual()[module] if _rank(dep) > own)
-    assert not upward, f"{module} 反向依赖了更上层的 {upward}"
+    new = [dep for dep in upward if (module, dep) not in UPWARD_EXCEPTIONS]
+    assert not new, (
+        f"{module}（第 {own} 层）反向依赖了更高层：{new}。"
+        "分层铁律只允许上层引用下层（docs/00 §0）。"
+        "修法：把这段逻辑下沉成纯函数/参数注入，或改成事件/回调；"
+        "确属 W4 才拆的存量债才进 UPWARD_EXCEPTIONS，并写清消债阶段。"
+    )
+
+
+def test_upward_exceptions_are_still_real() -> None:
+    """豁免表是债的登记簿：债还清了就要删，过期条目会掩盖新的越层。"""
+    actual = _actual()
+    stale = sorted(
+        f"{module} → {dep}"
+        for (module, dep) in UPWARD_EXCEPTIONS
+        if dep not in actual.get(module, frozenset()) or _rank(dep) <= _rank(module)
+    )
+    assert not stale, (
+        f"这些豁免已经没有对应的反向依赖（或层级已变）：{stale}。"
+        "请从 tests/test_imports.py 的 UPWARD_EXCEPTIONS 删掉，让表继续变空。"
+    )
 
 
 def test_policy_layer_never_imports_llm_or_tools() -> None:

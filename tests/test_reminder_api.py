@@ -65,7 +65,7 @@ def _reminders() -> dict:
 def test_post_creates_a_reminder_the_plans_page_can_see(bank: Path) -> None:
     res = post(
         "/api/reminders",
-        {"text": "提醒我明天上午 9 点开会", "repeat": "none", "hour": 9, "minute": 0},
+        {"text": "提醒我明天上午 9 点会员续费", "repeat": "none", "hour": 9, "minute": 0},
     )
     assert res.status_code == 200, res.text
     created = res.json()
@@ -78,7 +78,7 @@ def test_post_creates_a_reminder_the_plans_page_can_see(bank: Path) -> None:
     assert block["empty_reason"] is None
     item = block["items"][0]
     assert item["plan_id"] == created["plan"]["plan_id"]
-    assert item["title"] == "提醒我明天上午 9 点开会"
+    assert item["title"] == "提醒我明天上午 9 点会员续费"
     assert item["state_label"] == "等待到点"
 
 
@@ -91,7 +91,7 @@ def test_reminder_list_is_empty_but_not_unavailable(bank: Path) -> None:
 
 
 def test_repeating_reminder_from_the_form_gets_a_label(bank: Path) -> None:
-    res = post("/api/reminders", {"text": "提醒我每天喝水", "repeat": "daily", "hour": 8, "minute": 30})
+    res = post("/api/reminders", {"text": "提醒我每天盯会员续费", "repeat": "daily", "hour": 8, "minute": 30})
     assert res.status_code == 200, res.text
     body = res.json()
     assert body["repeat"] == "daily"
@@ -102,12 +102,12 @@ def test_repeating_reminder_from_the_form_gets_a_label(bank: Path) -> None:
 @pytest.mark.parametrize(
     "body",
     [
-        {"text": "提醒我喝水", "repeat": "hourly"},  # 只支持日/周/月
+        {"text": "提醒我会员续费", "repeat": "hourly"},  # 只支持日/周/月
         {"text": "", "repeat": "none"},  # 空文案
         {"text": "x" * 41, "repeat": "none"},  # 超长文案
-        {"text": "提醒我喝水", "repeat": "daily", "hour": 24},  # 小时越界
-        {"text": "提醒我喝水", "repeat": "none", "due_ms": -1},  # 负时间戳
-        {"text": "提醒我喝水", "repeat": "none", "unknown": 1},  # 多传字段
+        {"text": "提醒我会员续费", "repeat": "daily", "hour": 24},  # 小时越界
+        {"text": "提醒我会员续费", "repeat": "none", "due_ms": -1},  # 负时间戳
+        {"text": "提醒我会员续费", "repeat": "none", "unknown": 1},  # 多传字段
     ],
 )
 def test_bad_input_is_rejected(bank: Path, body: dict) -> None:
@@ -122,7 +122,7 @@ def test_daily_reminder_rearms_after_firing_instead_of_disappearing(bank: Path) 
     conn = db.connect()
     try:
         created = assist.create_reminder(
-            conn, text="提醒我每天喝水", user_id=USER_ID, repeat="daily", hour=8, minute=30
+            conn, text="提醒我每天盯会员续费", user_id=USER_ID, repeat="daily", hour=8, minute=30
         )
         plan_id = created["plan"]["plan_id"]
         stamp = now_ms()
@@ -164,7 +164,7 @@ def test_daily_reminder_rearms_after_firing_instead_of_disappearing(bank: Path) 
 def test_once_reminder_finishes_and_leaves_the_active_list(bank: Path) -> None:
     conn = db.connect()
     try:
-        created = assist.create_reminder(conn, text="提醒我明天上午 9 点开会", user_id=USER_ID)
+        created = assist.create_reminder(conn, text="提醒我明天上午 9 点会员续费", user_id=USER_ID)
         plan_id = created["plan"]["plan_id"]
         stamp = now_ms()
         conn.execute(

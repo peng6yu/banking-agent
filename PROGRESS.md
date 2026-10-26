@@ -609,3 +609,64 @@
 2. 停代扣只停银行侧；商户会员（真正退订）仍需用户自己去商户端，界面已明确写出。
 3. `tests/test_imports.py::_exists` 的路径拼接缺陷仍未修（子模块依赖恒判 False）。
 4. 真实短信/人脸仍是桩；提醒未接系统通知；未 push 远程。
+
+
+## v2.7.0 W1 立规矩 + 资金不变量（2026-10-26）
+
+### 1. 起因
+
+用户原话（m04120）：「前两个可以但是第三个我们涉及到的不是全是关于钱的操作吗怎么还有喝水」，随后（m04130）：「所有agent的操作都是和钱有关的，我不知道你能不能理解我的意思」。据此确立一条**硬不变量**并写进代码：这个助手的每一个动作都必须落在一个资金对象上（账户 / 卡 / 收款人 / 流水 / 账单 / 订阅代扣 / 预约转账 / 计划与预算 / 理财持仓 / 额度 / 风控确认 / 人工接管）；对不上任何资金对象的请求不属于它承接，只说明边界、不建对象。
+
+W1 只做「立规矩 + 资金不变量」，不改任何对外行为。
+
+### 2. 资金边界（新增 app/scope.py，第 0 层、只依赖标准库）
+
+- 三张词表：MONEY_MARKERS（钱/余额/账户/卡/流水/转账/收款人/商户/账单/订阅/代扣/理财/额度/支出/收入…）、NON_MONEY_MARKERS（天气/笑话/唱歌/翻译/写代码/星座/你好…）、REMINDER_ANCHORS 六个资金时间点：还款日（repayment）、订阅扣费（deduction）、预约转账（scheduled）、预算（budget）、储蓄目标（savings）、额度与大额（limit）。
+- 函数：classify() → money / off / unknown；out_of_scope_reply()；reminder_anchor()；anchor_label()；anchor_choices()（6 条可点选项）；is_money_text()。文案集中四句：BOUNDARY_HEAD / OUT_OF_SCOPE_REPLY / REMINDER_BOUNDARY / MEMORY_BOUNDARY。
+
+### 3. 三处漏洞的落地修法
+
+1. **通用提醒收窄成资金时间点**（app/planner/assist.py）：_create_reminder 先取锚点，取不到直接 raise ValidationError(REMINDER_BOUNDARY)；payload_json / meta_json 都带 anchor；_active_reminders 视图带 anchor / anchor_label；列表行显示「还款日 · 下次 …」。聊天里「提醒我 9 点喝水」不再建对象，回 reminder_anchor_needed + 6 个锚点 chips。
+2. **长期记忆只收与钱有关的事实**（app/memory_extract.py 与 assist._handle_memory）：抽取器在写入前用 scope.is_money_text(key + value) 过滤，不过就 log.info('memory.extract_item_out_of_scope') 丢弃；提示词规则 1 改成「只抽与资金/账户/计划有关的稳定偏好或事实」并加规则 1.1「与钱无关的事一律不记（住址、称呼、天气、兴趣、心情都算），宁可不记」；聊天里「记住我喜欢喝咖啡」回 memory_out_of_scope + 3 个资金向 chips。
+3. **无关请求走边界话术、不建对象**（app/api/routes.py 与 app/planner/intent.py）：_events 在 payment_guard 之后判 parsed.intent == 'unknown' 且 scope.out_of_scope_reply(text) 非空 → 把边界句写进 parsed.question、ok=False，done 帧带 out_of_scope: true；提示词加规则 8「你只处理与钱有关的事……与钱无关的请求不建任何对象：一句话说明你只管账上和计划里的事，再给出最接近的资金动作」。docs/07 §7.1 代码块逐字同步（tests/test_planner.py 逐字断言）。
+
+### 4. 规矩工程化（W1-A，guard-builder）
+
+- scripts/arch_report.py（427 行，纯标准库）：量文件行数、>80 行函数、重名顶层函数、跨层反向依赖、未登记依赖、前端 $('id') 引用缺失；顺带修了 _DECLARED_RE 把 JS 动态赋值当静态声明的 bug。
+- scripts/arch_baseline.json：191 文件 / 32 长函数 / 55 重名组的**存量债记账**；基线语义「不许变坏」，合理增长须 --write-baseline 重新记帐（手改 JSON 会被 test_baseline_limits_are_canonical 拦下）。
+- tests/test_imports.py：**修掉 _exists 的路径拼接缺陷**（APP_DIR 已是 repo/app 却又拼 app/，于是 app.audit → repo/app/app/audit 恒 False，所有子模块依赖消失 —— 这正是该文件长期「全绿」的根因）；补齐 29 个模块 / 115 条真实依赖；新增 UPWARD_EXCEPTIONS（4 条带理由与 TODO(W4)）与「豁免过期即失败」；lru_cache 把该文件从 34.43s 降到 0.31s。
+- tests/test_layers.py（17 条）：API 层禁 decide( / build_action( / can_confirm_here / can_verify_here（文本 + AST 双查）、领域层禁 import planner / tools、policy 层禁 llm / planner / tools / db、白名单过期即失败。
+- tests/test_architecture.py（8 条）：文件行数上限 max(基线, 600)、新长函数失败、重名组增长失败、新缺失 id 失败、新反向依赖失败、新未登记依赖失败，另加两道防作弊门（基线被改松 / 分层清单读不出来都失败）。
+
+### 5. 测试
+
+- 新增 tests/test_money_scope.py（25 条）：classify 8 组、六个锚点与 chips、is_money_text 挡住住址与称呼、「提醒我喝水」零写入、带锚点提醒落库且 meta_json / payload_json 都带 anchor、POST /api/reminders 无锚点 400 且含边界句、记忆快路 memory_out_of_scope 且 agent_memory 零行、抽取器过滤、提示词含规则 8、SSE 无关请求 done.out_of_scope=true 且 plans / dag_runs 不增。
+- 既有用例按新口径调整：提醒示例词从「开会 / 喝水」改成资金示例（会员续费 / 房租到期），记忆示例改成「我不喜欢银行电话推销」；tests/test_memory.py 抽取样例第二条改成「常用商户备注（值超长）」让长度上限真的被测到，同时 MONEY_MARKERS 补「商户 / 商家」。
+- 全量：**1613 passed / 4 skipped / 19.93s**（基线 1560 + 新增 53 条 = money_scope 25 + layers 17 + architecture 8 + imports 3）。
+
+### 6. 前端
+
+- 提醒表单 placeholder 改「例如：每月 25 号会员续费」，卡片说明改成「提醒只记和钱有关的时间点：还款日、会员扣费、预约转账、预算、储蓄目标、额度。只提醒不动钱…」。
+- bxRenderReminders 每条卡多显示 anchor_label（这条提醒盯的是哪笔钱）。scripts/check_frontend.py 66/66；内联 script node --check 通过。
+
+### 7. 规模与文档
+
+- 规模：tests/test_*.py **100**（+3）、tests/ 下 .py 108、app 模块 **82**（+app/scope.py）、app 总行 29,566；库表 33 / 审计事件 66 / API 路径 47 / 工具 35 / 规则 13 均未变。
+- 架构基线（arch_report 首次快照）：长函数 32 个、重名顶层函数 55 组（多出 68 个定义）、跨层反向依赖 4 条（全部进豁免表，W4 清零）、未登记依赖 0、前端 id 引用 109 / 声明 126 / 缺失 0 / 动态白名单 4。
+- 文档：docs/02 登记 app/scope.py 与 tests/test_money_scope.py；docs/07 §7.5 的 POST /api/reminders 补 anchor / anchor_label 与「文案必须含资金锚点，否则 400」，§7.7 提醒卡补 anchor_label；docs/10 补业务边界必测点一行；README 与各报告数字同步到 1618 passed / 100 测试文件 / 82 模块 / 17.62s。
+
+### 9. 收口补记（同一波，收尾时发现问题并修掉）
+
+- **假选项**：`scope.anchor_choices()` 给的 6 个 chip 里有两个点了没反应——`提醒我明天上午 9 点那笔预约转账`、`提醒我生日预算花到 2000 就停` 被 `REMINDER_EXCLUDES`（生日 / 转账 / 转 / 还款…）挡掉。修法：新增 `_REMINDER_TRANSFER_RE`（金额「N 元/块/万」、「转给/汇给/打给/付给」、「给某人转/汇/打/付」），提醒判定改成「命中提醒词且不含排除词 → 提醒；否则有资金锚点且没说金额与收款人 → 仍是提醒」。6 条 chip 现在都真能建成，带钱带人的仍走转账链路。
+- **锚点没显示**：`active_reminders` 页面视图没带 `anchor` / `anchor_label`（只有 `_active_reminders` 内部视图带了），卡片上看不出这条提醒盯的是哪笔钱。已补两个字段，页面多一个「订阅扣费」标签。
+- **提示语半句话**：「已建好提醒：09:00，提醒你「会员续费」」——一次性提醒的 `repeat_label` 就是时:分，念出来像断句。改成「已建好提醒（订阅扣费）：会员续费，下一次 2026-11-25 09:00。重复规则：每月 25 号 09:00，会一直重复到你取消。」
+- 测试：`tests/test_money_scope.py` 追加 `test_every_anchor_choice_really_builds_a_reminder`（6 条 chip 逐个 detect + handle + 列表带 anchor_label + plans 条数）与 `test_reminder_words_do_not_swallow_real_transfers`（4 条不吞转账）；`tests/test_assist_fastpath.py` 的负例「提醒我还信用卡还款」按新口径换成「提醒我给张三转账 100 元」。
+- 浏览器实测（8112 真模型，硬刷新）：表单 placeholder / 卡片说明已换口径；建「每月 25 号会员续费」→ 卡片 tag「每月 1 号 09:00」「订阅扣费」；聊天「提醒我 9 点喝水」→「我只管你账上和计划里的事，这条我不接。」+ 6 条资金锚点 chip；点「订阅扣费提醒」→ 建成「视频会员扣费前一天」；「讲个笑话」→ 边界话术 + 8 条兜底 chip。截图 `tmp/shot_w1_reminder.png`。
+- 收口全量：**1618 passed, 4 skipped in 17.62s**（`tmp/pytest_w1e.log`）；arch 基线按新文件重记（长行数上限写进 `scripts/arch_baseline.json`）。
+
+### 8. 遗留（W2 起处理）
+
+1. ~~REMINDER_EXCLUDES 含「还款 / 转账 / 付款」等词，导致「提醒我…还信用卡」不进口语快路~~ —— 收口前已修：新增 `_REMINDER_TRANSFER_RE` 区分「给谁转多少」与「某时间点提醒」，6 条锚点 chip 全部能一句话建成（`tests/test_money_scope.py::test_every_anchor_choice_really_builds_a_reminder` 钉住）；带金额或「给某人转」的仍走转账链路，不被吞。
+2. 4 条反向依赖（planner.conflict / runner → handoffs、planner.ticker → birthday、plans → birthday）与 8 条领域借道（handoffs / birthday → planner、tools）留在豁免表，W4 拆包时清零。
+3. business.py 三处 can_confirm_here / can_verify_here 目前只是响应字段名，W4 视图归位时改 *_allowed。
+4. 真实短信/人脸仍是桩；提醒未接系统通知；未 push 远程。

@@ -47,9 +47,9 @@ def _plan_status(conn, plan_id: str) -> str:
 @pytest.mark.parametrize(
     ("text", "expected"),
     [
-        ("提醒我明天上午 9 点开会", "reminder"),
-        ("每周三提醒我交房租", "reminder"),
-        ("记得帮我提醒忘带卡", "reminder"),
+        ("提醒我明天上午 9 点会员续费", "reminder"),
+        ("每周三提醒我房租到期", "reminder"),
+        ("记得帮我提醒会员续费", "reminder"),
         ("我存了 500 元", "savings"),
         ("我想攒钱买电脑", "savings"),
     ],
@@ -63,7 +63,8 @@ def test_detect_routes_to_the_right_fast_path(text: str, expected: str) -> None:
     [
         "查一下余额",
         "",  # 空串不能误判成任何一条快路
-        "提醒我还信用卡还款",  # 带「还款」的提醒要留给钱相关流程，不能当纯提醒
+        # 有提醒词、但带收款人与金额：仍归转账链路，不能被提醒快路吞掉
+        "提醒我给张三转账 100 元",
         # 「储蓄卡」是借记卡，不是储蓄目标：查余额/账单绝不能被储蓄快路吃掉
         "查一下我储蓄卡尾号1234的余额",
         "我的储蓄卡余额是多少",
@@ -84,7 +85,7 @@ def test_handle_returns_none_when_nothing_matches(bank) -> None:
 
 
 def test_create_once_reminder_lands_in_the_database(bank) -> None:
-    created = assist.create_reminder(bank, text="提醒我明天上午 9 点开会", user_id=USER_ID)
+    created = assist.create_reminder(bank, text="提醒我明天上午 9 点会员续费", user_id=USER_ID)
     assert created["ok"] is True
     assert created["repeat"] == "none"
     assert created["due_ms"] > 0
@@ -93,12 +94,12 @@ def test_create_once_reminder_lands_in_the_database(bank) -> None:
     items = assist.active_reminders(bank, USER_ID)
     assert [item["plan_id"] for item in items] == [created["plan"]["plan_id"]]
     assert items[0]["state"] == "pending"
-    assert items[0]["title"] == "提醒我明天上午 9 点开会"
+    assert items[0]["title"] == "提醒我明天上午 9 点会员续费"
 
 
 def test_repeating_reminder_computes_next_occurrence_and_label(bank) -> None:
     created = assist.create_reminder(
-        bank, text="提醒我每天喝水", user_id=USER_ID, repeat="daily", hour=8, minute=30
+        bank, text="提醒我每天盯会员续费", user_id=USER_ID, repeat="daily", hour=8, minute=30
     )
     assert created["repeat"] == "daily"
     assert created["repeat_label"] == "每天 08:30"
@@ -108,7 +109,7 @@ def test_repeating_reminder_computes_next_occurrence_and_label(bank) -> None:
 
 
 def test_chat_creates_a_reminder_and_offers_the_next_step(bank) -> None:
-    result = assist.handle(bank, "提醒我明天上午 9 点开会")
+    result = assist.handle(bank, "提醒我明天上午 9 点会员续费")
     assert result is not None
     assert result["intent"] == "assist"
     assert result["summary"].strip()
@@ -118,12 +119,12 @@ def test_chat_creates_a_reminder_and_offers_the_next_step(bank) -> None:
 
 
 def test_cancel_by_matching_title_does_not_touch_money(bank) -> None:
-    assist.handle(bank, "提醒我明天上午 9 点开会")
+    assist.handle(bank, "提醒我明天上午 9 点会员续费")
     items = assist.active_reminders(bank, USER_ID)
     assert len(items) == 1
     plan_id = items[0]["plan_id"]
     before = _balance(bank)
-    result = assist.handle(bank, "取消提醒 提醒我明天上午 9 点开会")
+    result = assist.handle(bank, "取消提醒 提醒我明天上午 9 点会员续费")
     assert result["action"] == "reminder_cancel"
     assert assist.active_reminders(bank, USER_ID) == []
     assert _plan_status(bank, plan_id) == "cancelled"
@@ -131,24 +132,24 @@ def test_cancel_by_matching_title_does_not_touch_money(bank) -> None:
 
 
 def test_cancel_with_several_reminders_asks_which_one(bank) -> None:
-    assist.create_reminder(bank, text="提醒我明天上午 9 点开会", user_id=USER_ID)
-    assist.create_reminder(bank, text="提醒我每天喝水", user_id=USER_ID, repeat="daily")
+    assist.create_reminder(bank, text="提醒我明天上午 9 点会员续费", user_id=USER_ID)
+    assist.create_reminder(bank, text="提醒我每天盯会员续费", user_id=USER_ID, repeat="daily")
     result = assist.handle(bank, "取消提醒")
     assert result["action"] == "reminder_cancel_choose"
     labels = [choice["label"] for choice in result["choices"]]
     # 两条标题不同，按钮就按标题给；点哪个取消哪个（不能取消错的那条）
-    assert any("提醒我每天喝水" in label for label in labels)
-    pick = [c["value"] for c in result["choices"] if "提醒我每天喝水" in c["label"]][0]
+    assert any("提醒我每天盯会员续费" in label for label in labels)
+    pick = [c["value"] for c in result["choices"] if "提醒我每天盯会员续费" in c["label"]][0]
     done = assist.handle(bank, pick)
     assert done["action"] == "reminder_cancel"
     left = assist.active_reminders(bank, USER_ID)
-    assert [item["title"] for item in left] == ["提醒我明天上午 9 点开会"]
+    assert [item["title"] for item in left] == ["提醒我明天上午 9 点会员续费"]
 
 
 def test_same_title_reminders_get_distinguishable_choices(bank) -> None:
-    """连着说两句「提醒我喝水」会建出两条同名提醒：按钮必须能分清点的是哪一条。"""
-    assist.create_reminder(bank, text="提醒我喝水", user_id=USER_ID, repeat="daily", hour=8, minute=0)
-    assist.create_reminder(bank, text="提醒我喝水", user_id=USER_ID, repeat="daily", hour=9, minute=0)
+    """连着说两句「提醒我会员续费」会建出两条同名提醒：按钮必须能分清点的是哪一条。"""
+    assist.create_reminder(bank, text="提醒我会员续费", user_id=USER_ID, repeat="daily", hour=8, minute=0)
+    assist.create_reminder(bank, text="提醒我会员续费", user_id=USER_ID, repeat="daily", hour=9, minute=0)
     result = assist.handle(bank, "我有哪些提醒")
     assert result["action"] == "reminder_list"
     values = [choice["value"] for choice in result["choices"]]
@@ -164,7 +165,7 @@ def test_same_title_reminders_get_distinguishable_choices(bank) -> None:
 
 
 def test_list_reminders_reports_next_due(bank) -> None:
-    assist.create_reminder(bank, text="提醒我每天喝水", user_id=USER_ID, repeat="daily")
+    assist.create_reminder(bank, text="提醒我每天盯会员续费", user_id=USER_ID, repeat="daily")
     result = assist.handle(bank, "我有哪些提醒")
     assert result["action"] == "reminder_list"
     assert "下次" in result["summary"]
@@ -253,7 +254,7 @@ def test_same_title_plans_get_distinguishable_choices(bank) -> None:
 
 @pytest.mark.parametrize(
     "text",
-    ["记住我不喜欢电话推销", "记一下我常用招行那张卡", "你记得我什么", "忘掉记忆「不喜欢电话推销」"],
+    ["记住我不喜欢银行电话推销", "记一下我常用招行那张卡", "你记得我什么", "忘掉记忆「不喜欢银行电话推销」"],
 )
 def test_memory_phrases_route_to_the_memory_fast_path(text: str) -> None:
     assert assist.detect(text) == "memory"
@@ -265,18 +266,18 @@ def test_remember_list_and_forget_only_touch_the_memory_table(bank) -> None:
 
     before = _balance(bank)
 
-    made = assist.handle(bank, "记住我不喜欢电话推销")
+    made = assist.handle(bank, "记住我不喜欢银行电话推销")
     assert made is not None and made["action"] == "memory_remember"
     facts = memory.all_facts(bank, user_id=proactive.default_user_id(bank))
-    assert [fact["key"] for fact in facts] == ["不喜欢电话推销"]
+    assert [fact["key"] for fact in facts] == ["不喜欢银行电话推销"]
     assert facts[0]["kind"] == "preference"
 
     listed = assist.handle(bank, "你记得我什么")
     assert listed is not None and listed["action"] == "memory_list"
-    assert "不喜欢电话推销" in listed["summary"]
+    assert "不喜欢银行电话推销" in listed["summary"]
     assert listed["data"]["memories"]
 
-    forgot = assist.handle(bank, "忘掉记忆「不喜欢电话推销」")
+    forgot = assist.handle(bank, "忘掉记忆「不喜欢银行电话推销」")
     assert forgot is not None and forgot["action"] == "memory_forget"
     assert memory.all_facts(bank, user_id=proactive.default_user_id(bank)) == []
 
@@ -297,7 +298,7 @@ def test_forget_unknown_keeps_everything(bank) -> None:
 
 def test_reminder_still_wins_over_memory_markers(bank) -> None:
     """「提醒我…」里就算带「记」字，也仍然是提醒，不能被记忆快路抢走。"""
-    out = assist.handle(bank, "提醒我明天上午 9 点喝水")
+    out = assist.handle(bank, "提醒我明天上午 9 点会员续费")
 
     assert out is not None and out["action"] == "reminder_create"
 

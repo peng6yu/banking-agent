@@ -19,6 +19,7 @@ import difflib
 from typing import Any, Final
 
 import app.memory as memory
+import app.scope as scope
 from app.clock import ValidationError
 from app.llm import LLMError, build_adapter
 from app.log import log
@@ -83,8 +84,10 @@ SYSTEM_PROMPT: Final[str] = (
     "你是一个记忆整理器。从下面这轮对话里，只挑出**用户自己说出的、以后还用得上的"
     "稳定偏好或事实**，用工具记下来。\n"
     "规则：\n"
-    "1. 只抽用户自己说出的稳定偏好/事实（如「我住杭州」「我喜欢记账」「叫我老王」）；"
-    "助手说的话、你的推测一律不记。\n"
+    "1. 只抽用户自己说出的、与资金/账户/计划有关的稳定偏好或事实"
+    "（如「我常用招商银行那张卡」「记账喜欢按周看」「单笔超过 2000 我会犹豫」"
+    "「不接受电话推销理财」）；助手说的话、你的推测一律不记。\n"
+    "1.1 与钱无关的事一律不记（住址、称呼、天气、兴趣、心情都算），宁可不记。\n"
     "2. 不抽金额、不抽一次性的转账对象或一次性请求（「这次给小王转 200」「帮我查余额」都不记）。\n"
     "3. 不猜：用户没说清的不要补全，宁可不记。\n"
     "4. key 是短标签，value 是一句话；同一件事只出一条。\n"
@@ -167,6 +170,11 @@ def _write_items(conn, user_id: str, items: list[Any]) -> list[dict[str, Any]]:
         key = str(item.get("key") or "").strip()
         value = str(item.get("value") or "").strip()
         if not key or not value:
+            continue
+        # 不变量：这个助手只处理钱的事，长期记忆也只收与资金相关的偏好与事实
+        # （常用卡、记账习惯、预算尺度、常用收款人、风险偏好、还款习惯）。
+        if not scope.is_money_text(key + value):
+            log.info("memory.extract_item_out_of_scope", key=key[:20])
             continue
         kind = str(item.get("kind") or "fact").strip()
         if kind not in memory.KINDS:

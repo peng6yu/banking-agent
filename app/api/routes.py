@@ -30,6 +30,7 @@ import app.memory as memory
 import app.memory_extract as memory_extract
 import app.plans as plans
 import app.proactive as proactive
+import app.scope as scope
 import app.subscriptions as subscriptions
 import app.suitability as suitability
 import app.tools.scheduled as scheduled
@@ -1592,6 +1593,7 @@ async def _events(
     queue: asyncio.Queue[str | tuple[str, dict[str, Any]]] = asyncio.Queue()
     # 纵深防御：即便将来有人重构掉意图层的 guard，接口层也拿原话再挡一次。
     # 命中时改的是同一个 IntentResult，SSE 的 intent 帧与审计都看得到原因。
+    out_of_scope = False
     if user_text:
         risk = payment_guard.inspect(user_text)
         if risk.ambiguous and not (
@@ -1600,6 +1602,14 @@ async def _events(
             parsed.question = parsed.question or risk.question
             parsed.guard_reason = parsed.guard_reason or risk.reason
             parsed.ok = False
+        # 业务边界：这个助手只处理钱的事。与钱无关的请求既不建对象也不走 DAG，
+        # 只说明边界并给出最接近的资金动作（app/scope.py 是唯一出处）。
+        if parsed.intent == "unknown":
+            boundary = scope.out_of_scope_reply(user_text)
+            if boundary:
+                parsed.question = boundary
+                parsed.ok = False
+                out_of_scope = True
     await queue.put(("start", {"session_id": session_id, "now_ms": clock.now_ms()}))
     await queue.put(("intent", parsed.to_event() | {"session_id": session_id}))
     if parsed.intent == "assist":
@@ -1616,6 +1626,7 @@ async def _events(
                 {
                     "summary": parsed.question,
                     "question": parsed.question,
+                    "out_of_scope": out_of_scope,
                     "choices": await asyncio.to_thread(_choices_for, parsed),
                 },
             )

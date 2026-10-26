@@ -4,6 +4,7 @@
 1. 意图是给模型填槽位用的，储蓄/提醒的槽位（每月存多少、哪一天提醒）模型经常漏，
    漏了就只能一轮轮反问——用户看到的正是「你要转给谁」这种答非所问；
 2. 这两件事都是确定性操作，不涉及资金动作，也不需要 DAG：能算的就不该让模型猜；
+   但「提醒」必须挂在资金时间点上（还款/扣费/预约/预算/储蓄/额度），见 app/scope.py；
 3. 不新增 intent 名，避免牵动知识库意图规则、schema 断言和工具计数（35 个）。
 
 所以这里是一条「识别即执行」的快路：命中就返回一句人话 + 可点选项，
@@ -22,6 +23,8 @@ from typing import Any, Final
 
 import app.audit as audit
 import app.plans as plans
+import app.scope as scope
+from app.clock import ValidationError
 import app.proactive as proactive
 import app.reminder_time as reminder_time
 import app.memory as memory
@@ -33,6 +36,13 @@ from app.money import fen_to_yuan_str
 REMINDER_MARKERS: Final[tuple[str, ...]] = ("提醒", "记得", "别忘", "叫我", "到点", "闹钟")
 REMINDER_EXCLUDES: Final[tuple[str, ...]] = (
     "生日", "转账", "转", "汇款", "付款", "支付", "申购", "赎回", "还款",
+)
+# 例外：「提醒我明天上午 9 点那笔预约转账」有提醒意图、有资金锚点、又没说金额与收款人，
+# 是在给一笔既存的钱设时间点，不是要现在转钱。只要出现金额或「给某人转」就仍判给转账链路。
+_REMINDER_TRANSFER_RE: Final[re.Pattern[str]] = re.compile(
+    r"\d+(?:\.\d+)?\s*(?:元|块|万)"
+    r"|(?:转给|汇给|打给|付给)"
+    r"|给[\u4e00-\u9fa5]{2,4}\s*(?:转|汇|打|付)"
 )
 
 # 「储蓄」不能单独当关键词：储蓄卡=借记卡，「查一下储蓄卡余额」会被吞成储蓄目标。
@@ -208,10 +218,12 @@ def detect(text: str) -> str | None:
     if _MEM_LIST_RE.search(clean) or _MEM_FORGET_RE.search(clean):
         return "memory"
     # 提醒优先：「提醒我每月存 100」是提醒，不是建储蓄目标。
-    if any(word in clean for word in REMINDER_MARKERS) and not any(
-        word in clean for word in REMINDER_EXCLUDES
-    ):
-        return "reminder"
+    if any(word in clean for word in REMINDER_MARKERS):
+        if not any(word in clean for word in REMINDER_EXCLUDES):
+            return "reminder"
+        # 有锚点、又没有金额/收款人：这是给既存的钱设时间点，不是要现在动钱。
+        if scope.reminder_anchor(clean) and not _REMINDER_TRANSFER_RE.search(clean):
+            return "reminder"
     # 逐笔核实订阅：要有动作词 + 对象词，或者用户直接下结论（「不是我订的」）。
     # 放在储蓄判断之前：这两句的用词不重叠，但「核实」比「存」更该优先。
     if (
@@ -332,6 +344,17 @@ def _handle_memory(conn, text: str, user_id: str) -> dict[str, Any]:
                 "action": "memory_remember_empty",
                 "choices": [
                     {"label": "记住我不喜欢电话推销", "value": "记住我不喜欢电话推销"},
+                    {"label": "你记得我什么", "value": "你记得我什么"},
+                ],
+                "data": {"memories": facts},
+            }
+        if not scope.is_money_text(body):
+            return {
+                "summary": scope.MEMORY_BOUNDARY,
+                "action": "memory_out_of_scope",
+                "choices": [
+                    {"label": "记住我常用招商银行那张卡", "value": "记住我常用招商银行那张卡"},
+                    {"label": "记住我记账喜欢按周看", "value": "记住我记账喜欢按周看"},
                     {"label": "你记得我什么", "value": "你记得我什么"},
                 ],
                 "data": {"memories": facts},
@@ -669,6 +692,11 @@ def _create_reminder(
     weekday: int | None = None,
     session_id: str | None = None,
 ) -> dict[str, Any]:
+    # 不变量：提醒是「资金时间轴」上的一件事，必须能说出它盯的是哪笔钱。
+    # 没有锚点（还款/扣费/预约/预算/储蓄/额度）就不建 —— 见 app/scope.py。
+    anchor = scope.reminder_anchor(text)
+    if not anchor:
+        raise ValidationError(scope.REMINDER_BOUNDARY)
     now = int(time.time() * 1000)
     if repeat not in reminder_time.REPEATS:
         repeat = "none"
@@ -687,6 +715,7 @@ def _create_reminder(
         "repeat": repeat,
         "hour": int(hour),
         "minute": int(minute),
+        "anchor": anchor,
     }
     if day is not None:
         payload["day"] = int(day)
@@ -697,7 +726,7 @@ def _create_reminder(
         user_id=user_id,
         title=f"提醒：{text}",
         steps=[{"kind": "reminder", "title": text, "payload": payload, "due_ms": int(due_ms)}],
-        meta={"source": "assist", "reminder": True, "repeat": repeat},
+        meta={"source": "assist", "reminder": True, "repeat": repeat, "anchor": anchor},
     )
     label = reminder_time.label(repeat, hour, minute, day, weekday)
     return {
@@ -707,6 +736,8 @@ def _create_reminder(
         "due_text": reminder_time.time_text(due_ms),
         "repeat": repeat,
         "repeat_label": label,
+        "anchor": anchor,
+        "anchor_label": scope.anchor_label(anchor),
     }
 
 
@@ -766,6 +797,8 @@ def _active_reminders(conn, user_id: str) -> list[dict[str, Any]]:
         view["due_ms"] = due_ms
         view["due_text"] = reminder_time.time_text(due_ms) if due_ms else ""
         view["state"] = str(row["step_state"] or "")
+        view["anchor"] = str(payload.get("anchor") or "")
+        view["anchor_label"] = scope.anchor_label(view["anchor"])
         view["repeat_label"] = reminder_time.label(
             str(view["repeat"]),
             int(payload.get("hour") or 9),
@@ -809,6 +842,10 @@ def active_reminders(conn, user_id: str) -> list[dict[str, Any]]:
                 "due_ms": int(step.get("due_ms") or 0),
                 "due_text": str(step.get("due_text") or ""),
                 "state": str(step.get("state") or ""),
+                # 这条提醒盯的是哪笔钱（还款日 / 会员扣费 / 预约转账 / 预算 / 储蓄目标 / 额度），
+                # 页面拿它当标签显示；老提醒没有这个字段就留空。
+                "anchor": str(payload.get("anchor") or ""),
+                "anchor_label": scope.anchor_label(str(payload.get("anchor") or "")),
             }
         )
     return items
@@ -954,7 +991,10 @@ def _handle_reminder(conn, text: str, user_id: str) -> dict[str, Any]:
         lines = []
         for title, item in list(soonest.items())[:5]:
             extra = f"（同名 {counts[title]} 条）" if counts[title] > 1 else ""
-            lines.append(f"「{title}」下次 {item.get('due_text') or '—'}{extra}")
+            anchor = str(item.get("anchor_label") or "")
+            lines.append(
+                f"「{title}」{anchor + ' · ' if anchor else ''}下次 {item.get('due_text') or '—'}{extra}"
+            )
         return {
             "intent": "assist",
             "action": "reminder_list",
@@ -962,6 +1002,16 @@ def _handle_reminder(conn, text: str, user_id: str) -> dict[str, Any]:
             # 列表本身也要给动作：只报「你有这些提醒」等于让用户自己再打一句。
             "choices": _reminder_cancel_choices(reminders),
             "data": {"reminders": reminders},
+        }
+
+    anchor = scope.reminder_anchor(clean)
+    if not anchor:
+        return {
+            "intent": "assist",
+            "action": "reminder_anchor_needed",
+            "summary": scope.REMINDER_BOUNDARY,
+            "choices": scope.anchor_choices(),
+            "data": {"anchor": ""},
         }
 
     repeat = _parse_repeat(clean)
@@ -982,9 +1032,13 @@ def _handle_reminder(conn, text: str, user_id: str) -> dict[str, Any]:
     )
     label = created["repeat_label"]
     when = created["due_text"]
-    summary = f"已建好提醒：{label}，提醒你「{title}」。下一次：{when}。"
+    anchor_text = created.get("anchor_label") or scope.anchor_label(str(created.get("anchor") or ""))
+    anchor_part = f"（{anchor_text}）" if anchor_text else ""
+    # 一次性提醒只有「09:00」这种时间标签，念出来像半句话；直接用具体日期。
+    when_part = f"下一次 {when}" if repeat["repeat"] != "none" else when
+    summary = f"已建好提醒{anchor_part}：{title}，{when_part}。"
     if repeat["repeat"] != "none":
-        summary += "这条会一直重复，直到你取消。"
+        summary += f"重复规则：{label}，会一直重复到你取消。"
     return {
         "intent": "assist",
         "action": "reminder_create",

@@ -233,7 +233,8 @@ def test_extract_writes_facts_but_never_raises(conn) -> None:
         _tool_response(
             [
                 {"key": "常去商户", "value": "乐刻健身", "kind": "fact"},
-                {"key": "超长", "value": "v" * (memory.VALUE_MAX + 5), "kind": "fact"},
+                # 与钱有关但值超长：应当被长度上限挡掉（边界过滤不该替长度检查挡枪）
+                {"key": "常用商户备注", "value": "v" * (memory.VALUE_MAX + 5), "kind": "fact"},
             ]
         )
     )

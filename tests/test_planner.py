@@ -167,7 +167,9 @@ def _doc_blocks() -> list[str]:
 def test_system_prompt_is_verbatim_from_docs() -> None:
     blocks = _doc_blocks()
     assert any(block == intent.SYSTEM_PROMPT for block in blocks), "SYSTEM_PROMPT 必须逐字等于 docs/07 7.1 原文"
-    assert intent.SYSTEM_PROMPT.endswith("不要输出英文错误码或堆栈。\n")
+    # 最后一条是业务边界（只处理钱的事）：与 docs/07 7.1 的末行一起钉住，
+    # 防止有人只在代码里加规则、忘了同步文档。
+    assert intent.SYSTEM_PROMPT.endswith("再给出最接近的资金动作。\n")
 
 
 # ---------------------------------------------------------------- 7.2 emit_intent

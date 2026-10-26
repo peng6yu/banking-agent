@@ -852,7 +852,7 @@
       <div class="card"><div class="card-head"><h3>提醒</h3><span class="spacer"></span><span class="tag" id="plan-alert-tag">—</span></div>
         <form id="plan-reminder-form" class="pf-form" autocomplete="off">
           <label class="pf-field"><span class="field-label">提醒我</span>
-            <input id="plan-reminder-text" class="pf-in" type="text" maxlength="40" placeholder="例如：明天上午 9 点开会" />
+            <input id="plan-reminder-text" class="pf-in" type="text" maxlength="40" placeholder="例如：每月 25 号会员续费" />
           </label>
           <div class="pf-row">
             <label class="pf-field"><span class="field-label">时间</span>
@@ -870,7 +870,7 @@
           <div class="pf-row">
             <button id="plan-reminder-submit" class="btn btn-green" type="submit">建这条提醒</button>
           </div>
-          <div class="card-note">时间按本机时区解释；重复提醒到点只提醒、不动钱。建好以后在下面的列表里可以点「结束」。不填时间按明天 09:00 算。</div>
+          <div class="card-note">提醒只记和钱有关的时间点：还款日、会员扣费、预约转账、预算、储蓄目标、额度。只提醒不动钱；建好以后在下面的列表里可以点「结束」。时间按本机时区解释，不填按明天 09:00 算。</div>
         </form>
         <div id="plan-reminders"></div>
         <div id="plan-alerts"></div>
@@ -4714,6 +4714,8 @@
       const head = el('div', 'anomaly-head');
       head.appendChild(el('span', 'anomaly-title', textOf(item.title)));
       head.appendChild(el('span', 'tag info', textOf(item.repeat_label) || BX_REPEAT_TEXT[textOf(item.repeat)] || '一次性'));
+      // 这条提醒盯的是哪笔钱：还款日 / 会员扣费 / 预约转账 / 预算 / 储蓄目标 / 额度
+      if (textOf(item.anchor_label)) { head.appendChild(el('span', 'tag', textOf(item.anchor_label))); }
       box.appendChild(head);
       box.appendChild(el('div', 'card-note',
         '下次 ' + (textOf(item.due_text) || BX_NA) + ' · ' + (textOf(item.state_label) || textOf(item.state)) +

@@ -75,13 +75,13 @@ def test_monthly_clamps_to_last_day_of_short_month() -> None:
 
 def test_next_from_payload_reads_the_same_fields_the_step_stores() -> None:
     now = _ms(2026, 10, 25, 10, 0)
-    payload = {"text": "喝水", "repeat": "daily", "hour": 8, "minute": 15}
+    payload = {"text": "会员续费", "repeat": "daily", "hour": 8, "minute": 15}
     assert _dt(reminder_time.next_from_payload(payload, now)) == datetime(2026, 10, 26, 8, 15)
 
 
 def test_next_from_payload_returns_none_for_one_shot() -> None:
     # 一次性提醒响过就结束：返回 None 是「不要再排下一次」的信号，不是错误
-    assert reminder_time.next_from_payload({"text": "开会", "repeat": "none"}, 0) is None
+    assert reminder_time.next_from_payload({"text": "还款", "repeat": "none"}, 0) is None
 
 
 def test_time_text_is_minute_precision() -> None:
