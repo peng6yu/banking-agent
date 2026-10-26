@@ -29,7 +29,8 @@ import app.proactive as proactive
 import app.reminder_time as reminder_time
 import app.memory as memory
 import app.subscriptions as subscriptions
-from app.money import fen_to_yuan_str
+from app.money import fen_to_yuan_str, yuan_short
+import app.timefmt as timefmt
 
 # 命中提醒的动词；「生日」和「转账」不在此列：生日计划有独立链路，
 # 「提醒我转账」如果只建个提醒反而把真正的资金动作吞掉了。
@@ -409,11 +410,6 @@ def _active_goals(conn, user_id: str) -> list[dict[str, Any]]:
     return proactive.list_goals(conn, user_id=user_id, status="active", limit=20)
 
 
-def _yuan_label(fen: int) -> str:
-    text = f"{fen / 100:.2f}".rstrip("0").rstrip(".")
-    return text or "0"
-
-
 def _savings_summary(goal: dict[str, Any]) -> str:
     return (
         f"已建好储蓄目标「{goal['name']}」：目标 {goal['target_yuan']} 元，"
@@ -553,7 +549,7 @@ def _handle_savings(conn, text: str, user_id: str) -> dict[str, Any]:
     if saved > target:
         saved = 0
     purpose = _parse_purpose(clean)
-    name = purpose or f"每月存 {_yuan_label(monthly)} 元"
+    name = purpose or f"每月存 {yuan_short(monthly)} 元"
     name = name[:20]
     created = proactive.create_goal(
         conn,
@@ -851,17 +847,6 @@ def active_reminders(conn, user_id: str) -> list[dict[str, Any]]:
     return items
 
 
-def _stamp_text(ms: Any) -> str:
-    """把毫秒时间戳写成「10-26 08:00」：同名计划/提醒只能靠时间与编号区分。"""
-    try:
-        value = int(ms or 0)
-    except (TypeError, ValueError):
-        return ""
-    if value <= 0:
-        return ""
-    return time.strftime("%m-%d %H:%M", time.localtime(value / 1000))
-
-
 def _reminder_cancel_choices(reminders: list[dict[str, Any]]) -> list[dict[str, str]]:
     """每条提醒一个「取消」chip，最多 8 个。
 
@@ -902,7 +887,7 @@ def _plan_cancel_choices(plans_: list[dict[str, Any]]) -> list[dict[str, str]]:
         title = str(plan.get("title") or "")
         plan_id = str(plan.get("plan_id") or "")
         if counts.get(title, 0) > 1 and plan_id:
-            when = _stamp_text(plan.get("updated_ms") or plan.get("created_ms"))
+            when = timefmt.stamp_text(plan.get("updated_ms") or plan.get("created_ms"))
             tail = f"{when} · {plan_id}" if when else plan_id
             options.append({"label": f"结束「{title}」（{tail}）", "value": f"取消计划 {plan_id}"})
         else:

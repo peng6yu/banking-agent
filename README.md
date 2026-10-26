@@ -117,9 +117,9 @@ make run     # 启动日志会打印一条带 #token= 的地址，打开那一�
 | 4 | **生日计划一次性预约授权**（P1） | 新增 `plan_authorizations`：绑定 `plan_version` + 账户 + 项目 + 金额，创建计划时用户显式勾选才保存；到点执行前重判，仅**仍合法的黄色**可用预授权自动执行，升级为红色或参数变化必须暂停并要求强验证/用户确认；取消计划即撤销授权，后台不再启动付款 | `tests/test_birthday_authorization.py`、`tests/test_birthday_api_authorization.py`（4 条：预留改变 available 不改 balance、授权行绑定计划版本、到期窗口前后、红日不自动扣） |
 | 5 | **沙箱条款的合规说明**（P1） | 审查完整调用链后确认主 Agent **不执行任意模型生成代码**（无 `eval`/`exec`，模型输出只进结构化参数）；`scripts/prove_no_exec_surface.py` 实测 75 文件 / 25,383 行、代码执行面 0 命中、出网 3 处（仅 `app/llm.py`）、动态 SQL 13 处逐条人工复核、离线 `subprocess` 9 处全部在测试/脚本侧；这是「消除执行面」的替代设计，**不是已部署的容器沙箱**，未宣称已实现沙箱 | `docs/security_sandbox.md`（149 行，含逐跳调用链 file:line 与剩余风险）、`tests/test_no_exec_surface.py`（14 条） |
 | 6 | **A/B 配对统计与浏览器回归**（P1） | 8 轮完整真实 80 例（mock=false）做配对统计：逐轮 intent B−A 为 −1.25 / +2.50 / 0 / +2.50 / +5.00（MiniMax）与 +5.00 / −2.50 / +8.75（DeepSeek），**符号翻转**；同配置 A 组复跑极差 6.25pp / 11.25pp；仅一轮的 +8.75pp 配对 bootstrap CI[+2.50,+16.25] 不含 0，但属单轮单次采样；**稳定成立的是知识引用（B 41–42/51 vs A=0），不宣称知识层稳定提升准确率** | `docs/benchmark/ab_paired_stats.md`、`scripts/ab_stats.py`；浏览器 7 条旅程由当前 `scripts/ui_journeys.py` 实际执行、失败 0（j3 单独用真模型后端，J4/J5 为 API 驱动流程级），见 `docs/交付/browser_journeys.json` 与 `docs/benchmark/browser_journey_audit.md` |
-| 7 | **交付材料统一** | 重新生成 `docs/benchmark/release_manifest.json`（从代码与运行日志取数），README / 验收报告 / 优先级 / 提交物对照表 / PPT 大纲 / 演示方案 / PROGRESS 全部引用同一份事实；旧数字一律标「历史基线」不删除 | 本轮最终验证：**pytest 1618 passed / 4 skipped**、红队 **43/43**、e2e **13/13**、浏览器旅程 **7/7**（全部 exit 0） |
+| 7 | **交付材料统一** | 重新生成 `docs/benchmark/release_manifest.json`（从代码与运行日志取数），README / 验收报告 / 优先级 / 提交物对照表 / PPT 大纲 / 演示方案 / PROGRESS 全部引用同一份事实；旧数字一律标「历史基线」不删除 | 本轮最终验证：**pytest 1632 passed / 4 skipped**、红队 **43/43**、e2e **13/13**、浏览器旅程 **7/7**（全部 exit 0） |
 
-本轮规模（实测）：测试文件 **100**（`tests/test_*.py`；`tests/` 下 `.py` 文件共 108 个，含 8 个夹具/辅助文件）、数据库表 **33**、工具 **35**（只读 13 / 写 22）、审计事件 **66**、权限规则 **13**、API 路径 **47**。
+本轮规模（实测）：测试文件 **102**（`tests/test_*.py`；`tests/` 下 `.py` 文件共 110 个，含 8 个夹具/辅助文件）、数据库表 **33**、工具 **35**（只读 13 / 写 22）、审计事件 **66**、权限规则 **13**、API 路径 **47**。
 
 **必须主动交代的限制**：真实短信/人脸渠道尚未接入（未声明 `FACTOR_PROVIDER` 时 `issue()` 直接 503，不落挑战）；人工接管是本地操作员队列，`operator` 仅为审计字符串、无 RBAC、不对接坐席系统；沙箱是「不执行生成代码」的架构选择而非容器隔离；A/B 每轮单次采样，配对 bootstrap 只估计样本层面差值，不能替代重复采样方差。
 ## 快速开始（评委复现路径）
@@ -332,7 +332,7 @@ curl -s http://127.0.0.1:8000/api/audit/verify
 ### 单元与集成测试（实测全绿，用例数持续增补）
 
 ```bash
-python3.12 -m pytest -q tests/            # 1618 passed, 4 skipped（2026-10-25 逐笔核实与会话记忆轮复跑；历史基线为 1336 passed / 4 skipped）
+python3.12 -m pytest -q tests/            # 1632 passed, 4 skipped（2026-10-25 逐笔核实与会话记忆轮复跑；历史基线为 1336 passed / 4 skipped）
 ```
 
 > **数字口径**：本 README 里的工具数、表数、审计事件数、测试通过数与 A/B 轮次，
@@ -408,7 +408,7 @@ python3.12 -m app.smoke                    # 实测 4/4 PASS，主脑延迟约 1
 | `app/tools/` | 35 个工具：查人、查余额、账单、卡片、订阅、转账、资金冻结 + 7 个主动财务（只读/需确认，无动钱语义） |
 | `app/api/` | 会话/确认/审计等 47 条 API 路径（46 条 `/api/*` + 根路径 `/`），含人工接管队列 `handoffs_api.py`；另有只读业务视图 `business.py`（overview / bill / management / plans / executions 五个 GET，六个区域的唯一数据来源） |
 | `web/index.html` | 单文件前端（原生 JS，无框架、无 CDN、零外链） |
-| `tests/` | pytest 用例集（**1618 passed / 4 skipped**，2026-10-25 逐笔核实与会话记忆轮复跑；历史基线 1336）+ 43 条红队 YAML + `tests/eval/` 80 例 A/B 评估集（10-24 共 8 轮真实结果已入库，统计见 `docs/benchmark/ab_paired_stats.md`） |
+| `tests/` | pytest 用例集（**1632 passed / 4 skipped**，2026-10-25 逐笔核实与会话记忆轮复跑；历史基线 1336）+ 43 条红队 YAML + `tests/eval/` 80 例 A/B 评估集（10-24 共 8 轮真实结果已入库，统计见 `docs/benchmark/ab_paired_stats.md`） |
 | `scripts/` | 种子脚本、前端合规检查器、真实 Chromium 冒烟(`browser_smoke.py`)、六区+主线截图(`ui_screenshots.py`) |
 | `docs/` | 交接规格书 00—10（改造前基线，写代码前必读）+ 11—15 改造设计与验收 + 答辩与演示交付件 |
 | `规划/` | 前期选型与模型实测记录 |
@@ -422,7 +422,7 @@ python3.12 -m app.smoke                    # 实测 4/4 PASS，主脑延迟约 1
 | `make setup` | 一键配置新电脑（.venv + 依赖 + .env + 选模型 + 建库 + 自检） | ✅ 幂等；`ARGS="--dry-run"` 可预演 |
 | `make run` | 启动服务（--reload） | ✅ |
 | `make seed` | 建库 + 种子（幂等） | ✅ |
-| `make test` | pytest 全跑 | ✅ 全绿（1618 passed / 4 skipped，2026-10-25 逐笔核实与会话记忆轮实测；历史基线 1336） |
+| `make test` | pytest 全跑 | ✅ 全绿（1632 passed / 4 skipped，2026-10-25 逐笔核实与会话记忆轮实测；历史基线 1336） |
 | `make smoke` | 模型连通性自检 | ✅ 4/4 |
 | `make cov` | 覆盖率（未装 pytest-cov 时自动退回纯跑） | ✅ |
 | `make reset` | `POST /api/demo/reset` 演示前清场 | ✅ |

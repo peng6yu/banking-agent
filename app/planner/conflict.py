@@ -15,10 +15,9 @@
 from __future__ import annotations
 
 import sqlite3
-from datetime import datetime
 from typing import Any, Final
 
-from app import audit, clock, db
+from app import audit, clock, db, timefmt
 from app.models import Dag
 from app.tools.registry import WRITE_TOOL_NAMES
 
@@ -28,10 +27,6 @@ UNFINISHED_RUN_STATES: Final[tuple[str, ...]] = ("running", "waiting")
 BUSY_NODE_STATES: Final[tuple[str, ...]] = ("pending", "running", "waiting_confirm", "waiting_factor")
 CONFLICT_CODE: Final[str] = "SESSION_RUN_CONFLICT"
 MAX_REPORTED_RUNS: Final[int] = 5
-
-
-def _time_text(ms: int) -> str:
-    return datetime.fromtimestamp(int(ms) / 1000).strftime("%Y-%m-%d %H:%M")
 
 
 def new_write_tools(dag: Dag) -> list[str]:
@@ -71,7 +66,7 @@ def _run_detail(conn: sqlite3.Connection, row: Any, now_ms: int) -> dict[str, An
         "run_id": str(row["id"]),
         "status": str(row["status"]),
         "created_ms": int(row["created_ms"]),
-        "created_text": _time_text(int(row["created_ms"])),
+        "created_text": timefmt.minute_text(int(row["created_ms"])),
         "pending_confirmations": pending,
         "write_nodes": busy,
     }

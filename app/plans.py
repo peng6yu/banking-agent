@@ -21,10 +21,9 @@ check 步的条件不满足时不会一直原地重试：按 repeat_ms 往后推
 from __future__ import annotations
 
 import json
-from datetime import datetime
 from typing import Any, Final
 
-from app import audit, clock, db, ids, proactive, reminder_time
+from app import audit, clock, db, ids, proactive, reminder_time, timefmt
 
 PLAN_STATUSES: Final[tuple[str, ...]] = ("active", "paused", "completed", "cancelled", "failed")
 STEP_KINDS: Final[tuple[str, ...]] = ("check", "action", "reminder")
@@ -52,10 +51,6 @@ ACTION_HANDOFF: Final[str] = "到期了，但这一步要动钱：已生成待�
 
 
 # --------------------------------------------------------------------------- 读写
-
-
-def _time_text(ms: int) -> str:
-    return datetime.fromtimestamp(ms / 1000).strftime("%Y-%m-%d %H:%M")
 
 
 def _dump(payload: Any) -> str:
@@ -90,7 +85,7 @@ def step_view(row: Any) -> dict[str, Any]:
         "title": str(row["title"]),
         "state": str(row["state"]),
         "due_ms": int(row["due_ms"]),
-        "due_text": _time_text(int(row["due_ms"])),
+        "due_text": timefmt.minute_text(int(row["due_ms"])),
         "attempts": int(row["attempts"]),
         "max_attempts": int(row["max_attempts"]),
         "last_error": str(row["last_error"] or ""),

@@ -12,7 +12,6 @@ BankError 处理器统一翻成 400 + 中文 user_text，包一层反而会把�
 
 from __future__ import annotations
 
-from contextlib import closing
 from typing import Any, Final, Literal
 
 from fastapi import APIRouter, Depends
@@ -46,14 +45,10 @@ class MemoryWriteRequest(BaseModel):
     source: str = Field(default="", max_length=SOURCE_MAX, description="来源，如 user")
 
 
-def _conn() -> Any:
-    return db.connect()
-
-
 @router.get("")
 def list_memory() -> dict[str, Any]:
     """这个用户现在被记住了什么。prompt_block 原样给前端，方便对照提示词里到底注入了什么。"""
-    with closing(_conn()) as conn:
+    with db.open_conn() as conn:
         user_id = default_user_id(conn)
         facts = memory.all_facts(conn, user_id=user_id, limit=LIST_LIMIT)
         return {
@@ -67,7 +62,7 @@ def list_memory() -> dict[str, Any]:
 @router.post("")
 def write_memory(body: MemoryWriteRequest) -> dict[str, Any]:
     """手动记一条；同一个 key 覆盖旧的，不新增长期记忆行。"""
-    with closing(_conn()) as conn:
+    with db.open_conn() as conn:
         user_id = default_user_id(conn)
         fact = memory.remember(
             conn,
@@ -83,7 +78,7 @@ def write_memory(body: MemoryWriteRequest) -> dict[str, Any]:
 @router.delete("/{key}")
 def delete_memory(key: str) -> dict[str, Any]:
     """忘掉一条；本来就没有也返回 ok，removed=False 说明没什么可忘的。"""
-    with closing(_conn()) as conn:
+    with db.open_conn() as conn:
         user_id = default_user_id(conn)
         result = memory.forget(conn, user_id=user_id, key=key)
         return {"ok": True, "key": result["key"], "removed": result["removed"]}

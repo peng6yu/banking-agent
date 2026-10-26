@@ -395,7 +395,7 @@ def _mask_phone(phone: str | None) -> str | None:
 @router.post("/api/factor/challenge")
 async def factor_challenge(request: FactorChallengeRequest) -> dict[str, Any]:
     """签发多因子挑战：真正的放行依据在服务端，前端只拿得到挑战号和一次验证码。"""
-    with _conn() as conn:
+    with db.open_conn() as conn:
         row = conn.execute(
             "SELECT * FROM confirmations WHERE id = ? AND session_id = ?",
             (request.confirmation_id, request.session_id),
@@ -506,7 +506,7 @@ def _card_view(conn: Any, row: Any) -> dict[str, Any]:
 @router.get("/api/session/{session_id}")
 async def session(session_id: str) -> dict[str, Any]:
     """查会话：节点状态、待确认卡片、当前余额。"""
-    with _conn() as conn:
+    with db.open_conn() as conn:
         head = conn.execute("SELECT * FROM sessions WHERE id = ?", (session_id,)).fetchone()
         if head is None:
             return {"session_id": session_id, "found": False}
@@ -545,7 +545,7 @@ async def session(session_id: str) -> dict[str, Any]:
 @router.get("/api/audit")
 async def audit_trail(session_id: str, limit: int = 100) -> dict[str, Any]:
     """审计链：既能看链还完不完整，也能看这条会话每一步为什么这么判。"""
-    with _conn() as conn:
+    with db.open_conn() as conn:
         rows = conn.execute(
             "SELECT seq, ts_ms, event_type, payload_json FROM audit_log WHERE session_id = ?"
             " ORDER BY seq LIMIT ?",
@@ -572,7 +572,7 @@ async def audit_trail(session_id: str, limit: int = 100) -> dict[str, Any]:
 @router.get("/api/audit/verify")
 async def audit_verify() -> dict[str, Any]:
     """答辩演示用：一眼看出哈希链还完不完整。"""
-    with _conn() as conn:
+    with db.open_conn() as conn:
         return {
             "ok": audit.verify_chain(conn),
             "head": audit.chain_head(conn),
@@ -595,7 +595,7 @@ async def scheduled_challenge(
 
     挑战绑定 sched:<id>，复用一次就作废——它不能拿去给别的转账当证明。
     """
-    with _conn() as conn, db.tx(conn):
+    with db.open_conn() as conn, db.tx(conn):
         return scheduled.challenge_scheduled(conn, scheduled_id, request.factor)
 
 
@@ -604,7 +604,7 @@ async def scheduled_verify(
     scheduled_id: str, request: ScheduledVerifyRequest
 ) -> dict[str, Any]:
     """补一次强验证并立即尝试执行这笔预约（执行前仍会重新裁决）。"""
-    with _conn() as conn, db.tx(conn):
+    with db.open_conn() as conn, db.tx(conn):
         return scheduled.verify_and_execute(
             conn, scheduled_id, proofs=request.proofs
         )
@@ -618,7 +618,7 @@ async def reset_demo(request: ResetRequest | None = None) -> dict[str, Any]:
     for session_id in executor.active_sessions():
         executor.close(session_id)
     _history.clear()
-    with _conn() as conn, db.tx(conn):
+    with db.open_conn() as conn, db.tx(conn):
         seed(conn)
         balance = _rewind_demo(conn)
     return {
@@ -656,7 +656,7 @@ def _rewind_demo(conn: Any) -> tuple[str | None, int | None]:
 @router.post("/api/savings/goals")
 async def create_savings_goal(request: SavingsGoalCreate) -> dict[str, Any]:
     """建储蓄目标：同时落一条进度监测规则，给了预算再加预算规则。写审计。"""
-    with _conn() as conn, db.tx(conn):
+    with db.open_conn() as conn, db.tx(conn):
         user_id = proactive.default_user_id(conn)
         created = proactive.create_goal(
             conn,
@@ -682,7 +682,7 @@ async def list_savings_goals(status: str | None = None, limit: int = 20) -> dict
     """目标列表 + 进度；status=all 时连已达成/已取消的一起给。"""
     if limit < 1 or limit > proactive.MAX_LIMIT:
         raise ValidationError("limit 超出范围", field="limit", minimum=1, maximum=proactive.MAX_LIMIT)
-    with _conn() as conn:
+    with db.open_conn() as conn:
         user_id = proactive.default_user_id(conn)
         goals = proactive.list_goals(
             conn,
@@ -696,7 +696,7 @@ async def list_savings_goals(status: str | None = None, limit: int = 20) -> dict
 @router.post("/api/reminders")
 async def create_reminder(request: ReminderCreate) -> dict[str, Any]:
     """建一条提醒：页面上的表单和聊天里的自然语言走同一个落库函数。"""
-    with _conn() as conn, db.tx(conn):
+    with db.open_conn() as conn, db.tx(conn):
         user_id = proactive.default_user_id(conn)
         created = await asyncio.to_thread(
             assist.create_reminder,
@@ -728,7 +728,7 @@ async def subscription_verdict(request: SubscriptionVerdictRequest) -> dict[str,
     去商户退订。两种结论都会让这条推断从管理页的「疑似订阅」待办里消失——
     「不是我订的」是误报，「确实是我订的」是确认，都不该继续挂着当待办。
     """
-    with _conn() as conn:
+    with db.open_conn() as conn:
         user_id = proactive.default_user_id(conn)
         verdict = subscriptions.record_verdict(
             conn,
@@ -747,7 +747,7 @@ async def subscription_verdict_clear(request: SubscriptionVerdictClearRequest) -
     同样是只改一行 + 写审计：如果流水仍然满足周期性条件，这条会立刻回到管理
     页的「疑似订阅」里；已经不满足的就自然不再出现。
     """
-    with _conn() as conn:
+    with db.open_conn() as conn:
         user_id = proactive.default_user_id(conn)
         result = subscriptions.clear_verdict(conn, user_id=user_id, merchant=request.merchant)
     return {"ok": True, **result}
@@ -757,7 +757,7 @@ async def subscription_verdict_clear(request: SubscriptionVerdictClearRequest) -
 async def update_savings_goal(goal_id: str, request: SavingsGoalUpdate) -> dict[str, Any]:
     """调整目标：只改传了的字段，按新参数重算计划并写审计。"""
     fields = request.model_dump(exclude_unset=True)
-    with _conn() as conn, db.tx(conn):
+    with db.open_conn() as conn, db.tx(conn):
         user_id = proactive.default_user_id(conn)
         updated = proactive.update_goal(conn, goal_id, user_id=user_id, **fields)
     if updated is None:
@@ -774,7 +774,7 @@ async def update_savings_goal(goal_id: str, request: SavingsGoalUpdate) -> dict[
 @router.get("/api/investment/suitability")
 async def get_suitability() -> dict[str, Any]:
     """读风险测评画像；没测过时把 5 道题一起给前端，用户不用先问一遍。"""
-    with _conn() as conn:
+    with db.open_conn() as conn:
         user_id = proactive.default_user_id(conn)
         profile = suitability.load(conn, user_id)
     return {
@@ -790,7 +790,7 @@ async def get_suitability() -> dict[str, Any]:
 @router.post("/api/investment/suitability")
 async def assess_suitability(request: SuitabilityAssessRequest) -> dict[str, Any]:
     """提交 5 题答案：算分、落画像、写一条 suitability.assessed 审计。"""
-    with _conn() as conn, db.tx(conn):
+    with db.open_conn() as conn, db.tx(conn):
         user_id = proactive.default_user_id(conn)
         profile = suitability.save(conn, user_id, request.answers)
     return {"ok": True, "profile": profile}
@@ -800,7 +800,7 @@ async def assess_suitability(request: SuitabilityAssessRequest) -> dict[str, Any
 async def run_proactive_monitor(request: MonitorRunRequest | None = None) -> dict[str, Any]:
     """手动触发一次监测（可重复）：只写提醒与运行记录，不动一分钱。"""
     goal_id = request.goal_id if request is not None else None
-    with _conn() as conn, db.tx(conn):
+    with db.open_conn() as conn, db.tx(conn):
         user_id = proactive.default_user_id(conn)
         run = proactive.run_monitor(conn, user_id=user_id, goal_id=goal_id)
     return {"ok": run["status"] == "ok", **run}
@@ -813,7 +813,7 @@ async def list_proactive_alerts(
     """提醒列表：默认只看待处理的 open。"""
     if limit < 1 or limit > proactive.MAX_LIMIT:
         raise ValidationError("limit 超出范围", field="limit", minimum=1, maximum=proactive.MAX_LIMIT)
-    with _conn() as conn:
+    with db.open_conn() as conn:
         user_id = proactive.default_user_id(conn)
         alerts = proactive.list_alerts(
             conn, user_id=user_id, status=status, goal_id=goal_id, limit=limit
@@ -826,7 +826,7 @@ async def resolve_proactive_alert(
     alert_id: str, request: AlertResolveRequest
 ) -> dict[str, Any]:
     """处理提醒：ignore=先放着，resolve=已解决；重复处理幂等，写审计。"""
-    with _conn() as conn, db.tx(conn):
+    with db.open_conn() as conn, db.tx(conn):
         user_id = proactive.default_user_id(conn)
         resolved = proactive.resolve_alert(conn, alert_id, request.action, user_id=user_id)
     if resolved is None:
@@ -842,7 +842,7 @@ async def resolve_proactive_alert(
 @router.post("/api/plans")
 async def create_plan(request: PlanCreate) -> dict[str, Any]:
     """建跨场景计划：步骤落库，后台节拍按到点时间推进（资金动作只提醒、不代扣）。"""
-    with _conn() as conn:
+    with db.open_conn() as conn:
         user_id = proactive.default_user_id(conn)
         created = plans.create(
             conn,
@@ -859,7 +859,7 @@ async def list_plans(status: str | None = None, limit: int = 20) -> dict[str, An
     """计划列表：默认只看当前用户的计划，status=all 时连已完成/已取消一起给。"""
     if limit < 1 or limit > plans.MAX_LIMIT:
         raise ValidationError("limit 超出范围", field="limit", minimum=1, maximum=plans.MAX_LIMIT)
-    with _conn() as conn:
+    with db.open_conn() as conn:
         user_id = proactive.default_user_id(conn)
         items = plans.list_plans(
             conn,
@@ -878,7 +878,7 @@ async def get_plan(plan_id: str) -> dict[str, Any]:
     只存在于 birthday.plan_with_budgets 里、没有任何 HTTP 出口——页面上那一步
     「付这一项」就永远没有数据可用。付款端点是唯一的真花钱入口，读口必须对齐。
     """
-    with _conn() as conn:
+    with db.open_conn() as conn:
         found = plans.view_plan(conn, plan_id)
         if found is not None and birthday.budgets(conn, plan_id):
             found = birthday.plan_with_budgets(conn, plan_id) or found
@@ -892,7 +892,7 @@ async def update_plan(plan_id: str, request: PlanUpdate) -> dict[str, Any]:
     """改计划：标题、状态（用来取消/暂停）、还没跑过的步骤。"""
     fields = request.model_dump(exclude_unset=True)
     steps = fields.get("steps")
-    with _conn() as conn:
+    with db.open_conn() as conn:
         user_id = proactive.default_user_id(conn)
         updated = plans.update(
             conn,
@@ -916,7 +916,7 @@ async def run_plans(request: PlanRunRequest | None = None) -> dict[str, Any]:
     plan_id 只缩小扫描范围，不改变任何安全校验。
     """
     target = request.plan_id if request is not None else None
-    with _conn() as conn:
+    with db.open_conn() as conn:
         authorized = birthday.run_due_authorized(conn, plan_id=target)
         result = plans.run_due(conn, plan_id=target)
     return {
@@ -936,7 +936,7 @@ async def create_birthday_plan(request: BirthdayPlanCreate) -> dict[str, Any]:
     save_authorization=True 才保存与计划版本绑定的一次性授权，到点后仍按最新日累计
     重新裁决，红灯/改计划/取消/参数漂移都会停下来，不会无限期代扣。
     """
-    with _conn() as conn:
+    with db.open_conn() as conn:
         user_id = proactive.default_user_id(conn)
         created = birthday.create_plan(
             conn,
@@ -1141,7 +1141,7 @@ async def manual_transaction(request: ManualTransactionRequest) -> dict[str, Any
     支付、不建计划、不触发代扣。补录之后账单、月度统计与订阅推断都会把它算进去
     （这正是「我买了什么，账上就该有」的意思）。
     """
-    with _conn() as conn, db.tx(conn):
+    with db.open_conn() as conn, db.tx(conn):
         result = _record_manual_transaction(conn, request)
     return {"ok": True, "manual": True, "notice": MANUAL_NOTICE, **result}
 
@@ -1152,7 +1152,7 @@ async def chat_history_turns(session_id: str = "", limit: int = 20) -> dict[str,
     sid = str(session_id or "").strip()
     if not sid:
         return {"ok": True, "session_id": "", "found": False, "turns": [], "title": ""}
-    with _conn() as conn:
+    with db.open_conn() as conn:
         turns = chat_history.recent(conn, sid, limit=max(1, min(50, int(limit))))
         head = chat_history.title(conn, sid)
     return {
@@ -1167,7 +1167,7 @@ async def chat_history_turns(session_id: str = "", limit: int = 20) -> dict[str,
 @router.get("/api/chat/latest")
 async def chat_history_latest(limit: int = 20) -> dict[str, Any]:
     """最近一次真的聊过的会话：首屏没存 session_id 时接着它，而不是新开一个。"""
-    with _conn() as conn:
+    with db.open_conn() as conn:
         data = chat_history.latest(conn, limit=max(1, min(50, int(limit))))
     return {"ok": True, **data}
 
@@ -1180,7 +1180,7 @@ async def simulate_expense(request: SimulatedExpenseRequest) -> dict[str, Any]:
     真实消费入口；这个端点只造演示流水（channel='simulated'），既不碰外部渠道，
     也不产生转账/申购/扣款语义。同一请求当天重复提交会复用已有流水（不重复扣钱）。
     """
-    with _conn() as conn, db.tx(conn):
+    with db.open_conn() as conn, db.tx(conn):
         result = _simulate_expense(conn, request)
     return {
         "ok": True,
@@ -1205,7 +1205,7 @@ def _resume_session_id() -> str:
     但不能因为查一次历史把整轮对话挡在 500 上。
     """
     try:
-        with _conn() as conn:
+        with db.open_conn() as conn:
             latest = chat_history.latest(conn, limit=1)
         found = str(latest.get("session_id") or "")
         if found:
@@ -1239,7 +1239,7 @@ async def _emit_assist(
     """assist 快路：同步算完再一次性发 done，不建图、不动钱。"""
     text = user_text or str(parsed.slots.get("assist_text") or "")
     try:
-        with _conn() as conn:
+        with db.open_conn() as conn:
             result = await asyncio.to_thread(assist.handle, conn, text)
     except BankError as exc:
         result = {"summary": exc.user_text, "choices": [], "action": "assist_error", "data": {}}
@@ -1358,7 +1358,7 @@ def _choices_for(parsed: intent.IntentResult) -> list[dict[str, str]]:
             choices.append({"label": label, "value": value})
 
     try:
-        with _conn() as conn:
+        with db.open_conn() as conn:
             user_id = proactive.default_user_id(conn)
             account = primary_account(conn)
             account_id = str(account["id"])
@@ -1523,7 +1523,7 @@ def _memory_block() -> str:
     记忆是增强项：库读不出来只记一条 warning，绝不让一轮对话因为「想不起前人是谁」而失败。
     """
     try:
-        with _conn() as conn:
+        with db.open_conn() as conn:
             return memory.prompt_block(conn, user_id=proactive.default_user_id(conn))
     except Exception:  # noqa: BLE001 - 记忆读失败只当没有记忆
         log.warning("api.chat.memory_block_failed", exc_info=True)
@@ -1541,7 +1541,7 @@ def _learn(session_id: str, user_text: str, assistant_text: str) -> None:
 
     async def worker() -> None:
         try:
-            with _conn() as conn:
+            with db.open_conn() as conn:
                 await asyncio.to_thread(
                     memory_extract.run,
                     conn,
@@ -1690,7 +1690,7 @@ def _start_run(
 
 def _audit_intent(session_id: str, text: str, parsed: intent.IntentResult) -> None:
     try:
-        with _conn() as conn:
+        with db.open_conn() as conn:
             audit.append(
                 conn,
                 "intent.parsed",
@@ -1744,7 +1744,7 @@ def _audit_knowledge(session_id: str, parsed: intent.IntentResult) -> None:
         "cross": parsed.knowledge_cross,
     }
     try:
-        with _conn() as conn:
+        with db.open_conn() as conn:
             audit.append(conn, "knowledge.retrieved", payload, session_id=session_id)
     except Exception:  # noqa: BLE001 - 与 intent.parsed 同一口径：审计失败不能让对话失败
         trace_id = new_id("tr")
@@ -1827,7 +1827,7 @@ def _audit_injection_reflection(session_id: str, parsed: intent.IntentResult) ->
     }
     trace_id = new_id("tr")
     try:
-        with _conn() as conn:
+        with db.open_conn() as conn:
             audit.append(conn, "injection.detected", payload, session_id=session_id)
     except Exception:  # noqa: BLE001 - 审计写不进去也不能让对话失败
         _write_fallback_audit(
@@ -1844,17 +1844,6 @@ def _audit_failure(session_id: str, text: str, reason: str) -> None:
     _audit_intent(session_id, text, intent.IntentResult(intent="unknown", ok=False, source=reason))
 
 
-class _conn:
-    """临时连接：端点自己开自己关，不给执行器的连接踩坑。"""
-
-    def __enter__(self) -> Any:
-        self._conn_obj = db.connect()
-        return self._conn_obj
-
-    def __exit__(self, *_exc: object) -> None:
-        self._conn_obj.close()
-
-
 def _remember(session_id: str | None, role: str, content: str) -> None:
     """记一轮对话：内存里给模型当上下文，库里给用户和自己留底。
 
@@ -1865,7 +1854,7 @@ def _remember(session_id: str | None, role: str, content: str) -> None:
     turns = _history.setdefault(session_id, deque(maxlen=HISTORY_PER_SESSION))
     turns.append({"role": role, "content": content})
     try:
-        with _conn() as conn:
+        with db.open_conn() as conn:
             chat_history.append(conn, session_id, role, content)
     except Exception:  # noqa: BLE001 - 记忆写不进去也要把这一轮答完
         log.warning("api.chat.history_write_failed session=%s role=%s", session_id, role)
@@ -1877,7 +1866,7 @@ def _turns(session_id: str) -> list[dict[str, str]]:
     if turns:
         return turns
     try:
-        with _conn() as conn:
+        with db.open_conn() as conn:
             rows = chat_history.recent(conn, session_id, limit=HISTORY_TURNS)
     except Exception:  # noqa: BLE001 - 读不到历史就当没有，不拦当前这一轮
         return []
@@ -1896,7 +1885,7 @@ def _model_name() -> str:
 
 def _db_ok() -> bool:
     try:
-        with _conn() as conn:
+        with db.open_conn() as conn:
             return conn.execute("SELECT 1 FROM accounts LIMIT 1").fetchone() is not None
     except Exception:  # noqa: BLE001 - 探活失败就是 False，不该把探活端点自己搞崩
         return False

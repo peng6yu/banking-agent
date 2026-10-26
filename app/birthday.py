@@ -31,7 +31,7 @@ import json
 import logging
 from typing import Any, Final
 
-from app import audit, clock, db, funds
+from app import audit, clock, db, funds, timefmt
 from app.clock import BankError, InsufficientFunds, ValidationError
 from app import ids
 from app.ids import new_id
@@ -92,15 +92,10 @@ PAY_BOUNDARY: Final[str] = (
     "后台到点只提醒，不代扣；真正付款要你在助手里确认一次，"
     "同样过策略裁决、能力令牌（必要时多因子）。"
 )
-TIME_TEXT_FMT: Final[str] = "%Y-%m-%d %H:%M"
 
 
 def _now_ms() -> int:
     return clock.now_ms()
-
-
-def _time_text(ms: int) -> str:
-    return _dt.datetime.fromtimestamp(ms / 1000).strftime(TIME_TEXT_FMT)
 
 
 def _load(raw: Any) -> dict[str, Any]:
@@ -281,11 +276,11 @@ def _authorization_view(row) -> dict[str, Any]:
         "decision": decision,
         "items": list(scope.get("items") or []),
         "created_ms": int(row["created_ms"]),
-        "created_text": _time_text(int(row["created_ms"])),
+        "created_text": timefmt.minute_text(int(row["created_ms"])),
         "used_ms": int(row["used_ms"]) if row["used_ms"] is not None else None,
         "revoked_ms": int(row["revoked_ms"]) if row["revoked_ms"] is not None else None,
         "expires_ms": int(row["expires_ms"]) if row["expires_ms"] is not None else None,
-        "expires_text": _time_text(int(row["expires_ms"])) if row["expires_ms"] is not None else "",
+        "expires_text": timefmt.minute_text(int(row["expires_ms"])) if row["expires_ms"] is not None else "",
         "active": status == "active",
         "boundary": AUTH_BOUNDARY,
     }
@@ -739,7 +734,7 @@ def _budget_view(row: Any, step: Any | None) -> dict[str, Any]:
         "hold_id": str(row["hold_id"] or "") if "hold_id" in row.keys() else "",
         "step_state": str(step["state"]) if step is not None else "",
         "step_due_ms": int(step["due_ms"]) if step is not None else None,
-        "step_due_text": _time_text(int(step["due_ms"])) if step is not None else "",
+        "step_due_text": timefmt.minute_text(int(step["due_ms"])) if step is not None else "",
         "detail": payload,
         "needs_user": str(row["status"]) == "reserved",
         "boundary": PAY_BOUNDARY,
@@ -899,14 +894,14 @@ def create_plan(
         "birthday": day.isoformat(),
         "budget_fen": budget,
         "trigger_ms": trigger_ms,
-        "trigger_text": _time_text(trigger_ms),
+        "trigger_text": timefmt.minute_text(trigger_ms),
         "items": stored_items,
         "account_id": str(account["id"]),
         # 授权（一次性代扣授权）绑定的计划版本号：只有用户改计划才 +1，
         # 后台的暂停/定时推进不动它，否则一生成待确认项目授权就自动失效了。
         "version": 1,
         "summary": f"生日 {day.isoformat()}，预算 {fen_to_yuan_str(budget)} 元，"
-        f"生日前 {TRIGGER_DAYS_BEFORE} 天（{_time_text(trigger_ms)}）提醒，付款要你确认。",
+        f"生日前 {TRIGGER_DAYS_BEFORE} 天（{timefmt.minute_text(trigger_ms)}）提醒，付款要你确认。",
     }
     plan_title = str(title or "").strip() or f"{day.month} 月 {day.day} 日生日计划"
     reserved_fen = sum(item["amount_fen"] for item in clean)

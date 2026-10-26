@@ -32,6 +32,7 @@ import app.audit as audit  # noqa: PLR0402
 import app.db as db  # noqa: PLR0402
 import app.funds as funds  # noqa: PLR0402
 import app.ids as ids  # noqa: PLR0402
+import app.timefmt as timefmt
 from app.clock import PolicyDenied, ValidationError, now_ms
 from app.ids import idempotency_key
 from app.models import Action, ToolResult
@@ -131,7 +132,7 @@ def schedule_transfer(
             session_id=ctx.session_key(),
         )
     who = payee_name(ctx.conn, payee_id)
-    when = _time_text(due_ms)
+    when = timefmt.minute_text(due_ms)
     extra = "，每月重复" if recurrence == "monthly" else ""
     return ok_result(
         {
@@ -170,7 +171,7 @@ def list_scheduled(
             "amount_fen": int(row["amount_fen"]),
             "amount_yuan": fen_to_yuan_str(int(row["amount_fen"])),
             "due_ms": int(row["due_ms"]),
-            "due_text": _time_text(int(row["due_ms"])),
+            "due_text": timefmt.minute_text(int(row["due_ms"])),
             "recurrence": str(row["recurrence"]),
             # 到点复判升级成红灯但还没强验证：前端要明确提示「需要再验一次」，
             # 别让用户以为它只是「还没到点」。
@@ -681,11 +682,6 @@ def _defer(
     log.info("scheduled.deferred id=%s due_ms=%s count=%s", sched_id, new_due, count)
     return {"scheduled_id": sched_id, "status": "scheduled", "deferred_to_ms": new_due,
             "defer_count": count, "amount_fen": amount_fen}
-
-
-def _time_text(ms: int) -> str:
-    stamp = datetime.datetime.fromtimestamp(ms / 1000, tz=datetime.UTC).astimezone()
-    return stamp.strftime("%Y-%m-%d %H:%M")
 
 
 def required_factors_for(

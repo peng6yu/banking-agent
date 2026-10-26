@@ -13,6 +13,7 @@ import sqlite3
 import time
 from typing import Any, Final
 
+from app import timefmt
 from app.clock import ValidationError
 from app.models import ToolResult
 from app.money import fen_to_yuan_str
@@ -63,10 +64,6 @@ def _local(ts_ms: int) -> time.struct_time:
 def _ms(year: int, month: int, day: int, hour: int = 0, minute: int = 0) -> int:
     """把本地时间拼成毫秒时间戳；跨年跨月交给 mktime 归一化。"""
     return int(time.mktime((year, month, day, hour, minute, 0, 0, -1, -1)) * 1000)
-
-
-def _time_text(ts_ms: int) -> str:
-    return time.strftime("%Y-%m-%d %H:%M", _local(ts_ms))
 
 
 def _month_key(ts_ms: int) -> tuple[int, int]:
@@ -230,8 +227,8 @@ def _split_order_anomalies(rows: list[sqlite3.Row]) -> list[dict[str, Any]]:
                     "kind": "split_orders",
                     "title": f"{merchant} 疑似拆单",
                     "detail": (
-                        f"{_time_text(window_start_ms)} 到 "
-                        f"{_time_text(window_end_ms)}，在 {merchant} "
+                        f"{timefmt.minute_text(window_start_ms)} 到 "
+                        f"{timefmt.minute_text(window_end_ms)}，在 {merchant} "
                         f"连着付了 {len(window)} 笔，单笔都在 500—1000 元，"
                         f"合计 {fen_to_yuan_str(total)} 元。"
                     ),
@@ -277,7 +274,7 @@ def _odd_hour_anomalies(rows: list[sqlite3.Row]) -> list[dict[str, Any]]:
                 "kind": "odd_hour_overseas",
                 "title": f"{row['counterparty']} 凌晨境外消费",
                 "detail": (
-                    f"{_time_text(int(row['ts_ms']))} 这笔 {fen_to_yuan_str(amount_fen)} 元"
+                    f"{timefmt.minute_text(int(row['ts_ms']))} 这笔 {fen_to_yuan_str(amount_fen)} 元"
                     f"发生在 0 点到 5 点之间，商户 {row['counterparty']} 属于境外。"
                 ),
                 "amount_fen": amount_fen,

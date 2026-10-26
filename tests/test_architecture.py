@@ -43,7 +43,7 @@ LONG_FUNCTION_GROWTH = 1.5
 
 @pytest.fixture(scope="module")
 def metrics() -> Metrics:
-    """整次扫描只跑一次（82 个模块 + 105 个测试文件 + 前端单页，约 1 秒）。"""
+    """整次扫描只跑一次（83 个模块 + 110 个测试文件 + 前端单页，约 1 秒）。"""
     return collect()
 
 

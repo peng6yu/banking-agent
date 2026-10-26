@@ -18,13 +18,12 @@ from __future__ import annotations
 import json
 import sqlite3
 import time
-from contextlib import closing
 from datetime import date
 from typing import Any, Final
 
 from fastapi import APIRouter, Depends, Query
 
-from app import audit, db, funds, handoffs, plans, proactive, subscriptions, suitability
+from app import audit, db, funds, handoffs, plans, proactive, subscriptions, suitability, timefmt
 from app.api.routes import require_api_token
 from app.clock import now_ms
 from app.money import fen_to_yuan_str
@@ -123,23 +122,12 @@ QUICK_ACTIONS: Final[tuple[dict[str, str], ...]] = (
 # ---------------------------------------------------------------- 小工具
 
 
-def _conn() -> Any:
-    """一次请求一条连接；和 routes.py 一样用 closing 保证关掉。"""
-    return closing(db.connect())
-
-
 def _ctx(conn: sqlite3.Connection, account_id: str | None = None) -> ToolContext:
     """只读工具的执行上下文：没有会话、没有密钥，也不该有。"""
     return ToolContext(
         conn=conn, session_id="view", node_id="view", task_id="view",
         account_id=account_id, secret=None,
     )
-
-
-def _time_text(ms: int | None) -> str | None:
-    if not ms:
-        return None
-    return time.strftime("%Y-%m-%d %H:%M", time.localtime(int(ms) / 1000))
 
 
 def _date_text(day: date | str | None) -> str | None:
@@ -222,7 +210,7 @@ def _anomaly_view(
         "window_start_ms": item.get("window_start_ms"),
         "window_end_ms": item.get("window_end_ms"),
         "window_text": (
-            f"{_time_text(item.get('window_start_ms'))} ~ {_time_text(item.get('window_end_ms'))}"
+            f"{timefmt.maybe_minute_text(item.get('window_start_ms'))} ~ {timefmt.maybe_minute_text(item.get('window_end_ms'))}"
             if item.get("window_start_ms") and item.get("window_end_ms")
             else None
         ),
@@ -442,7 +430,7 @@ def _pending_confirmations(
                 ),
                 "payee_name": params.get("payee_name"),
                 "created_ms": int(row["created_ms"]),
-                "created_text": _time_text(int(row["created_ms"])),
+                "created_text": timefmt.maybe_minute_text(int(row["created_ms"])),
                 "expires_ms": expires_ms,
                 "expires_in_s": max(0, (expires_ms - stamp) // 1000),
                 "expired": expired,
@@ -536,7 +524,7 @@ def _handoffs_view(conn: sqlite3.Connection, *, limit: int = 10) -> dict[str, An
                     else ""
                 ),
                 "created_ms": created_ms,
-                "created_text": _time_text(created_ms) if created_ms else "",
+                "created_text": timefmt.maybe_minute_text(created_ms) if created_ms else "",
                 "actions": actions,
             }
         )
@@ -583,7 +571,7 @@ def _scheduled_tasks(
                 "amount_yuan": fen_to_yuan_str(int(row["amount_fen"])),
                 "note": str(row["note"] or ""),
                 "due_ms": due_ms,
-                "due_text": _time_text(due_ms),
+                "due_text": timefmt.maybe_minute_text(due_ms),
                 "recurrence": str(row["recurrence"]),
                 "status": status,
                 "state_label": (
@@ -596,7 +584,7 @@ def _scheduled_tasks(
                 "can_verify_here": bool(needs_verification),
                 "overdue": status == "scheduled" and due_ms <= stamp,
                 "executed_ms": int(row["executed_ms"]) if row["executed_ms"] else None,
-                "executed_text": _time_text(row["executed_ms"]),
+                "executed_text": timefmt.maybe_minute_text(row["executed_ms"]),
             }
         )
     pending = [i for i in items if i["status"] == "scheduled"]
@@ -635,7 +623,7 @@ def _alerts(conn: sqlite3.Connection, user_id: str, *, limit: int = 10) -> dict[
                 "suggestion": str(row["suggestion"] or ""),
                 "evidence": evidence,
                 "created_ms": int(row["created_ms"]),
-                "created_text": _time_text(int(row["created_ms"])),
+                "created_text": timefmt.maybe_minute_text(int(row["created_ms"])),
                 "status": str(row["status"]),
             }
         )
@@ -659,7 +647,7 @@ def _monitor_runs(conn: sqlite3.Connection, *, limit: int = 5) -> list[dict[str,
         {
             "run_id": str(row["id"]),
             "started_ms": int(row["started_ms"]),
-            "started_text": _time_text(int(row["started_ms"])),
+            "started_text": timefmt.maybe_minute_text(int(row["started_ms"])),
             "finished_ms": int(row["finished_ms"]) if row["finished_ms"] else None,
             "status": str(row["status"]),
             "trigger": str(row["trigger"] or proactive.TRIGGER_MANUAL),
@@ -742,7 +730,7 @@ def overview_view(conn: sqlite3.Connection) -> dict[str, Any]:
 
     return {
         "generated_ms": stamp,
-        "generated_text": _time_text(stamp),
+        "generated_text": timefmt.maybe_minute_text(stamp),
         "month_label": bill_data.get("range", {}).get("label"),
         "account": next((a for a in accounts if a["account_id"] == account_id), None),
         "accounts": accounts,
@@ -814,7 +802,7 @@ def bill_view(
     anomalies = _enrich_anomalies(conn, list(data.get("anomalies") or []))
     return {
         "generated_ms": stamp,
-        "generated_text": _time_text(stamp),
+        "generated_text": timefmt.maybe_minute_text(stamp),
         "period": period,
         "year": int(year),
         "month": month if period == "month" else None,
@@ -900,7 +888,7 @@ def management_view(conn: sqlite3.Connection) -> dict[str, Any]:
             "status": str(row["status"]),
             "status_label": "生效中" if str(row["status"]) == "active" else "已停止（银行侧）",
             "next_charge_ms": int(row["next_charge_ms"]),
-            "next_charge_text": _time_text(int(row["next_charge_ms"])),
+            "next_charge_text": timefmt.maybe_minute_text(int(row["next_charge_ms"])),
             # 这句必须跟着每条订阅一起给：本地表标记取消，只停银行侧代扣，
             # 商户那边的会员并不会因此注销。
             "boundary": "这里只能停止银行侧的周期性代扣，商户会员需要你自己去商户端取消。",
@@ -930,7 +918,7 @@ def management_view(conn: sqlite3.Connection) -> dict[str, Any]:
                 "min_buy_yuan": fen_to_yuan_str(int(row["min_buy_fen"])),
                 "nav_micro": int(row["nav_micro"]),
                 "nav_updated_ms": int(row["nav_updated_ms"]),
-                "nav_updated_text": _time_text(int(row["nav_updated_ms"])),
+                "nav_updated_text": timefmt.maybe_minute_text(int(row["nav_updated_ms"])),
                 "description": str(row["description"]),
                 "holding_shares_milli": shares,
                 # 下面四个字段表里本来就没有，也没有可信来源：显式给 null
@@ -1148,7 +1136,7 @@ def plans_view(conn: sqlite3.Connection) -> dict[str, Any]:
     persisted = plans.list_plans(conn, user_id=user_id, limit=10)
     return {
         "generated_ms": stamp,
-        "generated_text": _time_text(stamp),
+        "generated_text": timefmt.maybe_minute_text(stamp),
         "scheduler": _scheduler_block(),
         "state_legend": [
             {"state": "saved", "label": "计划已保存",
@@ -1235,9 +1223,9 @@ def executions_view(
                     "active": "进行中", "done": "已完成", "cancelled": "已取消",
                 }.get(str(row["status"]), str(row["status"])),
                 "created_ms": int(row["created_ms"]),
-                "created_text": _time_text(int(row["created_ms"])),
+                "created_text": timefmt.maybe_minute_text(int(row["created_ms"])),
                 "last_ms": int(row["last_ms"]),
-                "last_text": _time_text(int(row["last_ms"])),
+                "last_text": timefmt.maybe_minute_text(int(row["last_ms"])),
                 "runs": [
                     {
                         "run_id": str(run["id"]),
@@ -1258,9 +1246,9 @@ def executions_view(
                             "pending": "等待中", "approved": "已批准",
                             "rejected": "已拒绝", "expired": "已过期",
                         }.get(str(c["status"]), str(c["status"])),
-                        "created_text": _time_text(int(c["created_ms"])),
-                        "expires_text": _time_text(int(c["expires_ms"])),
-                        "resolved_text": _time_text(c["resolved_ms"]),
+                        "created_text": timefmt.maybe_minute_text(int(c["created_ms"])),
+                        "expires_text": timefmt.maybe_minute_text(int(c["expires_ms"])),
+                        "resolved_text": timefmt.maybe_minute_text(c["resolved_ms"]),
                     }
                     for c in confs
                 ],
@@ -1272,14 +1260,14 @@ def executions_view(
     chain_ok = audit.verify_chain(conn)
     return {
         "generated_ms": stamp,
-        "generated_text": _time_text(stamp),
+        "generated_text": timefmt.maybe_minute_text(stamp),
         "sessions": session_items,
         "handoffs": _handoffs_view(conn, limit=20),
         "denials": [
             {
                 "reason": str(row["reason"]),
                 "ts_ms": int(row["ts_ms"]),
-                "ts_text": _time_text(int(row["ts_ms"])),
+                "ts_text": timefmt.maybe_minute_text(int(row["ts_ms"])),
                 "session_id": str(row["session_id"]) if row["session_id"] else None,
             }
             for row in denials
@@ -1320,7 +1308,7 @@ def _node_view(node: sqlite3.Row, run_id: str) -> dict[str, Any]:
         "result_ok": result.get("ok"),
         "summary": result.get("summary") or result.get("message"),
         "ts_ms": int(node["ts_ms"]) if node["ts_ms"] else None,
-        "ts_text": _time_text(node["ts_ms"]),
+        "ts_text": timefmt.maybe_minute_text(node["ts_ms"]),
     }
 
 
@@ -1334,7 +1322,7 @@ router = APIRouter(prefix="/api/business", tags=["business"],
 @router.get("/overview")
 def api_overview() -> dict[str, Any]:
     """财务总览：账户、本月收支、异常、待确认授权、储蓄目标、计划提醒。"""
-    with _conn() as conn:
+    with db.open_conn() as conn:
         return overview_view(conn)
 
 
@@ -1345,7 +1333,7 @@ def api_bill(
     month: int | None = Query(None, ge=1, le=12),
 ) -> dict[str, Any]:
     """账单分析：统计、分类、趋势、异常（每条带规则依据与相关流水）。"""
-    with _conn() as conn:
+    with db.open_conn() as conn:
         today = proactive.local_date()
         return bill_view(conn, period=period, year=int(year or today.year), month=month)
 
@@ -1353,14 +1341,14 @@ def api_bill(
 @router.get("/management")
 def api_management() -> dict[str, Any]:
     """业务管理：账户、卡片、订阅、理财入口与各自的业务边界。"""
-    with _conn() as conn:
+    with db.open_conn() as conn:
         return management_view(conn)
 
 
 @router.get("/plans")
 def api_plans() -> dict[str, Any]:
     """计划与提醒：已保存的计划、已安排的预约、待确认操作、提醒与监测记录。"""
-    with _conn() as conn:
+    with db.open_conn() as conn:
         return plans_view(conn)
 
 
@@ -1370,7 +1358,7 @@ def api_executions(
     session_id: str | None = Query(None, max_length=64),
 ) -> dict[str, Any]:
     """执行记录与安全中心：会话、节点裁决、确认卡、拒绝记录、审计链状态。"""
-    with _conn() as conn:
+    with db.open_conn() as conn:
         return executions_view(conn, limit=limit, session_id=session_id)
 
 

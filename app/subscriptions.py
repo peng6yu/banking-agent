@@ -21,6 +21,7 @@ from typing import Any, Final
 
 import app.audit as audit
 import app.db as db
+import app.timefmt as timefmt
 from app.clock import ValidationError, now_ms
 from app.money import fen_to_yuan_str
 
@@ -69,10 +70,6 @@ def _month_start(ts_ms: int, months_back: int = 0) -> int:
         month += 12
         year -= 1
     return int(time.mktime((year, month, 1, 0, 0, 0, 0, -1, -1)) * 1000)
-
-
-def _time_text(ts_ms: int) -> str:
-    return time.strftime("%Y-%m-%d", time.localtime(ts_ms / 1000))
 
 
 def _period_text(period: str) -> str:
@@ -146,15 +143,15 @@ def _candidate(rows: list[Any]) -> dict[str, Any] | None:
         "last_amount_fen": amounts[-1],
         "last_amount_yuan": fen_to_yuan_str(amounts[-1]),
         "first_ms": times[0],
-        "first_text": _time_text(times[0]),
+        "first_text": timefmt.date_text(times[0]),
         "last_ms": times[-1],
-        "last_text": _time_text(times[-1]),
+        "last_text": timefmt.date_text(times[-1]),
         "interval_days_min": min(gaps),
         "interval_days_max": max(gaps),
         "confidence": confidence,
         "confidence_label": CONFIDENCE_LABELS[confidence],
         "basis": (
-            f"{merchant} 在 {_time_text(times[0])} 到 {_time_text(times[-1])} 之间共 {len(rows)} 笔，"
+            f"{merchant} 在 {timefmt.date_text(times[0])} 到 {timefmt.date_text(times[-1])} 之间共 {len(rows)} 笔，"
             f"间隔 {gap_text}（{period_label}），{spread_text}。"
         ),
         "uncertainty": (
@@ -166,7 +163,7 @@ def _candidate(rows: list[Any]) -> dict[str, Any] | None:
             {
                 "transaction_id": str(row["id"]),
                 "ts_ms": int(row["ts_ms"]),
-                "time_text": _time_text(int(row["ts_ms"])),
+                "time_text": timefmt.date_text(int(row["ts_ms"])),
                 "amount_fen": int(row["amount_fen"]),
                 "amount_yuan": fen_to_yuan_str(int(row["amount_fen"])),
                 "category": str(row["category"]),
@@ -227,7 +224,7 @@ def merchant_transactions(
             {
                 "transaction_id": str(row["id"]),
                 "ts_ms": int(row["ts_ms"]),
-                "time_text": _time_text(int(row["ts_ms"])),
+                "time_text": timefmt.date_text(int(row["ts_ms"])),
                 "amount_fen": int(row["amount_fen"]),
                 "amount_yuan": fen_to_yuan_str(int(row["amount_fen"])),
                 "category": str(row["category"]),
@@ -349,7 +346,7 @@ def upcoming(
             "amount_yuan": fen_to_yuan_str(int(row["amount_fen"])),
             "period": str(row["period"]),
             "next_charge_ms": int(row["next_charge_ms"]),
-            "next_charge_text": _time_text(int(row["next_charge_ms"])),
+            "next_charge_text": timefmt.date_text(int(row["next_charge_ms"])),
             "days_left": round((int(row["next_charge_ms"]) - as_of) / _DAY_MS, 1),
         }
         for row in rows
@@ -390,7 +387,7 @@ def stopped_debits(conn, account_id: str) -> list[dict[str, Any]]:
                 "amount_yuan": fen_to_yuan_str(amount_fen),
                 "period": period,
                 "period_label": _period_text(period),
-                "next_charge_text": _time_text(int(row["next_charge_ms"])),
+                "next_charge_text": timefmt.date_text(int(row["next_charge_ms"])),
                 "status": status,
                 "status_label": _status_text(status),
                 "boundary_text": STOPPED_BOUNDARY_TEXT,
@@ -423,7 +420,7 @@ def verdicts(conn, user_id: str) -> dict[str, dict[str, Any]]:
             "verdict_label": VERDICT_LABELS.get(str(row["verdict"]), str(row["verdict"])),
             "note": str(row["note"] or ""),
             "updated_ms": int(row["updated_ms"]),
-            "updated_text": _time_text(int(row["updated_ms"])),
+            "updated_text": timefmt.date_text(int(row["updated_ms"])),
         }
         for row in rows
     }
@@ -464,7 +461,7 @@ def record_verdict(
         "verdict_label": VERDICT_LABELS[act],
         "note": str(note or "")[:200],
         "updated_ms": stamp,
-        "updated_text": _time_text(stamp),
+        "updated_text": timefmt.date_text(stamp),
     }
 
 

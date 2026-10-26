@@ -45,6 +45,7 @@ LAYERS: dict[str, int] = {
     "app.security.envelope": 0,
     # 提醒时间：纯日历计算（下次到点/文案），只依赖标准库
     "app.reminder_time": 0,
+    "app.timefmt": 0,
     # 边界守门（W1-A）：只有标准库依赖的纯函数与常量，被 api/planner/memory_extract 共用
     "app.scope": 0,
     "app.security.api_auth": 1,
@@ -221,6 +222,7 @@ ALLOWED: dict[str, frozenset[str]] = {
         "app.tools.bill",
         "app.tools.queries",
         "app.tools.scheduled",
+        "app.timefmt",
     }),
     # 入参模型里 FactorProof 复用公共契约（多因子凭证与 /api/confirm 同构）
     "app.api.schemas": frozenset({"app.models"}),
@@ -412,6 +414,7 @@ ALLOWED: dict[str, frozenset[str]] = {
         "app.subscriptions",
         # 提醒类话术要带上「这个人是谁」（称呼/偏好），只读记忆，不改记忆
         "app.memory",
+        "app.timefmt",
     }),
     "app.planner.state": frozenset({
         "app.audit",
@@ -441,6 +444,7 @@ ALLOWED: dict[str, frozenset[str]] = {
         "app.handoffs",
         "app.models",
         "app.tools.registry",
+        "app.timefmt",
     }),
     # 重启恢复：只重建状态、接着驱动，不重新解析意图也不重新裁决
     "app.planner.recover": frozenset({
@@ -491,6 +495,7 @@ ALLOWED: dict[str, frozenset[str]] = {
     }),
     # 提醒时间：纯函数，没有 app 内依赖
     "app.reminder_time": frozenset(),
+    "app.timefmt": frozenset(),  # 毫秒 -> 本地时间串：只依赖 time，不查库
     "app.script_mode": frozenset({
         "app.money",
     }),
@@ -542,6 +547,7 @@ ALLOWED: dict[str, frozenset[str]] = {
         "app.proactive",
         "app.reminder_time",
         "app.subscriptions",
+        "app.timefmt",
     }),
     # 生日计划：钱走 executor（确认/令牌），商户白名单复用工具层常量
     "app.birthday": frozenset({
@@ -560,6 +566,7 @@ ALLOWED: dict[str, frozenset[str]] = {
         "app.policy.rules",
         "app.tools.base",
         "app.tools.transfers",
+        "app.timefmt",
     }),
     # 人工接管：状态机只搬库里的事实；恢复交给 planner.recover（延迟导入）
     "app.handoffs": frozenset({
@@ -577,6 +584,7 @@ ALLOWED: dict[str, frozenset[str]] = {
         "app.clock",
         "app.db",
         "app.money",
+        "app.timefmt",
     }),
     # 长期记忆：落库 + 审计（from app import audit）+ 时间，不碰模型、不碰业务
     "app.memory": frozenset({
@@ -616,6 +624,7 @@ ALLOWED: dict[str, frozenset[str]] = {
         "app.money",
         "app.tools.base",
         "app.tools.queries",
+        "app.timefmt",
     }),
     "app.tools.cards": frozenset({
         "app.audit",
@@ -678,6 +687,7 @@ ALLOWED: dict[str, frozenset[str]] = {
         "app.security.factors",
         "app.security.token",
         "app.tools.base",
+        "app.timefmt",
     }),
     "app.tools.split": frozenset({
         "app.clock",

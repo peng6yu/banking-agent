@@ -549,6 +549,21 @@ def connect(path: str | Path | None = None) -> sqlite3.Connection:
     return conn
 
 
+@contextmanager
+def open_conn(path: str | Path | None = None) -> Iterator[sqlite3.Connection]:
+    """一次请求一条连接，退出时**一定关掉**。
+
+    为什么不用 `with connect() as conn`：sqlite3 的 Connection 确实是上下文管理器，
+    但它的 `__exit__` 只提交事务、不关连接。HTTP 端点统一走这一个入口之后，
+    「漏关」就不可能是某个模块写错了，只可能是没用这个函数（有守卫测试盯着）。
+    """
+    conn = connect(path)
+    try:
+        yield conn
+    finally:
+        conn.close()
+
+
 #: SQLite 的「写锁没抢到」措辞；都在 OperationalError 里，靠文本来分类。
 _BUSY_MARKERS: Final[tuple[str, ...]] = (
     "database is locked",
@@ -707,6 +722,7 @@ __all__ = [
     "connect",
     "ensure_columns",
     "init_db",
+    "open_conn",
     "sweep_expired_holds",
     "table_names",
     "tx",

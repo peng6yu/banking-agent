@@ -670,3 +670,36 @@ W1 只做「立规矩 + 资金不变量」，不改任何对外行为。
 2. 4 条反向依赖（planner.conflict / runner → handoffs、planner.ticker → birthday、plans → birthday）与 8 条领域借道（handoffs / birthday → planner、tools）留在豁免表，W4 拆包时清零。
 3. business.py 三处 can_confirm_here / can_verify_here 目前只是响应字段名，W4 视图归位时改 *_allowed。
 4. 真实短信/人脸仍是桩；提醒未接系统通知；未 push 远程。
+## v2.8.0 W2 统一底座（2026-10-26）
+
+用户指令（m04631）：「你严格按照计划全都跑完就行了」——按已确认的六波计划连续执行 W2→W6，不再逐波请示。本波目标：**同一件事只允许一个实现**，把 W1 之前各自长出来的重复件收掉，外部行为不变。
+
+### 做了什么
+
+| 收掉的重复 | 原状 | 现在 |
+|---|---|---|
+| 数据库连接 | 4 份各自实现：`app/api/routes.py` 的 `class _conn`（39 处调用）、`business.py` 的 `_conn()`（5 处）、`memory_api.py`（3 处）、`handoffs_api.py`（8 处） | `app/db.py:open_conn()` 一处（`@contextmanager`，`finally: conn.close()`），四个模块全改调它 |
+| 毫秒 → 时间串 | 7 份 `_time_text` + 1 份 `_stamp_text`，语义各不相同（有的抛错、有的空串、有的 None） | `app/timefmt.py`：`date_text` / `minute_text` / `maybe_minute_text` / `stamp_text`，脏输入给 `None` 或 `""`，不抛 |
+| 金额格式化 | `money` 里两个没人用的别名（`to_fen` / `fmt_yuan`）+ `policy/rules.py` 的 `_yuan`（12 处）+ `assist.py` 的 `_yuan_label`（1 处）+ `transfers.py` 的 `_yuan`（3 处） | 别名删除；新增 `money.yuan_label()`（带单位，话术用）与 `money.yuan_short()`（去尾零，紧凑标签用） |
+| 标签字典 | 原计划把 19 个 `*LABELS` 搬进 `app/labels.py` | **不搬**（见下），改为留在各领域模块 + 新增守卫测试 |
+
+### 一处偏离计划的决定（留档）
+
+原计划 W2 把标签字典集中到 `app/labels.py`。动手前用 ast 把 20 个 `*LABELS` 的字面量两两比对：**没有任何内容重复**。集中化只会把「状态值」与「它的中文」分到两个文件——改状态忘了改标签，编译器和测试都不会报，反而多一处漂移点。所以这批字典留在各自的领域模块，改由 `tests/test_labels.py` 钉住两件真事：值不能是空/纯空白；有权威常量的地方必须覆盖（`PLAN_STATUSES` / `KINDS` / 接管单状态 / `VERDICT_ACTIONS` / `RiskLevel`），并拿种子库真数据对渠道、产品分类、风险等级。
+
+### 顺手修掉的真缺陷
+
+`app/api/handoffs_api.py` 的 8 个端点原本写 `with _conn() as conn`——sqlite3 的 `Connection.__exit__` 只提交事务、**不关连接**，等于每个请求漏一条。这类漏连接平时看不出来（进程退出才回收），现在由 `tests/test_conn_hygiene.py` 用「请求结束后代理对象是否 closed」钉住，并禁止 `app/api/*.py` 再出现 `db.connect(` 与自建 `_conn`。
+
+### 验收
+
+- 全量 `.venv/bin/python -m pytest -q` → **1632 passed, 4 skipped, 1 warning in 18.73s**（`tmp/pytest_w2.log`；W1 基线 1618 + 12 条新守卫用例 + `test_imports` 为 `app.timefmt` 多出的 2 条参数化）
+- 架构基线重新生成：模块 82→83、测试文件 108→110、重名函数组 **55→52**、多出定义 **68→59**（删掉 `_conn`×3、`_time_text`×7、`_yuan`×2 的直接结果），跨层违规仍 4 条待 W4 清零
+- `scripts/check_frontend.py` **66/66**；内联 `<script>` 抽出后 `node --check` 通过
+- 文档数字同步：1618→1632、17.62s→18.73s、测试文件 100→102（`tests/` 下 .py 108→110）、app 模块 82→83；`docs/02` 补 `app/timefmt.py` 与两个新测试文件登记并修掉 `to_fen`/`fmt_yuan` 旧名；`docs/04` 补 `yuan_label`/`yuan_short` 分支表
+
+### 遗留（W3 起继续）
+
+- 跨层反向依赖 4 条（全在 `tests/test_imports.py` 的 `UPWARD_EXCEPTIONS`），按计划 W4 清零
+- 长函数 32 个、重名 52 组、`web/index.html` 5954 行、`app/api/routes.py` 1894 行：W4/W5 的活
+- `app/db.py`（729 行）与 `tests/test_imports.py`（896 行）已超 600 行软线并入基线；前者 W3 拆用例层时一并按职责切分
