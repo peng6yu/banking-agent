@@ -218,7 +218,12 @@ function bxFlashCard(hostId) {
 
 /* -------------------------------------------------------------- 网络层 */
 async function bxFetch(url) {
-  const response = await fetch(url, { method: 'GET', headers: { Accept: 'application/json' } });
+  let response;
+  try {
+    response = await fetch(url, { method: 'GET', headers: { Accept: 'application/json' } });
+  } catch (err) {
+    throw new Error('连不上本地服务（可能已经停止或刚重启过）。确认服务在跑，再刷新这一页。');
+  }
   if (!response.ok) {
     let detail = '';
     try {
@@ -228,21 +233,30 @@ async function bxFetch(url) {
       detail = '';
     }
     if (response.status === 401) {
-      throw new Error('接口鉴权没通过：请用带 ?token= 的链接打开页面，或先在页面里填好 API Token。');
+      /* 服务端只从请求头认令牌，?token= 一律 401（见 app/api/auth.py）。以前这里让人用
+         ?token= 打开，等于把人往一条设计上不可能成功的路上引——正确入口是 #token=。 */
+      throw new Error('接口鉴权没通过：这个标签页还没拿到访问令牌。用启动日志里带 #token= 的链接重新打开一次页面。');
     }
-    throw new Error('后端返回 HTTP ' + response.status + (detail ? '：' + detail : ''));
+    throw new Error(detail || ('后端返回 HTTP ' + response.status));
   }
   return response.json();
 }
 
 /* 写操作统一走这里：页面上的按钮只允许改「计划/目标/提醒」这类非资金状态，
-   转钱之类一律回 AI 助手走权限引擎，避免页面绕过确认流程。 */
+   转钱之类一律回 AI 助手走权限引擎，避免页面绕过确认流程。
+   网络层失败（fetch 直接 reject）原来只会冒出浏览器原话 "Failed to fetch"，
+   用户看不懂、也不知道服务是不是挂了——这里统一翻译成人话。 */
 async function bxSend(url, method, body) {
-  const response = await fetch(url, {
-    method: method || 'POST',
-    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-    body: body === undefined ? undefined : JSON.stringify(body)
-  });
+  let response;
+  try {
+    response = await fetch(url, {
+      method: method || 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: body === undefined ? undefined : JSON.stringify(body)
+    });
+  } catch (err) {
+    throw new Error('连不上本地服务（可能已经停止或刚重启过）。确认服务在跑，再刷新这张卡片重试。');
+  }
   if (!response.ok) {
     let detail = '';
     try {
@@ -251,7 +265,8 @@ async function bxSend(url, method, body) {
     } catch (err) {
       detail = '';
     }
-    throw new Error('后端返回 HTTP ' + response.status + (detail ? '：' + detail : ''));
+    /* 后端每个错误都带 user_text（一句人话），优先用它；HTTP 码降级成括号里的线索。 */
+    throw new Error(detail || ('后端返回 HTTP ' + response.status));
   }
   return response.json();
 }

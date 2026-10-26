@@ -1,6 +1,23 @@
 /* 72-bx-core-b.js — 动作卡、人工接管、预约补验证与统一的按钮分发（bxRunAction）。 */
 'use strict';
 
+/* 页面级轻提示：卡片一刷新，卡内那句状态行就跟着没了；写操作至少要留一条
+   「刚才那一下到底成没成」的可见回执，否则用户会以为按钮没接上。 */
+function bxToast(text, kind) {
+  let host = document.getElementById('bx-toast');
+  if (!host) {
+    host = document.createElement('div');
+    host.id = 'bx-toast';
+    document.body.appendChild(host);
+  }
+  const item = el('div', 'bx-toast-item' + (kind ? ' is-' + kind : ''), textOf(text));
+  host.appendChild(item);
+  setTimeout(function () { item.classList.add('is-out'); }, 2800);
+  setTimeout(function () {
+    if (item.parentNode) { item.parentNode.removeChild(item); }
+  }, 3400);
+}
+
 /* --------------------------------------------------------- 异常卡片 */
 function bxAnomalyCard(item, full) {
   const box = el('div', 'anomaly');
@@ -175,6 +192,16 @@ function bxHandoffCard(item) {
   if (meta.length) { box.appendChild(el('div', 'card-note', meta.join(' · '))); }
 
   const actions = bxArr(item.actions).filter(function (act) { return act && textOf(act.key); });
+  /* 反馈必须留在卡片上：以前成功/失败都只往 AI 助手页的画布塞一条气泡，
+     用户停在总览页时看不到任何变化，会以为按钮点坏了。 */
+  const status = el('div', 'card-note handoff-status');
+  status.style.display = 'none';
+  const say = function (text, kind) {
+    status.style.display = '';
+    status.textContent = text;
+    status.className = 'card-note handoff-status' + (kind ? ' is-' + kind : '');
+    if (kind === 'ok' || kind === 'bad') { bxToast(text, kind); }
+  };
   if (!actions.length) {
     box.appendChild(el('div', 'card-note', '这张单当前没有可执行的动作。'));
     return box;
@@ -188,18 +215,37 @@ function bxHandoffCard(item) {
   noteInput.maxLength = 500;
   const submitBtn = el('button', 'btn btn-mini btn-green', '提交');
   submitBtn.type = 'button';
+  const closeNoteBtn = el('button', 'btn btn-mini', '不填了');
+  closeNoteBtn.type = 'button';
   let pending = null;
+  closeNoteBtn.addEventListener('click', function () {
+    pending = null;
+    noteRow.style.display = 'none';
+    noteInput.value = '';
+    say('这一步没提交，什么都没变。', '');
+  });
+  const fail = function (err, btn) {
+    if (btn) { btn.disabled = false; }
+    say('没成功：' + pfErrText(err) + '（正在刷新队列，确认这张单现在的状态）', 'bad');
+    appendBubble('sys', '接管动作没成功：' + pfErrText(err), 'handoff');
+    /* 失败最常见的原因是这张单已经被处理、或者服务重启过——刷新一次，让卡片说真话。 */
+    bxCacheDrop();
+    bxRefresh();
+  };
   const submitter = function () {
     if (!pending) { return; }
     const act = pending;
+    const label = textOf(act.label) || textOf(act.key);
     submitBtn.disabled = true;
+    say('正在提交「' + label + '」…', 'busy');
     bxHandoffPost(item, act.key, noteInput.value).then(function () {
-      appendBubble('sys', '已提交「' + (textOf(act.label) || textOf(act.key)) + '」，接管队列已更新。', 'handoff');
+      say('已提交「' + label + '」，正在刷新队列…', 'ok');
+      appendBubble('sys', '已提交「' + label + '」，接管队列已更新。', 'handoff');
       bxCacheDrop();
       bxRefresh();
     }, function (err) {
       submitBtn.disabled = false;
-      appendBubble('sys', '接管动作没成功：' + pfErrText(err), 'handoff');
+      fail(err, null);
     });
   };
   submitBtn.addEventListener('click', submitter);
@@ -211,27 +257,53 @@ function bxHandoffCard(item) {
     btn.addEventListener('click', function () {
       if (!act.needs_note) {
         btn.disabled = true;
+        say('正在提交「' + label + '」…', 'busy');
         bxHandoffPost(item, key, '').then(function () {
+          say('已提交「' + label + '」，正在刷新队列…', 'ok');
           appendBubble('sys', '已提交「' + label + '」，接管队列已更新。', 'handoff');
           bxCacheDrop();
           bxRefresh();
         }, function (err) {
-          btn.disabled = false;
-          appendBubble('sys', '接管动作没成功：' + pfErrText(err), 'handoff');
+          fail(err, btn);
         });
         return;
       }
       pending = act;
       noteRow.style.display = '';
+      noteInput.value = '';
+      noteInput.placeholder = key === 'cancel'
+        ? '写清取消原因（会记进审计，钱不动）'
+        : (key === 'reject' ? '写清拒绝原因（会记进审计，钱不动）'
+          : (key === 'resume' ? '写清你确认了什么，恢复执行会按这句记审计' : '写清缺哪条信息'));
       submitBtn.textContent = '提交：' + label;
       noteInput.focus();
+      say('这一步要写一句备注，写好再点「提交：' + label + '」。不写也会被服务端打回。', 'busy');
     });
     bar.appendChild(btn);
   });
   box.appendChild(bar);
+  /* 收款人歧义这类单，缺的是「本人选哪一位」，操作员不能替选，后端也刻意不给 resume。
+     以前卡上只有领取/拒绝/取消，用户会去备注框里写答案、然后误点「提交：取消这一轮」。
+     这里补一个回对话的入口，并把这句话讲明白。 */
+  if (item.needs_user) {
+    const go = el('button', 'btn btn-mini btn-green', '去对话里选收款人');
+    go.type = 'button';
+    go.addEventListener('click', function () {
+      bxSetView('assistant');
+      const input = $('chat-input');
+      if (input) {
+        input.value = textOf(item.request_text) || '这单我选收款人：';
+        input.focus();
+      }
+      appendBubble('sys', '这单缺的是你本人的选择，操作员不能替你选：在输入框里补一句付给哪一位（例如「选尾号 4417 的那个张三」），再发送。备注框只是写给操作员的说明，不会替你选收款人。', 'handoff');
+    });
+    bar.appendChild(go);
+  }
   noteRow.appendChild(noteInput);
   noteRow.appendChild(submitBtn);
+  noteRow.appendChild(closeNoteBtn);
   box.appendChild(noteRow);
+  box.appendChild(status);
   box.appendChild(el('div', 'card-note', '所有动作都以「' + BX_OPERATOR + '」的身份记进审计；恢复执行不会再替你点确认卡。'));
   return box;
 }
@@ -246,7 +318,16 @@ function bxRenderHandoffs(host, block, tagId) {
     return;
   }
   host.replaceChildren();
-  host.appendChild(el('div', 'card-note', '共 ' + items.length + ' 张 · ' + (textOf(data.source) || '按创建时间倒序')));
+  /* 已取消/已拒绝的单只是历史，不该和「还在等你处理」的单混在一个数字里（截图里
+     「共 2 张」其中一张早就取消了）。进行中的按 ACTIVE 状态算，和服务端 ACTIVE_STATUSES 一致。 */
+  const activeCount = items.filter(function (item) {
+    return ['pending', 'claimed', 'need_info'].indexOf(textOf(item.status)) >= 0;
+  }).length;
+  const endedCount = items.length - activeCount;
+  const countText = endedCount
+    ? '进行中 ' + activeCount + ' 张 · 已结束 ' + endedCount + ' 张（历史只作记录）'
+    : '共 ' + items.length + ' 张';
+  host.appendChild(el('div', 'card-note', countText + ' · ' + (textOf(data.source) || '按创建时间倒序')));
   items.slice(0, 6).forEach(function (item) { host.appendChild(bxHandoffCard(item)); });
 }
 

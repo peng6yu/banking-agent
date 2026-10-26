@@ -584,3 +584,17 @@ ul.assumptions li { margin: 2px 0; }
 .step-title { font-size: var(--fs-sm); color: var(--text); }
 .tag.warn { background: var(--amber-soft); color: var(--amber); }
 
+/* 人工接管卡的就地反馈 + 3 秒页面级轻提示：卡片重渲染也不该吞掉「刚才那一下成没成」 */
+.handoff-status { margin-top: 6px; }
+.handoff-status.is-busy { color: var(--amber); }
+.handoff-status.is-ok { color: var(--green); }
+.handoff-status.is-bad { color: var(--red); }
+.handoff-note-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 6px; }
+.handoff-note-row .handoff-note { flex: 1 1 260px; min-width: 180px; padding: 6px 8px; }
+#bx-toast { position: fixed; left: 50%; bottom: 28px; transform: translateX(-50%); z-index: 9999;
+  display: flex; flex-direction: column; gap: 6px; align-items: center; pointer-events: none; }
+.bx-toast-item { background: #1f2937; color: #f9fafb; padding: 8px 14px; border-radius: 8px;
+  font-size: var(--fs-sm); box-shadow: 0 6px 20px rgba(0,0,0,.18); max-width: 70vw; }
+.bx-toast-item.is-ok { background: #166534; }
+.bx-toast-item.is-bad { background: #991b1b; }
+.bx-toast-item.is-out { opacity: 0; transition: opacity .6s ease; }
