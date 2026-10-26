@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from pathlib import Path
 from typing import Any
 
@@ -102,6 +103,32 @@ def test_overview_trend_is_six_points_and_last_month_is_partial(bank: Path) -> N
     assert len(trend) == 6
     assert trend[-1]["partial"] is True
     assert all("net_positive" in point for point in trend)
+
+
+def test_month_whose_spending_exceeds_income_shows_a_minus_sign(bank: Path) -> None:
+    """亏损月份的「结余」必须带负号。
+
+    `net_yuan` 曾经是 `fen_to_yuan_str(abs(net))`：趋势表把 -1,311.00 写成 1,311.00，
+    和账单页红色的 -1,311.00 并排出现——同一屏两个结余，用户不知道该信哪个。
+    """
+
+    conn = db.connect()
+    try:
+        conn.execute(
+            "INSERT INTO transactions (id, account_id, direction, amount_fen, counterparty,"
+            " category, note, ts_ms, balance_after_fen, channel, reversal_of)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            ("t_neg_overspend", DEBIT_ACCOUNT_ID, "out", 90_000_000, "一笔超支", "购物", "",
+             int(time.time() * 1000), 1_000_000, "app", None),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    last = get("/api/business/overview").json()["trend"][-1]
+    assert last["net_fen"] < 0
+    assert last["net_positive"] is False
+    assert last["net_yuan"].startswith("-"), last["net_yuan"]
 
 
 def test_overview_never_sells_empty_lists_as_unavailable(bank: Path) -> None:
@@ -229,19 +256,27 @@ def test_plans_reports_the_real_scheduler_not_a_promise(bank: Path) -> None:
 # ---------------------------------------------------------------- 执行记录
 
 
-def test_executions_expose_nine_task_states_and_audit_chain(bank: Path) -> None:
+def test_executions_expose_task_state_labels_and_audit_chain(bank: Path) -> None:
+    """状态要全：DAG 节点真的会出现 pending / skipped，缺了就在表里露英文。"""
+
     data = get("/api/business/executions").json()
-    assert set(data["state_labels"]) == {
+    labels = data["state_labels"]
+    assert set(labels) == {
         "draft",
+        "pending",
         "need_info",
         "waiting_confirm",
         "waiting_factor",
         "running",
         "done",
+        "success",
         "failed",
         "cancelled",
+        "skipped",
         "manual",
     }
+    # 前端表格直接显示 label：任何一个英文 key 漏翻，用户看到的就是 "pending"
+    assert all(text and text != key for key, text in labels.items())
     audit = data["audit"]
     assert audit["chain_ok"] is True
     # append_only 是一句人话解释，不是布尔：界面直接把它展示给用户

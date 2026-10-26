@@ -198,7 +198,9 @@ def _trend(
                 "expense_fen": bucket["expense_fen"],
                 "expense_yuan": fen_to_yuan_str(bucket["expense_fen"]),
                 "net_fen": net,
-                "net_yuan": fen_to_yuan_str(abs(net)),
+                # 亏损月要带负号：以前这里取了 abs()，趋势表会把 -1,311.00 显示成
+                # 1,311.00，和同页红色的 -1,311.00 并存，同一屏两个结余。
+                "net_yuan": fen_to_yuan_str(net),
                 "net_positive": net >= 0,
                 "transaction_count": bucket["count"],
                 "partial": key == (today.year, today.month),

@@ -77,7 +77,8 @@ def overview_view(conn: sqlite3.Connection) -> dict[str, Any]:
             "items": anomalies[:3],
             "count": len(anomalies),
             "more_count": max(0, len(anomalies) - 3),
-            "state": "发现异常（待核实）",
+            # 空列表也写「发现异常」就是撒谎：没有命中规则时说没有。
+            "state": "发现异常（待核实）" if anomalies else "本期没有命中任何规则",
             "disclaimer": "规则命中不等于欺诈认定；每一条都可以点开看依据和相关流水。",
         },
         "pending_authorizations": pending,

@@ -16,6 +16,11 @@ from app.clock import ValidationError
 # 单笔上限 100 万元（docs/04 4.3 分支表）
 MAX_SINGLE_FEN: Final[int] = 100_000_000
 
+# 转账与理财是账户之间的内部搬运：既不是收入，也不是消费，收支统计一律排除。
+# 口径只写这一份：主动洞察（app/proactive.py）与账单工具（app/tools/bill.py）都从这里取，
+# 否则「总览结余 3,476」和「账单净结余 -1,311」就是两套定义各说各话。
+INTERNAL_CATEGORIES: Final[tuple[str, ...]] = ("转账", "理财")
+
 # 「全部 / 所有钱」不给数字，由调用方替换成余额；money 层不许查库
 UNKNOWN_AMOUNT_FEN: Final[int] = -1
 

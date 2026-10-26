@@ -280,11 +280,17 @@ function bxRenderBill(data) {
     host.replaceChildren();
     host.appendChild(bxStatCard('支出合计', bxMoney(data, 'total_out'), textOf(range.label) + ' · ' + bxCount(data.out_count, ' 笔')));
     host.appendChild(bxStatCard('收入合计', bxMoney(data, 'total_in'), bxCount(data.in_count, ' 笔')));
-    host.appendChild(bxStatCard('净结余',
-      (bxNum(data.total_in_fen) !== null && bxNum(data.total_out_fen) !== null)
+    /* 结余必须交代口径：这张卡含转账/理财，下面的趋势表排除它们（和总览一致）。
+       只说「净结余」就会出现同一屏 -1,311 与 3,476 两个数、谁也不服谁。 */
+    const netAll = bxNum(data.net_all_fen) !== null
+      ? textOf(data.net_all_yuan) + ' 元'
+      : ((bxNum(data.total_in_fen) !== null && bxNum(data.total_out_fen) !== null)
         ? pfYuanFromFen(Math.round(data.total_in_fen - data.total_out_fen)) + ' 元'
-        : BX_NA,
-      '按同区间收支相减，前端只做这一步减法'));
+        : BX_NA);
+    const netHint = bxNum(data.net_external_fen) !== null
+      ? '全部收支相减（含转账/理财）。不算转账/理财是 ' + textOf(data.net_external_yuan) + ' 元，和总览同一个口径'
+      : '按同区间收支相减，前端只做这一步减法';
+    host.appendChild(bxStatCard('净结余', netAll, netHint));
   }
 
   const catHost = $('bill-cats');
@@ -311,7 +317,7 @@ function bxRenderBill(data) {
     } else {
       trendHost.replaceChildren();
       trendHost.appendChild(bxTable(
-        ['月份', '收入', '支出', '结余', '笔数'],
+        ['月份', '收入', '支出', '结余（不含转账/理财）', '笔数'],
         trend.map(function (row) {
           return [
             textOf(row.label) + (row.partial ? '（未完）' : ''),

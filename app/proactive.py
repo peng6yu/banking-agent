@@ -25,7 +25,7 @@ import app.db as db
 from app.clock import ValidationError, now_ms
 from app.ids import new_id
 from app.log import log
-from app.money import fen_to_yuan_str
+from app.money import INTERNAL_CATEGORIES, fen_to_yuan_str
 
 # 币种固定 CNY：产品只支持人民币账户，换币种属于另一个需求。
 CURRENCY: Final[str] = "CNY"
@@ -40,7 +40,7 @@ ESSENTIAL_CATEGORIES: Final[tuple[str, ...]] = (
 )
 
 # 转账与理财是账户之间的内部搬运：既不是收入，也不是消费，统计时排除。
-INTERNAL_CATEGORIES: Final[tuple[str, ...]] = ("转账", "理财")
+# 常量本体在 app/money.py（工具层也用它），这里只是按老名字再导出一遍。
 
 LOOKBACK_MONTHS: Final[int] = 6
 MIN_LOOKBACK_MONTHS: Final[int] = 1

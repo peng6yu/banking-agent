@@ -18,13 +18,16 @@ MAX_LIST: Final[int] = 50
 #: 交易状态的中文标签。前后端必须共用同一套说法，不能一处叫"处理中"一处叫"执行中"。
 TASK_STATE_LABELS: Final[dict[str, str]] = {
     "draft": "草稿",
+    "pending": "还没执行",
     "need_info": "等待补充信息",
     "waiting_confirm": "等待确认",
     "waiting_factor": "等待验证",
     "running": "执行中",
     "done": "已成功",
+    "success": "已成功",
     "failed": "已失败",
     "cancelled": "已取消",
+    "skipped": "已跳过",
     "manual": "需要人工处理",
 }
 #: 提醒步骤的状态 -> 用户能看懂的说法（计划步骤的 state 与交易状态的词不一样）

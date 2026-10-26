@@ -16,7 +16,7 @@ from typing import Any, Final
 from app import timefmt
 from app.clock import ValidationError
 from app.models import ToolResult
-from app.money import fen_to_yuan_str
+from app.money import INTERNAL_CATEGORIES, fen_to_yuan_str
 from app.tools.base import ToolContext, ok_result, primary_account
 from app.tools.queries import fetch_transactions
 
@@ -117,6 +117,19 @@ def _bill_summary(
     in_rows = [row for row in rows if str(row["direction"]) == "in"]
     total_out = sum(int(row["amount_fen"]) for row in out_rows)
     total_in = sum(int(row["amount_fen"]) for row in in_rows)
+    # 转账/理财是账户内部搬运，两个方向都要单列：前端要把「全部结余」和
+    # 「不含内部搬运的结余」摆在一起说明，否则总览（排除）与账单（不排除）
+    # 会各报一个数，用户不知道该信哪个。
+    internal_out = sum(
+        int(row["amount_fen"]) for row in out_rows
+        if str(row["category"]) in INTERNAL_CATEGORIES
+    )
+    internal_in = sum(
+        int(row["amount_fen"]) for row in in_rows
+        if str(row["category"]) in INTERNAL_CATEGORIES
+    )
+    net_all = total_in - total_out
+    net_external = (total_in - internal_in) - (total_out - internal_out)
     return {
         "period": period,
         "year": int(year),
@@ -131,6 +144,12 @@ def _bill_summary(
         "total_in_fen": total_in,
         "total_out_yuan": fen_to_yuan_str(total_out),
         "total_in_yuan": fen_to_yuan_str(total_in),
+        "internal_out_fen": internal_out,
+        "internal_in_fen": internal_in,
+        "net_all_fen": net_all,
+        "net_all_yuan": fen_to_yuan_str(net_all),
+        "net_external_fen": net_external,
+        "net_external_yuan": fen_to_yuan_str(net_external),
         "out_count": len(out_rows),
         "in_count": len(in_rows),
         "by_category": _by_category(out_rows, total_out),

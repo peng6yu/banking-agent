@@ -334,19 +334,22 @@ function bxSetView(name) {
   bxLoad(name);
 }
 
+/* 页面上的快捷入口、卡片动作统一走这里：只把话填进输入框，不替用户按发送。
+   以前这里填完直接 sendMessage()，点一下「转账」就已经把钱指令发出去了，和页脚
+   「快捷入口只负责把话填好」的承诺相反，也让人来不及改金额/收款人。 */
 function bxAsk(prompt) {
   if (!prompt) { return; }
   bxSetView('assistant');
   const input = $('chat-input');
   if (!input) { return; }
+  input.value = prompt;
+  if (input.focus) { input.focus(); }
+  try { input.setSelectionRange(prompt.length, prompt.length); } catch (err) { /* 非文本输入忽略 */ }
   if (streaming) {
-    input.value = prompt;
     appendBubble('sys', '上一句还在跑，这句话已经填进输入框，等它结束再发送。');
     return;
   }
-  input.value = prompt;
-  appendBubble('sys', '按快捷入口发起：' + prompt + '（仍然要过权限判定与确认）', 'quick');
-  sendMessage();
+  appendBubble('sys', '已经填进输入框，金额和收款人确认无误后按「发送」。（快捷入口只负责把话填好，不会替你发出去）', 'quick');
 }
 
 function bxSendText(value) {

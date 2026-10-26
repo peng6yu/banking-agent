@@ -37,18 +37,40 @@ function bxRenderSecurity(data) {
         box.appendChild(kvRow('时间', textOf(session.created_text) + ' → ' + textOf(session.last_text)));
         const nodes = bxArr(session.nodes);
         if (nodes.length) {
-          box.appendChild(bxTable(
-            ['节点', '工具', '状态', '裁决', '结果'],
-            nodes.map(function (node) {
-              return [
-                textOf(node.node_id),
-                textOf(node.tool),
-                textOf(node.state_label) || BX_TASK_LABEL[textOf(node.state)] || textOf(node.state),
-                node.level ? (levelText(node.level) + (node.rule_id ? ' · ' + textOf(node.rule_id) : '')) : '',
-                textOf(node.summary)
-              ];
-            })
-          ));
+          /* 同一个会话里可能执行过好几轮：以前所有轮的节点平铺成一张表，
+             看到的是「n1 成功 / n3 等待 / n2 等待 / n2 成功 / n3 成功」这种
+             时间倒错的混排，根本分不清哪几行属于同一次请求。按 run_id 分组，
+             每组标上轮次与时间，顺序才是执行顺序。 */
+          const groups = [];
+          const groupIndex = {};
+          nodes.forEach(function (node) {
+            const rid = textOf(node.run_id) || '未知轮次';
+            if (!(rid in groupIndex)) {
+              groupIndex[rid] = groups.length;
+              groups.push({ run_id: rid, nodes: [] });
+            }
+            groups[groupIndex[rid]].nodes.push(node);
+          });
+          groups.forEach(function (group, order) {
+            const first = group.nodes[0] || {};
+            box.appendChild(el('div', 'field-label',
+              '第 ' + (groups.length - order) + ' 轮 · ' + group.run_id +
+              (first.ts_text ? ' · ' + textOf(first.ts_text) : '') +
+              ' · 共 ' + group.nodes.length + ' 个节点'));
+            box.appendChild(bxTable(
+              ['节点', '工具', '状态', '裁决', '结果'],
+              group.nodes.map(function (node) {
+                return [
+                  textOf(node.node_id),
+                  textOf(node.tool),
+                  textOf(node.state_label) || BX_TASK_LABEL[textOf(node.state)] || textOf(node.state),
+                  node.level ? (levelText(node.level) + (node.rule_id ? ' · ' + textOf(node.rule_id) : '')) : '',
+                  textOf(node.summary)
+                ];
+              })
+            ));
+          });
+          box.appendChild(el('div', 'card-note', '同一会话里执行过几轮就分几段列，每段的顺序就是这一轮的执行顺序。'));
         } else {
           box.appendChild(el('div', 'card-note', '这条会话没有节点记录。'));
         }
