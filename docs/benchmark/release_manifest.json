@@ -1,13 +1,13 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-10-26T14:23:55+08:00",
+  "generated_at": "2026-10-26T14:24:39+08:00",
   "git": {
-    "head": "8006f97ba89677422634b0ed9340891e9a20c283",
-    "head_short": "8006f97",
-    "subject": "docs(manifest): 清单以 HEAD 5ce6528 重生成（1710/47/33/66/103）",
+    "head": "d6f9662865aa44daf1fc173ba48f4369770fbd89",
+    "head_short": "d6f9662",
+    "subject": "feat(W6): 文档里的数字只有一个来源——清单为准，脚本核对",
     "branch": "main",
-    "dirty": true,
-    "changed_paths": 19
+    "dirty": false,
+    "changed_paths": 0
   },
   "code": {
     "tools": {
