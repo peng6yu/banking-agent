@@ -360,8 +360,29 @@ def test_index_serves_the_frontend_and_unknown_route_stays_chinese(bank: Path) -
     root = call("GET", "/")
     assert root.status_code == 200
     assert "text/html" in root.headers["content-type"]
-    assert "api/chat" in root.text
+    # W5 之后 index.html 只是壳：结构在 HTML、样式在 /static/app.css、脚本在 /static/js/*.js。
+    assert "/static/app.css" in root.text
+    assert "/static/js/10-core.js" in root.text
     missing = call("GET", "/api/nope")
     assert missing.status_code == 404
     assert missing.json()["code"] == "HTTP_ERROR"
     assert "Not Found" not in missing.text
+
+
+def test_static_assets_are_served_without_the_api_token(bank: Path) -> None:
+    """样式与脚本挂在 /static 下，不校验 X-API-Token：否则没令牌就只剩一个白页。
+
+    这条同时锁住「壳引用的文件真的存在」——旧版把 CSS/JS 内联在同一份 HTML 里，
+    拆分之后最容易犯的错就是文件名改了却忘了改壳。
+    """
+    css = call("GET", "/static/app.css")
+    assert css.status_code == 200
+    assert "text/css" in css.headers["content-type"]
+    assert "--green" in css.text
+
+    core = call("GET", "/static/js/10-core.js")
+    assert core.status_code == 200
+    assert "api/chat" in core.text or "API_CHAT" in core.text
+
+    assert call("GET", "/static/js/nope.js").status_code == 404
+

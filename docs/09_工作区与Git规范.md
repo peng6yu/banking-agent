@@ -12,7 +12,7 @@ banking-agent/
 ├── requirements.txt
 ├── setup_env.sh
 ├── app/                  # 后端
-├── web/                  # 前端单文件
+├── web/                  # 前端：index.html 壳 + app.css + js/ 17 个模块脚本
 ├── tests/                # pytest
 ├── scripts/              # 种子、红队、演示脚本
 ├── data/                 # 运行时 sqlite，不进 git

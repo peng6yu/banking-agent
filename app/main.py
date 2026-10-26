@@ -10,10 +10,12 @@ from __future__ import annotations
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app import db
@@ -93,7 +95,14 @@ async def _lifespan(_app: FastAPI) -> AsyncIterator[None]:
         await ticker.stop(task)
 
 
+#: 前端静态资源根：index.html 是壳，app.css + js/*.js 从这里取。
+#: 只挂同源目录，不引 CDN——演示机断网也要能整页打开。
+WEB_DIR = Path(__file__).resolve().parents[1] / "web"
+
+
 app = FastAPI(title=API_TITLE, version=API_VERSION, lifespan=_lifespan)
+# /static 不走 require_api_token：样式与脚本本身不含业务数据，页面拿不到令牌时也该能显示壳。
+app.mount("/static", StaticFiles(directory=WEB_DIR), name="static")
 app.include_router(routes.router)
 # 只读业务视图（财务总览/账单分析/业务管理/计划与提醒/执行记录）与聊天流并列注册：
 # 前者描述"账户现在什么状态"，后者描述"某次会话执行到了哪里"，不是同一种数据。

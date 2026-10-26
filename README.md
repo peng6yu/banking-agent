@@ -62,7 +62,7 @@ make run     # 启动日志会打印一条带 #token= 的地址，打开那一�
 
 设计系统在 web/index.html 顶部统一定义（品牌色、背景、卡片、主次文字、成功/警告/危险、字号、间距、圆角、阴影、按钮与输入高度、焦点与禁用态），组件按「余额卡 / 收支卡 / 异常卡 / 计划卡 / 状态标签 / AI 消息 / 补信息表单 / 收款人候选 / 确认卡 / 风险提示 / 多因子状态 / 执行进度 / 错误 / 空状态 / 加载 / 审计详情」分区实现。
 
-> 为什么还是单文件：这是仓库自带的合规门禁 scripts/check_frontend.py 的要求——不允许任何外链脚本/样式、不允许 EventSource、不允许 var，66 项全过才算过。引入框架要先说清部署与离线成本，本轮没做这个交换。
+> 为什么没有构建链：`web/index.html` 只是壳（477 行，纯 DOM），样式在 `web/app.css`，脚本是 `web/js/` 下 17 个经典脚本按文件名序加载、共享一个全局词法作用域。仓库自带的合规门禁 `scripts/check_frontend.py` 不允许外链脚本/样式、不允许 EventSource、不允许 var，91 项全过才算过；引入框架要先说清部署与离线成本，本轮没做这个交换。
 
 ## 2026-10-24 上一轮补了什么（业务语义与安全边界；其中日累计/生日预算两条已被下文审计整改轮修正）
 
@@ -117,7 +117,7 @@ make run     # 启动日志会打印一条带 #token= 的地址，打开那一�
 | 4 | **生日计划一次性预约授权**（P1） | 新增 `plan_authorizations`：绑定 `plan_version` + 账户 + 项目 + 金额，创建计划时用户显式勾选才保存；到点执行前重判，仅**仍合法的黄色**可用预授权自动执行，升级为红色或参数变化必须暂停并要求强验证/用户确认；取消计划即撤销授权，后台不再启动付款 | `tests/test_birthday_authorization.py`、`tests/test_birthday_api_authorization.py`（4 条：预留改变 available 不改 balance、授权行绑定计划版本、到期窗口前后、红日不自动扣） |
 | 5 | **沙箱条款的合规说明**（P1） | 审查完整调用链后确认主 Agent **不执行任意模型生成代码**（无 `eval`/`exec`，模型输出只进结构化参数）；`scripts/prove_no_exec_surface.py` 实测 75 文件 / 25,383 行、代码执行面 0 命中、出网 3 处（仅 `app/llm.py`）、动态 SQL 13 处逐条人工复核、离线 `subprocess` 9 处全部在测试/脚本侧；这是「消除执行面」的替代设计，**不是已部署的容器沙箱**，未宣称已实现沙箱 | `docs/security_sandbox.md`（149 行，含逐跳调用链 file:line 与剩余风险）、`tests/test_no_exec_surface.py`（14 条） |
 | 6 | **A/B 配对统计与浏览器回归**（P1） | 8 轮完整真实 80 例（mock=false）做配对统计：逐轮 intent B−A 为 −1.25 / +2.50 / 0 / +2.50 / +5.00（MiniMax）与 +5.00 / −2.50 / +8.75（DeepSeek），**符号翻转**；同配置 A 组复跑极差 6.25pp / 11.25pp；仅一轮的 +8.75pp 配对 bootstrap CI[+2.50,+16.25] 不含 0，但属单轮单次采样；**稳定成立的是知识引用（B 41–42/51 vs A=0），不宣称知识层稳定提升准确率** | `docs/benchmark/ab_paired_stats.md`、`scripts/ab_stats.py`；浏览器 7 条旅程由当前 `scripts/ui_journeys.py` 实际执行、失败 0（j3 单独用真模型后端，J4/J5 为 API 驱动流程级），见 `docs/交付/browser_journeys.json` 与 `docs/benchmark/browser_journey_audit.md` |
-| 7 | **交付材料统一** | 重新生成 `docs/benchmark/release_manifest.json`（从代码与运行日志取数），README / 验收报告 / 优先级 / 提交物对照表 / PPT 大纲 / 演示方案 / PROGRESS 全部引用同一份事实；旧数字一律标「历史基线」不删除 | 本轮最终验证：**pytest 1709 passed / 4 skipped**、红队 **43/43**、e2e **13/13**、浏览器旅程 **7/7**（全部 exit 0） |
+| 7 | **交付材料统一** | 重新生成 `docs/benchmark/release_manifest.json`（从代码与运行日志取数），README / 验收报告 / 优先级 / 提交物对照表 / PPT 大纲 / 演示方案 / PROGRESS 全部引用同一份事实；旧数字一律标「历史基线」不删除 | 本轮最终验证：**pytest 1710 passed / 4 skipped**、红队 **43/43**、e2e **13/13**、浏览器旅程 **7/7**（全部 exit 0） |
 
 本轮规模（实测）：测试文件 **102**（`tests/test_*.py`；`tests/` 下 `.py` 文件共 110 个，含 8 个夹具/辅助文件）、数据库表 **33**、工具 **35**（只读 13 / 写 22）、审计事件 **66**、权限规则 **13**、API 路径 **47**。
 
@@ -332,17 +332,17 @@ curl -s http://127.0.0.1:8000/api/audit/verify
 ### 单元与集成测试（实测全绿，用例数持续增补）
 
 ```bash
-python3.12 -m pytest -q tests/            # 1709 passed, 4 skipped（2026-10-26 W4 分层收口轮复跑；历史基线为 1336 passed / 4 skipped）
+python3.12 -m pytest -q tests/            # 1710 passed, 4 skipped（2026-10-26 W5 前端拆分轮复跑；历史基线为 1336 passed / 4 skipped）
 ```
 
 > **数字口径**：本 README 里的工具数、表数、审计事件数、测试通过数与 A/B 轮次，
 > 一律以 [`docs/benchmark/release_manifest.json`](docs/benchmark/release_manifest.json) 为准（2026-10-24 生成）。
 > 该文件由 `scripts/release_manifest.py` 从代码与运行日志里读出来，不手抄。
 
-### 前端合规自检（实测 66 项全过）
+### 前端合规自检（实测 91 项全过）
 
 ```bash
-python3.12 scripts/check_frontend.py      # 实测「前端检查通过：66/66 项全部达标」
+python3.12 scripts/check_frontend.py      # 实测「前端检查通过：91/91 项全部达标」
 ```
 
 ### 浏览器级冒烟（真 Chromium，实测 PASS + 3 张截图）
@@ -407,8 +407,10 @@ python3.12 -m app.smoke                    # 实测 4/4 PASS，主脑延迟约 1
 | `app/security/` | 入口访问令牌、能力令牌、签名信封、注入扫描、熔断器 |
 | `app/tools/` | 35 个工具：查人、查余额、账单、卡片、订阅、转账、资金冻结 + 7 个主动财务（只读/需确认，无动钱语义） |
 | `app/api/` | 会话/确认/审计等 47 条 API 路径（46 条 `/api/*` + 根路径 `/`），含人工接管队列 `handoffs_api.py`；另有只读业务视图 `business.py`（overview / bill / management / plans / executions 五个 GET，六个区域的唯一数据来源） |
-| `web/index.html` | 单文件前端（原生 JS，无框架、无 CDN、零外链） |
-| `tests/` | pytest 用例集（**1709 passed / 4 skipped**，2026-10-26 W4 分层收口轮复跑；历史基线 1336）+ 43 条红队 YAML + `tests/eval/` 80 例 A/B 评估集（10-24 共 8 轮真实结果已入库，统计见 `docs/benchmark/ab_paired_stats.md`） |
+| `web/index.html` | 前端壳：只放 DOM（原生 JS，无框架、无 CDN、零外链） |
+| `web/app.css` | 全站唯一样式表（设计系统变量层在 `:root`） |
+| `web/js/*.js` | 17 个模块脚本，按 10→95 的文件名序加载，共享全局作用域 |
+| `tests/` | pytest 用例集（**1710 passed / 4 skipped**，2026-10-26 W5 前端拆分轮复跑；历史基线 1336）+ 43 条红队 YAML + `tests/eval/` 80 例 A/B 评估集（10-24 共 8 轮真实结果已入库，统计见 `docs/benchmark/ab_paired_stats.md`） |
 | `scripts/` | 种子脚本、前端合规检查器、真实 Chromium 冒烟(`browser_smoke.py`)、六区+主线截图(`ui_screenshots.py`) |
 | `docs/` | 交接规格书 00—10（改造前基线，写代码前必读）+ 11—15 改造设计与验收 + 答辩与演示交付件 |
 | `规划/` | 前期选型与模型实测记录 |
@@ -422,7 +424,7 @@ python3.12 -m app.smoke                    # 实测 4/4 PASS，主脑延迟约 1
 | `make setup` | 一键配置新电脑（.venv + 依赖 + .env + 选模型 + 建库 + 自检） | ✅ 幂等；`ARGS="--dry-run"` 可预演 |
 | `make run` | 启动服务（--reload） | ✅ |
 | `make seed` | 建库 + 种子（幂等） | ✅ |
-| `make test` | pytest 全跑 | ✅ 全绿（1709 passed / 4 skipped，2026-10-26 W4 分层收口轮实测；历史基线 1336） |
+| `make test` | pytest 全跑 | ✅ 全绿（1710 passed / 4 skipped，2026-10-26 W5 前端拆分轮实测；历史基线 1336） |
 | `make smoke` | 模型连通性自检 | ✅ 4/4 |
 | `make cov` | 覆盖率（未装 pytest-cov 时自动退回纯跑） | ✅ |
 | `make reset` | `POST /api/demo/reset` 演示前清场 | ✅ |
@@ -512,7 +514,7 @@ docs/10_测试与验收清单.md         ← 43 条红队 + 里程碑验收
 | 不用 LangGraph / 多 Agent 框架 | 审计链要逐字段可控；金融场景要单点可追溯，多 Agent 会糊掉责任边界 |
 | 结构化输出只走 tool_calls | 实测 MiniMax 的 `response_format: json_object` 不被遵守；两家都按 tool_calls 解析 |
 | SQLite + 标准库 | 零运维，评审可一键复现；审计表用触发器禁改 |
-| 单文件前端 | 断网也能演示；SSE 用 fetch + ReadableStream 手工解析，不引任何框架 |
+| 零构建前端 | 断网也能演示；壳 + 样式 + 17 个经典脚本，SSE 用 fetch + ReadableStream 手工解析，不引任何框架 |
 
 ## 安全声明
 

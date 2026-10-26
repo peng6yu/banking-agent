@@ -785,3 +785,37 @@ W3 把写操作收到一条路径，W4 处理**依赖方向**与**文件体量**
 - `web/index.html` **5954 行** → 壳 + js/css 模块（目标 ≤600 行）—— W5
 - 文档手抄数字（历史 39 path / 44 operation / 30 表 等口径散在 `docs/技术文档.md`、`docs/10`、`docs/09`、`docs/架构图.mmd`）—— W6 由 `scripts/check_docs_numbers.py` 统一，写不进代码的事实只留在 `release_manifest.json`
 - 最长函数仍是 `app/handoffs.py:254 resume`（286 行）、`app/birthday.py:1143 pay_item`（247 行），待后续按分支拆
+
+---
+
+## v3.1.0 前端拆分（W5）· 2026-10-26
+
+**这一轮把 5954 行的单文件前端拆成「壳 + 样式 + 模块脚本」，一行页面逻辑都没改。**
+
+### 拆法
+
+- 不用 ES module、不引打包器：继续用经典 `<script src>`，按 10→95 的文件名序加载，17 个文件共享一个全局词法作用域（顶层 `const/let` 落全局词法环境，`function` 落 window），跨文件直接引用；每个文件头 `'use strict';`。
+- `web/index.html`：**5954 → 477 行**，只留 DOM；`<head>` 一行 `<link rel="stylesheet" href="/static/app.css">`，末尾 17 行 `<script src="/static/js/xx.js">`，没有内联 `<style>` / `<script>`。
+- `web/app.css`：586 行，原 `<style>` 整段搬来；设计系统变量层仍在 `:root`。
+- `web/js/` 17 个文件共 4943 行：10-core(72) 20-dom(164) 30-chat(241) 40-confirm(426) 50-actions(272) 60-proactive-a(268) 65-proactive-b(532) 70-bx-core-a(349) 72-bx-core-b(319) 80-view-overview(389) 82-view-bill(124) 84-view-plans(186) 86-view-birthday(407) 88-view-monitor(203) 90-view-manage(481) 92-view-security(131) 95-session(379)。每个 ≤600 行，首行是块注释说明职责。
+- 保真度：拆分后去掉注释逐行比对，**4489 行代码 IDENTICAL**（`tmp/_verify_split2.py`）。
+
+### 接线与门禁
+
+- `app/main.py`：`app.mount("/static", StaticFiles(directory=WEB_DIR), name="static")`。`/static` 不走 `require_api_token`——样式与脚本里没有业务数据，带 token 反而没法被浏览器缓存。
+- `scripts/check_frontend.py` 整体重写（约 560 行）：新增 `Sources` / `load_sources`，把「一个文件」的检查改成「壳 + 样式 + 17 个脚本」的检查；新增 `check_files`（每个前端文件 ≤600 行、壳里不许内联、`app.css` 非空）与 `check_static_refs`（`src/href` 必须 `/static` 或 `#` 开头、引用的文件必须真实存在、脚本顺序必须等于 `sorted(/static/js/*.js)`）。原来那条「所有脚本包在 IIFE 里」换成「每个 js 都有块注释开头 + 不许有 `var`」。实测 **91/91 PASS**。
+- `scripts/arch_report.py`：前端统计从「只看 index.html」改成收 `web/**/*.{html,css,js}`，引用来源改 `html + js`（声明仍只认壳），`DYNAMIC_ID_WHITELIST` 四条改指向 `web/js/84-view-plans.js` 与 `web/js/90-view-manage.js`。
+- `tests/test_api.py`：首页断言从「有 api/chat」改成「引用了 `/static/app.css` 与 `/static/js/10-core.js`」；新增 `test_static_assets_are_served_without_the_api_token`（css 200 + text/css、脚本 200、不存在的 js 404、全程不带 token）。
+
+### 验收
+
+- 全量 `.venv/bin/python -m pytest -q` → **1710 passed, 4 skipped, 1 warning in 19.54s, EXIT=0**（`tmp/pytest_w5b.log`）。
+- `scripts/check_frontend.py` → **91/91 PASS**；架构体检前端 id 引用 109 / 声明 126 / 缺失 0。
+- 真浏览器（8112 真模型 + 硬刷 `Page.reload{ignoreCache:true}`）：17 个脚本全部加载、六视图全部渲染、聊天问「我有哪些提醒」回 chips、样式变量生效（`--green=#16a34a`）。截图 `tmp/shot_w5_chat.png`。
+- 文档同步：README（「为什么没有构建链」重写 + 文件表拆三行）、docs/00 铁律 9、docs/02 目录树与 web/ 登记表（新增 app.css 与 js/*.js 两行）、docs/07 §7.7 标题、docs/08 §8.9 前端规则与文件上限、docs/09 目录树、技术文档/技术方案总览/提交物对照表/设计系统/演示脚本/作品简介，以及 benchmark 三处「66/66 → 91/91」「单文件膨胀」表述。
+
+### 遗留
+
+- W6：`scripts/check_docs_numbers.py`（文档里的数字不再手抄，改为从 `release_manifest.json` 与代码实测校验）。
+- `app/birthday.py` 1818 行（超旧的 1809 上限 9 行，已随 `--write-baseline` 重生成；W5 之后最长的文件已不是它，但仍是最大的单体，留给后续拆）。
+- 前端仍是全局作用域：17 个文件之间靠文件名序与块注释约定，没有模块边界校验；若继续变大，下一步是给每个文件加「只允许读哪些前缀全局」的静态检查。

@@ -7,13 +7,14 @@
     .venv/bin/python scripts/arch_report.py --write-baseline scripts/arch_baseline.json
 
 口径（改这里就要同步 tests/test_architecture.py 的断言）：
-1. 文件行数：物理行数（含空行、注释），范围 app/**/*.py + tests/**/*.py + web/index.html。
+1. 文件行数：物理行数（含空行、注释），范围 app/**/*.py + tests/**/*.py + web/**（index.html / app.css / js/*.js）。
 2. 长函数：ast 里每个 FunctionDef/AsyncFunctionDef（含 async、含嵌套、含装饰器行）的
    end_lineno - start + 1；超过 80 行即记录。只统计 app/（运行时代码），测试文件不在此列。
 3. 顶层重名：模块顶层（tree.body）的函数名，同名出现在 >1 个模块即记录。
 4. 跨层违规：复用 tests/test_imports.py 的 LAYERS/_rank/_actual（唯一真源，不另抄一份），
    依赖方的层序号 < 被依赖方 即反向依赖；不在 ALLOWED 表里的依赖另记一条「未登记依赖」。
-5. 前端 id：web/index.html 里 $('xxx') / querySelector('#xxx') 的字面量引用 vs id="xxx" 声明；
+5. 前端 id：web/index.html + web/js/*.js 里 $('xxx') / querySelector('#xxx') 的字面量引用 vs
+   index.html 里 id="xxx" 的声明；
    JS 动态生成（element.id = '...'）的 id 走 DYNAMIC_ID_WHITELIST 白名单，每条必须写明来历。
 
 稳定可复现：所有列表按固定键排序，基线里不写时间戳，所以同一份工作区永远生成同一份基线。
@@ -32,7 +33,10 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 APP_DIR = ROOT / "app"
 TESTS_DIR = ROOT / "tests"
-WEB_INDEX = ROOT / "web" / "index.html"
+WEB_DIR = ROOT / "web"
+WEB_INDEX = WEB_DIR / "index.html"
+#: 前端参与行数统计的扩展名：壳、样式表、脚本。别的（截图、字体）不计。
+WEB_SUFFIXES = (".html", ".css", ".js")
 
 #: 单个文件的行数硬上限（不在基线里的文件按这个卡）。
 FILE_LINE_LIMIT = 600
@@ -44,10 +48,10 @@ BASELINE_VERSION = 1
 #: 前端 id 白名单：这些 id 由 JS 动态创建，HTML 里静态找不到，不算缺失。
 #: 每条都必须写清「谁在哪里创建」，否则下一个人无法判断它还成不成立。
 DYNAMIC_ID_WHITELIST: dict[str, str] = {
-    "plan-run-now": "web/index.html:4185 的 btn.id = 'plan-run-now'（按计划动态生成的「立刻跑」按钮）",
-    "mg-memory-key": "web/index.html:5277 的 bxMemoryField('mg-memory-key', …)（记忆表单动态字段）",
-    "mg-memory-value": "web/index.html:5278 的 bxMemoryField('mg-memory-value', …)（记忆表单动态字段）",
-    "mg-memory-kind": "web/index.html:5282 的 kindSel.id = 'mg-memory-kind'（记忆类型下拉，动态插入）",
+    "plan-run-now": "web/js/84-view-plans.js 的 btn.id = 'plan-run-now'（按计划动态生成的「立刻跑」按钮）",
+    "mg-memory-key": "web/js/90-view-manage.js 的 bxMemoryField('mg-memory-key', …)（记忆表单动态字段）",
+    "mg-memory-value": "web/js/90-view-manage.js 的 bxMemoryField('mg-memory-value', …)（记忆表单动态字段）",
+    "mg-memory-kind": "web/js/90-view-manage.js 的 kindSel.id = 'mg-memory-kind'（记忆类型下拉，动态插入）",
 }
 
 #: JS 里取元素的两种写法：$('id') 与 querySelector('#id…')。
@@ -126,12 +130,12 @@ def _iter_app_files() -> list[Path]:
 
 
 def _iter_tracked_files() -> list[Path]:
-    """参与行数统计的全部文件：app + tests + 前端单页。"""
+    """参与行数统计的全部文件：app + tests + web/（壳、样式、脚本）。"""
     files = list(_iter_app_files())
     if TESTS_DIR.exists():
         files.extend(sorted(TESTS_DIR.rglob("*.py")))
-    if WEB_INDEX.exists():
-        files.append(WEB_INDEX)
+    if WEB_DIR.exists():
+        files.extend(sorted(path for path in WEB_DIR.rglob("*") if path.suffix in WEB_SUFFIXES))
     return sorted(files)
 
 
@@ -232,14 +236,21 @@ def _collect_layer(metrics: Metrics) -> None:
 
 
 def _collect_frontend(metrics: Metrics) -> None:
-    """前端 id：JS 引用 vs HTML 声明，动态生成的走白名单。"""
+    """前端 id：脚本里的引用 vs 壳里的声明，动态生成的走白名单。
+
+    拆分之后（W5）引用散在 web/js/*.js，声明仍只认 index.html——
+    因为页面结构只有一份，脚本里 element.id = 'x' 属于动态创建，走白名单。
+    """
     if not WEB_INDEX.exists():
         return
     html = WEB_INDEX.read_text(encoding="utf-8")
+    js = "\n".join(
+        path.read_text(encoding="utf-8") for path in sorted((WEB_DIR / "js").glob("*.js"))
+    )
     declared = {match.group("id") for match in _DECLARED_RE.finditer(html)}
     referenced: set[str] = set()
     for pattern in (_DOLLAR_RE, _SELECTOR_RE):
-        referenced.update(match.group("id") for match in pattern.finditer(html))
+        referenced.update(match.group("id") for match in pattern.finditer(html + "\n" + js))
 
     metrics.frontend_declared = len(declared)
     metrics.frontend_referenced = len(referenced)

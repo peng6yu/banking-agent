@@ -2,7 +2,7 @@
 
 > **用途**：2026 深圳国际金融科技大赛「人工智能赛道 · 银行 AI 智能体」阶段 0.3 / 0.4 交付物。把 Revolut AIR 的公开能力逐维度拆成可执行的改造项，回答三件事：差在哪、值不值得补、补完怎么验收。
 > **对标对象**：Revolut AIR（AI by Revolut），证据全部复用 `docs/benchmark/revolut_air_research.md` 的台账编号（A1–A17 / B1–B15 / F1–F7）与四档证据状态，**不新增来源、不升级证据等级**。
-> **本项目证据口径**：代码路径 + 测试。基线数字来自 `docs/改造实施基线.md`（改造前基线：**904 passed / 4 skipped**）；本文写作时（2026-10-23）一度处于并行改造中间态（916/935 passed），**已收口**。最终交付状态：**1709 passed / 4 skipped**（`.venv/bin/python -m pytest -q`，19.02s，2026-10-26 终态复跑；历史基线 **1336 passed / 4 skipped**，19.94s）、前端静态检查 **66/66**、红队 **PASS 43 / FAIL 0**、集成联调 **13/13**（`scripts.e2e --offline`）、浏览器旅程 **7 条 / 失败 0**、A/B 评估 **80 例**（详见 `docs/benchmark/final_acceptance_report.md`）。中间态数字只作过程记录，不作交付依据。
+> **本项目证据口径**：代码路径 + 测试。基线数字来自 `docs/改造实施基线.md`（改造前基线：**904 passed / 4 skipped**）；本文写作时（2026-10-23）一度处于并行改造中间态（916/935 passed），**已收口**。最终交付状态：**1710 passed / 4 skipped**（`.venv/bin/python -m pytest -q`，19.54s，2026-10-26 终态复跑；历史基线 **1336 passed / 4 skipped**，19.94s）、前端静态检查 **91/91**、红队 **PASS 43 / FAIL 0**、集成联调 **13/13**（`scripts.e2e --offline`）、浏览器旅程 **7 条 / 失败 0**、A/B 评估 **80 例**（详见 `docs/benchmark/final_acceptance_report.md`）。中间态数字只作过程记录，不作交付依据。
 > **硬约束**：本矩阵不改代码；所有"本项目"结论都能回指真实文件；拿不准的一律写「待核实」，不用常识补齐。
 
 ---
@@ -61,7 +61,7 @@
 | D10 安全确认 | G10 | 官方证实（分级表未核实） | 已实现（R01–R13 + 令牌七步 + 用户维度日累计分级） | P0（已有） | 8–12（P2 部分） |
 | D11 隐私与数据最小化 | G11 | 官方证实（三条承诺） | 已实现（信封 + 审计不落原文） | P1 | 1–2 |
 | D12 可解释与来源引用 | G12 | 部分官方证实；"为什么"未核实 | 部分（审计已落知识 ids；explain 仍硬编码） | P0 | 3–5 |
-| D13 评估与可观测性 | G13 | B1（原页未打开） | 已补强（1709 测试 + 80 例评估集 + 43 红队 + 哈希链；仍无延迟/token/成本指标与人工抽样） | P0 | 3–5 |
+| D13 评估与可观测性 | G13 | B1（原页未打开） | 已补强（1710 测试 + 80 例评估集 + 43 红队 + 哈希链；仍无延迟/token/成本指标与人工抽样） | P0 | 3–5 |
 | D14 领域知识与术语 | G14 | B1 + A6 | 已完成（5 个 YAML 齐、kb_bridge 已接 intent/dag/审计；version 2c4fbe8d4be2906c） | P0 | 8–12 |
 | D15 中断/回退/人工接管 | G15 | 仅"转人工"官方证实 | 部分→收窄版已实现（取消/超时/冲正 + 本地人工接管队列 + 断点恢复；无 RBAC/坐席对接） | P0（已有）/P2（仅剩坐席对接） | 5–8 |
 
@@ -78,12 +78,12 @@
 | ① AIR 公开能力 | 把多标签页操作压缩成一次对话：App 内下拉或 Profile→Chats→AIR；官方自述 "an execution engine"、"moves beyond the traditional chatbot"、"One chat. Total control."；英国 1300 万客户起量 |
 | ② AIR 依据与证据状态 | A1 https://www.revolut.com/air-ai-by-revolut/ 、A3 https://www.revolut.com/news/revolut_enters_new_era_of_money_intelligence_with_launch_of_ai_assistant/ 、A4 https://www.revolut.com/blog/post/air-ai-by-revolut/ 、A5 https://help.revolut.com/help/profile-and-plan/getting-started-with-air/ ——**官方资料明确证实**；语音入口只在 B1 提到，**尚未核实** |
 | ③ 本项目真实实现状态 | 部分：PC 单页 `web/index.html`（1173 行，无框架），右侧 5 面板"意图/计划/权限灯/多因子/审计链"（`web/index.html:297-340`），SSE 固定 8 个事件 `start/intent/trace/confirm/factor/tool/done/error`（`app/planner/events.py:1-8`、`app/api/routes.py:106`）；无移动端、无手势入口、无语音 |
-| ④ 代码位置与测试证据 | `app/api/routes.py:330 _events`（SSE 编排）、`app/planner/events.py trace_event`；`scripts/check_frontend.py` **66/66**（2026-10-23 实测）、`scripts/browser_smoke.py` + `tests/test_browser_smoke.py:42`（2 场景真实浏览器截图，断言截图互不相同） |
+| ④ 代码位置与测试证据 | `app/api/routes.py:330 _events`（SSE 编排）、`app/planner/events.py trace_event`；`scripts/check_frontend.py` **91/91**（2026-10-23 实测）、`scripts/browser_smoke.py` + `tests/test_browser_smoke.py:42`（2 场景真实浏览器截图，断言截图互不相同） |
 | ⑤ 能力缺口 | **G01**：缺"一句一屏"的演示级交互收敛（当前是对话 + 工程看板并置，评审第一眼更像监控台，不是银行助手）；无移动端形态与语音 |
 | ⑥ 可借鉴设计 | E1 手势单入口（难度低）、E13 "单步完成复杂任务"作为验收标准；**不照搬**独立 App，赛题演示用响应式 Web + 大字号对话区即可 |
-| ⑦ 改造复杂度与风险 | 2–3 人日 / 约 200–300 行前端改动：新增"演示模式"开关、对话区优先布局、手势/快捷键唤起、移动端断点；风险：改坏 66 项前端硬检查（R10 前端单文件膨胀），须先跑 `check_frontend.py` 再改 |
+| ⑦ 改造复杂度与风险 | 2–3 人日 / 约 200–300 行前端改动：新增"演示模式"开关、对话区优先布局、手势/快捷键唤起、移动端断点；风险：改坏 91 项前端硬检查（R10 前端文件膨胀），须先跑 `check_frontend.py` 再改 |
 | ⑧ 对应赛题要求 | 30% 创新性与交互体验；演示视频 ≤5 分钟；3.3 "模糊表达"体验 |
-| ⑨ 验收方法 | `python scripts/check_frontend.py` 66/66；`pytest tests/test_browser_smoke.py -q` 通过且截图差异断言不变；人工走查 5 条口语句（含 1 条模糊句）均一屏内看到"意图→权限灯→结果" |
+| ⑨ 验收方法 | `python scripts/check_frontend.py` 91/91；`pytest tests/test_browser_smoke.py -q` 通过且截图差异断言不变；人工走查 5 条口语句（含 1 条模糊句）均一屏内看到"意图→权限灯→结果" |
 | ⑩ 优先级 | **P1**（演示加分项，不阻塞核心场景；主演示前必须完成） |
 
 ### D02 个人财务洞察
@@ -257,7 +257,7 @@
 |---|---|
 | ① AIR 公开能力 | 官方未公开评测方法；B1 称有多 Agent 平台、guardrails、evals、monitoring、标注与 QA/QC 流程、集中式 AI 网关 |
 | ② AIR 依据与证据状态 | B1（**可信公开技术资料证实，原页未打开**）；具体指标/阈值/数据集规模**尚未核实** |
-| ③ 本项目真实实现状态 | **已补强**：`tests/eval/` 80 例中文评估集 + 可复现脚本 + A/B 报告（真模型，6 项指标：intent/slot/clarify/dag/knowledge_citation/unauthorized）；全量 **1709 passed / 4 skipped**（2026-10-26 终态复跑，19.02s；历史基线 1336）、103 个测试文件（`tests/test_*.py`）、43 条红队 **PASS 43 / FAIL 0**、前端 66 项、哈希链审计可验证。**仍无**延迟/token/成本指标与人工质量抽样 |
+| ③ 本项目真实实现状态 | **已补强**：`tests/eval/` 80 例中文评估集 + 可复现脚本 + A/B 报告（真模型，6 项指标：intent/slot/clarify/dag/knowledge_citation/unauthorized）；全量 **1710 passed / 4 skipped**（2026-10-26 终态复跑，19.54s；历史基线 1336）、103 个测试文件（`tests/test_*.py`）、43 条红队 **PASS 43 / FAIL 0**、前端 91 项、哈希链审计可验证。**仍无**延迟/token/成本指标与人工质量抽样 |
 | ④ 代码位置与测试证据 | `tests/`、`tests/eval/{intent_cases.yaml,run_eval.py,evaluation_report.md,test_eval_harness.py}`、`scripts/redteam.py`、`scripts/check_frontend.py`、`app/api/routes.py /api/audit/verify` |
 | ⑤ 能力缺口 | **G13 收窄**：80 例评估集 + 8 轮 A/B 已入库；仍无延迟/token/成本指标、人工质量抽样与 CI 阈值；每轮单次采样不能谈显著性 |
 | ⑥ 可借鉴设计 | E7：小步引入 evals + 标注集，不建平台；指标只做三项（意图准确率、工具成功率、P95 延迟） |
@@ -272,7 +272,7 @@
 |---|---|
 | ① AIR 公开能力 | 直连内部知识库与产品生态，能回答产品/条款类问题；未见术语表或法规知识库的公开细节 |
 | ② AIR 依据与证据状态 | B1（**可信公开技术资料证实，原页未打开**）；A6（AI 透明度）——**官方资料明确证实**；知识库结构**尚未核实** |
-| ③ 本项目真实实现状态 | **已完成**：`app/knowledge/` 6 个模块 + 5 个 YAML（terms 40 / entities 25 / relations 22 / intents 11 / workflows 10 / sources 34），`app/planner/kb_bridge.py` 接入 intent + dag + routes，`knowledge.retrieved` 审计落库；知识集成测试 7 条失败已收口，全量 1709 passed（历史基线 1336）；加载失败降级为「空知识 + warning + 追问」并有专门测试 |
+| ③ 本项目真实实现状态 | **已完成**：`app/knowledge/` 6 个模块 + 5 个 YAML（terms 40 / entities 25 / relations 22 / intents 11 / workflows 10 / sources 34），`app/planner/kb_bridge.py` 接入 intent + dag + routes，`knowledge.retrieved` 审计落库；知识集成测试 7 条失败已收口，全量 1710 passed（历史基线 1336）；加载失败降级为「空知识 + warning + 追问」并有专门测试 |
 | ④ 代码位置与测试证据 | `app/knowledge/loader.py`、`retrieve.py`（docstring 明确"不引入向量检索"）、`app/planner/kb_bridge.py`、`app/api/routes.py:_audit_knowledge`；测试 `tests/test_knowledge_{loader,normalize,retrieve,integration}.py`、`tests/test_security_knowledge.py`；43 条红队已复跑 PASS 43 / FAIL 0 |
 | ⑤ 能力缺口 | **G14 已关闭**（原缺口：缺 4 个数据文件、缺接线、缺审计与降级策略）；残余：知识仅参与「问不问/填什么/怎么解释」，不进模型上下文（受 SYSTEM_PROMPT 逐字测试约束），语义泛化仍靠别名表 |
 | ⑥ 可借鉴设计 | E5 知识库+产品生态直连；知识是**数据不是指令**（基线原则），冲突时降级并审计；检索用结构化/关键词即可，**不上向量库** |
