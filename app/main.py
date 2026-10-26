@@ -19,7 +19,7 @@ from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app import db
-from app.api import business, handoffs_api, memory_api, routes
+from app.api import business, handoffs_api, memory_api, messages_api, routes
 from app.clock import BankError
 from app.llm import LLMError
 from app.planner import ticker
@@ -113,6 +113,9 @@ app.include_router(handoffs_api.router)
 # 长期记忆：用户能看、能补、能删「agent 记住了我什么」，所以和会话/业务视图并列，
 # 同样挂 require_api_token（router 内部已声明依赖）。
 app.include_router(memory_api.router)
+# 助手主动提醒：读列表 + 反馈（采纳/忽略/静默）。同样挂 require_api_token
+# （router 内部已声明依赖），提醒正文里会出现金额与商户，不能匿名可读。
+app.include_router(messages_api.router)
 
 
 @app.exception_handler(BankError)

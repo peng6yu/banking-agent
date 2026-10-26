@@ -37,15 +37,17 @@ def test_claims_cover_every_fact_we_publish():
 
 def test_a_wrong_test_count_is_caught(tmp_path):
     """写错的总数必须被指出来，而且期望值是清单里的数。"""
+    manifest = json.loads(cdn.MANIFEST.read_text(encoding="utf-8"))
+    # 路径数取清单里的真实值：写死一个常数的话，代码一加路由这条测试就自己变成"过时文档"。
+    paths = manifest["code"]["api_paths"]
     doc = tmp_path / "wrong.md"
-    doc.write_text("全量回归 9999 passed / 4 skipped；47 条 API 路径。\n", encoding="utf-8")
+    doc.write_text(f"全量回归 9999 passed / 4 skipped；{paths} 条 API 路径。\n", encoding="utf-8")
     problems = cdn.check(docs=[doc])
     labels = _problem_labels(problems)
     assert "pytest 通过数" in labels
     # 路径数这一行写对了，不应被连坐
     assert "API 路径数" not in labels
     expected = {label: expect for _where, expect, label, _text in problems}
-    manifest = json.loads(cdn.MANIFEST.read_text(encoding="utf-8"))
     assert expected["pytest 通过数"] == manifest["tests"]["passed"]
 
 

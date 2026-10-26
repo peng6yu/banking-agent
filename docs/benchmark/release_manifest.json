@@ -1,13 +1,13 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-10-26T14:24:39+08:00",
+  "generated_at": "2026-10-26T18:45:58+08:00",
   "git": {
-    "head": "d6f9662865aa44daf1fc173ba48f4369770fbd89",
-    "head_short": "d6f9662",
-    "subject": "feat(W6): 文档里的数字只有一个来源——清单为准，脚本核对",
+    "head": "06163bd3272f7eeb2fc0c449bb54b763e15af654",
+    "head_short": "06163bd",
+    "subject": "fix(view): 结余交代口径、快捷入口只填不发、执行记录按轮次分组",
     "branch": "main",
-    "dirty": false,
-    "changed_paths": 0
+    "dirty": true,
+    "changed_paths": 38
   },
   "code": {
     "tools": {
@@ -52,7 +52,7 @@
         "assess_suitability"
       ]
     },
-    "db_tables": 33,
+    "db_tables": 36,
     "db_table_names": [
       "users",
       "accounts",
@@ -86,13 +86,16 @@
       "handoffs",
       "subscription_verdicts",
       "chat_turns",
-      "agent_memory"
+      "agent_memory",
+      "messages",
+      "message_feedback",
+      "message_insight_state"
     ],
-    "audit_event_types": 66,
-    "api_paths": 47,
+    "audit_event_types": 68,
+    "api_paths": 51,
     "policy_rules": 13,
     "intent_templates": 9,
-    "test_files": 104,
+    "test_files": 106,
     "knowledge": {
       "version": "2c4fbe8d4be2906c",
       "terms": 40,
@@ -106,11 +109,11 @@
   },
   "tests": {
     "command": ".venv/bin/python -m pytest -q",
-    "passed": 1719,
+    "passed": 1754,
     "failed": 0,
     "skipped": 4,
-    "duration_s": 19.89,
-    "log": "tmp/pytest_w6.log",
+    "duration_s": 17.04,
+    "log": "tmp/pytest_final.log",
     "parsed": true
   },
   "redteam": {
@@ -118,13 +121,13 @@
     "cases_run": 43,
     "pass": 43,
     "fail": 0,
-    "log": "tmp/redteam_w6.log"
+    "log": "tmp/redteam_final.log"
   },
   "e2e": {
     "command": ".venv/bin/python scripts/e2e.py --offline",
     "pass": 13,
     "total": 13,
-    "log": "tmp/e2e_w6.log"
+    "log": "tmp/e2e_final.log"
   },
   "ab": {
     "rounds": [

@@ -57,6 +57,9 @@ EVENT_TYPES: Final[frozenset[str]] = frozenset(
         "scheduled.executed",
         "scheduled.deferred",
         "tool.executed",
+        # 主动提醒：生成了什么、用户采纳还是忽略，都要能复盘「这条提醒从哪来、后来怎样」
+        "message.generated",
+        "message.feedback",
         # 黄档操作在提交时发现日累计已被别的会话推过红线：重新裁决并升级为红
         "policy.upgraded",
         "injection.detected",

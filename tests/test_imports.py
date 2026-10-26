@@ -153,6 +153,10 @@ LAYERS: dict[str, int] = {
     "app.api.handoffs_api": 5,
     # 长期记忆的 HTTP 面：和接管队列同层，鉴权复用 routes
     "app.api.memory_api": 5,
+    # 助手主动提醒：探测器只读账务表 + 频控落库，不认识 planner/tools（同存储级）
+    "app.messages": 2,
+    "app.views.messages": 5,
+    "app.api.messages_api": 5,
     "app.api.schemas": 5,
     "app.main": 5,
     # 包本身没有逻辑，聚合再导出不算越层
@@ -170,6 +174,7 @@ LAYERS: dict[str, int] = {
     "app.use_cases.handoffs": 5,
     "app.use_cases.investments": 5,
     "app.use_cases.memory": 5,
+    "app.use_cases.messages": 5,
     "app.use_cases.plans": 5,
     "app.use_cases.proactive": 5,
     "app.use_cases.reminders": 5,
@@ -260,6 +265,9 @@ ALLOWED: dict[str, frozenset[str]] = {
     "app.api.handoffs_api": _deps("app.api.http app.api.routes app.db app.handoffs app.use_cases app.use_cases.handoffs"),
     # 长期记忆的 HTTP 面：数据层 + 记忆仓储 + 单用户口径 + 鉴权依赖
     "app.api.memory_api": _deps("app.api.http app.api.routes app.db app.memory app.proactive app.use_cases"),
+    "app.api.messages_api": _deps("app.api.http app.api.routes app.db app.use_cases app.use_cases.messages app.views.messages"),
+    "app.messages": _deps("app.audit app.clock app.db app.ids app.money"),
+    "app.views.messages": _deps("app.messages app.timefmt"),
     "app.audit": _deps("app.clock app.log"),
     "app.clock": _deps(""),
     "app.config": _deps(""),
@@ -274,7 +282,7 @@ ALLOWED: dict[str, frozenset[str]] = {
     "app.knowledge.retrieve": _deps("app.knowledge.models"),
     "app.llm": _deps("app.log app.script_mode"),
     "app.log": _deps("app.clock"),
-    "app.main": _deps("app.api app.api.business app.api.handoffs_api app.api.memory_api app.api.routes app.clock app.db app.llm app.planner app.planner.ticker app.security app.security.api_auth"),
+    "app.main": _deps("app.api app.api.business app.api.handoffs_api app.api.memory_api app.api.messages_api app.api.routes app.clock app.db app.llm app.planner app.planner.ticker app.security app.security.api_auth"),
     "app.models": _deps(""),
     "app.money": _deps("app.clock"),
     "app.planner": _deps(""),
@@ -361,6 +369,7 @@ ALLOWED: dict[str, frozenset[str]] = {
     "app.use_cases.handoffs": _deps("app.clock app.db app.handoffs app.use_cases.base"),
     "app.use_cases.investments": _deps("app.proactive app.suitability app.use_cases.base"),
     "app.use_cases.memory": _deps("app.memory app.proactive app.use_cases.base"),
+    "app.use_cases.messages": _deps("app.db app.messages app.use_cases.base app.views.messages"),
         # 手动推进到点计划：run_due 自己开连接（生日付款经线程池另开连接，外层事务会锁库）
     "app.use_cases.plans": _deps("app.birthday app.clock app.db app.plans app.proactive app.use_cases.base"),
     "app.use_cases.proactive": _deps("app.clock app.proactive app.use_cases.base"),

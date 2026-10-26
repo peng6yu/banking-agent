@@ -26,8 +26,9 @@ PRAGMAS: Final[tuple[str, ...]] = (
     "PRAGMA busy_timeout=5000;",
 )
 
-# 33 张表（改造前 27 + 用户维度日累计 daily_user_limits、计划一次性授权
-# plan_authorizations、人工接管队列 handoffs、会话记忆 chat_turns、长期记忆 agent_memory；
+# 36 张表（改造前 27 + 用户维度日累计 daily_user_limits、计划一次性授权
+# plan_authorizations、人工接管队列 handoffs、会话记忆 chat_turns、长期记忆 agent_memory、
+# 主动提醒 messages/message_feedback/message_insight_state；
 # 订阅推断字段在 subs、运行元数据在 dag_runs）
 TABLE_NAMES: Final[tuple[str, ...]] = (
     "users",
@@ -63,6 +64,9 @@ TABLE_NAMES: Final[tuple[str, ...]] = (
     "subscription_verdicts",
     "chat_turns",
     "agent_memory",
+    "messages",
+    "message_feedback",
+    "message_insight_state",
 )
 
 SCHEMA_SQL: Final[str] = """
@@ -526,6 +530,48 @@ CREATE TABLE IF NOT EXISTS agent_memory (
   source     TEXT NOT NULL DEFAULT '',
   updated_ms INTEGER NOT NULL,
   PRIMARY KEY (user_id, mem_key)
+);
+
+-- 助手主动提醒（消息）：一条提醒 = 一个事实 + 一句建议 + 一组可选动作。
+-- dedupe_key 是「同类事实的指纹」：同一商户同一个月只留一条，重复生成被
+-- UNIQUE 直接挡掉——没有它，涨价提醒会每天准点出现，用户很快学会无视全部提醒。
+CREATE TABLE IF NOT EXISTS messages (
+  id           TEXT PRIMARY KEY,
+  user_id      TEXT NOT NULL,
+  insight_id   TEXT NOT NULL,
+  dedupe_key   TEXT NOT NULL,
+  severity     TEXT NOT NULL DEFAULT 'info' CHECK (severity IN ('info','warning')),
+  title        TEXT NOT NULL,
+  body         TEXT NOT NULL,
+  facts_json   TEXT NOT NULL DEFAULT '{}',
+  actions_json TEXT NOT NULL DEFAULT '[]',
+  status       TEXT NOT NULL DEFAULT 'new' CHECK (status IN ('new','adopted','dismissed')),
+  created_ms   INTEGER NOT NULL,
+  expires_ms   INTEGER,
+  UNIQUE (user_id, dedupe_key)
+);
+CREATE INDEX IF NOT EXISTS idx_messages_user_time ON messages(user_id, created_ms DESC);
+
+-- 反馈只追加：采纳/忽略/不再提醒都留一条，用来算「这一类还要不要继续提醒」。
+CREATE TABLE IF NOT EXISTS message_feedback (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  message_id TEXT NOT NULL,
+  user_id    TEXT NOT NULL,
+  action     TEXT NOT NULL CHECK (action IN ('adopted','dismissed','muted')),
+  note       TEXT NOT NULL DEFAULT '',
+  created_ms INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_message_feedback_msg ON message_feedback(message_id);
+
+-- 每一类洞察的静默状态：忽略 3 次或点「不再提醒」后，这一类长期不再打扰。
+-- 单独一张表而不是塞进 messages：静默是「以后」的规则，不是某条消息的属性。
+CREATE TABLE IF NOT EXISTS message_insight_state (
+  user_id      TEXT NOT NULL,
+  insight_id   TEXT NOT NULL,
+  ignore_count INTEGER NOT NULL DEFAULT 0,
+  muted_ms     INTEGER,
+  last_ms      INTEGER NOT NULL,
+  PRIMARY KEY (user_id, insight_id)
 );
 
 -- 审计只增不改：UPDATE/DELETE 一律由 SQLite 层拦掉（docs/03 3.2 第 7 张表）

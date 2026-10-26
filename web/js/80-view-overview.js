@@ -25,6 +25,9 @@ function bxRenderOverview(data) {
   }
   setText($('ov-month-tag'), data.month_label || '—');
 
+  /* 助手提醒走独立端点（要写动作才生成），不并进总览那份只读快照。 */
+  if (typeof bxLoadMessages === 'function') { bxLoadMessages(); }
+
   const flowHost = $('ov-flow');
   if (flowHost) {
     flowHost.replaceChildren();

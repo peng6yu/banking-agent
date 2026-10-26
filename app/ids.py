@@ -25,6 +25,8 @@ ID_PREFIXES: Final[frozenset[str]] = frozenset(
         "pb",
         # 人工接管单（handoff）：不用 "h"，那个前缀已经是资金 hold
         "ho",
+        # 助手主动提醒（message）：用户能逐条采纳/忽略，必须有个能贴进对话的短 id
+        "m",
     }
 )
 

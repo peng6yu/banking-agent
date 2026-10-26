@@ -86,6 +86,15 @@
       </div>
 
       <div class="card">
+        <div class="card-head"><h3>助手提醒</h3><span class="spacer"></span>
+          <span class="tag info" id="ov-messages-tag">每天最多三条</span>
+          <button class="btn btn-mini" type="button" id="ov-messages-refresh">现在想一想</button>
+        </div>
+        <div id="ov-messages"></div>
+        <div class="card-note">每条提醒都写明依据的那个数字，数字只来自你自己的流水；同一类事 7 天内不重复，连续三次点「这类别再提醒」就不再出现。它只是把值得看一眼的地方指出来，判断仍然是你的。</div>
+      </div>
+
+      <div class="card">
         <div class="card-head"><h3>待人工接管的单</h3><span class="spacer"></span><span class="tag warn" id="ov-handoffs-tag">—</span></div>
         <div id="ov-handoffs"></div>
         <div class="card-note">收款人有歧义、或找不到收款人时，这一轮会挂在这里等人工处理；领取、补信息、拒绝、恢复都要求写明操作员，全部进审计。</div>
@@ -465,6 +474,7 @@
   <script src="/static/js/65-proactive-b.js"></script>
   <script src="/static/js/70-bx-core-a.js"></script>
   <script src="/static/js/72-bx-core-b.js"></script>
+  <script src="/static/js/74-view-messages.js"></script>
   <script src="/static/js/80-view-overview.js"></script>
   <script src="/static/js/82-view-bill.js"></script>
   <script src="/static/js/84-view-plans.js"></script>
