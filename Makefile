@@ -6,7 +6,7 @@ PY ?= python3.12
 PIP_INDEX ?= https://pypi.tuna.tsinghua.edu.cn/simple
 VENV_PY ?= .venv/bin/python
 
-.PHONY: help setup install venv run seed reseed test cov redteam smoke browser-smoke latency fresh clean reset check-env
+.PHONY: help setup install venv run seed reseed test cov docs-check redteam smoke browser-smoke latency fresh clean reset check-env
 
 # make setup 的透传参数，例如 make setup ARGS="--dry-run" 或 ARGS="--ollama"
 ARGS ?=
@@ -21,6 +21,7 @@ help:
 	@echo   make seed      建库与种子数据（已有数据则跳过）
 	@echo   make reseed    删库重建（演示跑过转账、余额变了之后用）
 	@echo   make test      跑 pytest
+	@echo   make docs-check 校验文档里的数字与 release_manifest.json 一致
 	@echo   make redteam   跑 43 条红队用例
 	@echo   make smoke     模型连通性自检
 	@echo   make browser-smoke 真浏览器冒烟（Playwright + Chromium，截图进 docs/交付/截图/）
@@ -61,6 +62,9 @@ latency:
 
 test:
 	$(PY) -m pytest -q tests/
+
+docs-check:
+	$(VENV_PY) scripts/check_docs_numbers.py
 
 cov:
 	@echo 未安装 pytest-cov 时跳过；安装后本命令输出覆盖率

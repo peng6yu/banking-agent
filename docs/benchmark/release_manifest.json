@@ -1,13 +1,13 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-10-26T14:17:24+08:00",
+  "generated_at": "2026-10-26T14:23:55+08:00",
   "git": {
-    "head": "5ce6528f4655161fa9afbe9f956f34df82cc5c12",
-    "head_short": "5ce6528",
-    "subject": "refactor(W5): 前端拆分——5954 行单文件 → 477 行壳 + 586 行样式 + 17 个模块脚本",
+    "head": "8006f97ba89677422634b0ed9340891e9a20c283",
+    "head_short": "8006f97",
+    "subject": "docs(manifest): 清单以 HEAD 5ce6528 重生成（1710/47/33/66/103）",
     "branch": "main",
-    "dirty": false,
-    "changed_paths": 0
+    "dirty": true,
+    "changed_paths": 19
   },
   "code": {
     "tools": {
@@ -92,7 +92,7 @@
     "api_paths": 47,
     "policy_rules": 13,
     "intent_templates": 9,
-    "test_files": 103,
+    "test_files": 104,
     "knowledge": {
       "version": "2c4fbe8d4be2906c",
       "terms": 40,
@@ -106,11 +106,11 @@
   },
   "tests": {
     "command": ".venv/bin/python -m pytest -q",
-    "passed": 1710,
+    "passed": 1719,
     "failed": 0,
     "skipped": 4,
-    "duration_s": 19.54,
-    "log": "tmp/pytest_w5b.log",
+    "duration_s": 19.89,
+    "log": "tmp/pytest_w6.log",
     "parsed": true
   },
   "redteam": {
@@ -118,13 +118,13 @@
     "cases_run": 43,
     "pass": 43,
     "fail": 0,
-    "log": "tmp/redteam_w3.log"
+    "log": "tmp/redteam_w6.log"
   },
   "e2e": {
     "command": ".venv/bin/python scripts/e2e.py --offline",
     "pass": 13,
     "total": 13,
-    "log": "tmp/e2e_w3.log"
+    "log": "tmp/e2e_w6.log"
   },
   "ab": {
     "rounds": [
