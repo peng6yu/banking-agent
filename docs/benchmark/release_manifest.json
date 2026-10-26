@@ -1,13 +1,13 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-10-27T00:06:43+08:00",
+  "generated_at": "2026-10-27T00:15:30+08:00",
   "git": {
-    "head": "b4d69fbbd4e6453c0acb12b693d82979889360d6",
-    "head_short": "b4d69fb",
-    "subject": "refactor(money): 「转账」拆成对外转账与账户互转，支出/结余全站只剩一个定义",
+    "head": "32529f1ef0b9b2c2f69fa8f1ba06a511b1767c6d",
+    "head_short": "32529f1",
+    "subject": "docs(benchmark): 清单按 b4d69fb 重生成，并记下最新一轮取数",
     "branch": "main",
-    "dirty": false,
-    "changed_paths": 0
+    "dirty": true,
+    "changed_paths": 20
   },
   "code": {
     "tools": {
@@ -94,7 +94,7 @@
     "api_paths": 50,
     "policy_rules": 13,
     "intent_templates": 9,
-    "test_files": 106,
+    "test_files": 107,
     "knowledge": {
       "version": "2c4fbe8d4be2906c",
       "terms": 40,
@@ -108,10 +108,10 @@
   },
   "tests": {
     "command": ".venv/bin/python -m pytest -q",
-    "passed": 1781,
+    "passed": 1784,
     "failed": 0,
     "skipped": 4,
-    "duration_s": 20.42,
+    "duration_s": 20.11,
     "log": "tmp/pytest_final.log",
     "parsed": true
   },

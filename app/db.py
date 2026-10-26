@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+import os
 import sqlite3
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -18,7 +19,12 @@ from app import audit
 from app.clock import SystemBusy, now_ms
 
 ROOT: Final[Path] = Path(__file__).resolve().parent.parent
-DEFAULT_DB_PATH: Final[Path] = ROOT / "data" / "bank.db"
+#: 演示库/隔离库可以靠环境变量换路径（scripts/make_demo_db.py、make run-demo 用）；
+#: 不设就是仓库自带的 data/bank.db，测试仍然各自传 path，不读这个默认值。
+_ENV_DB_PATH: Final[str] = os.environ.get("BANK_DB_PATH", "").strip()
+DEFAULT_DB_PATH: Final[Path] = (
+    Path(_ENV_DB_PATH).expanduser() if _ENV_DB_PATH else ROOT / "data" / "bank.db"
+)
 
 PRAGMAS: Final[tuple[str, ...]] = (
     "PRAGMA journal_mode=WAL;",

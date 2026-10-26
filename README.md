@@ -134,6 +134,7 @@ make run     # 启动日志会打印一条带 #token= 的地址，打开那一�
 | 3. 不配模型也要演 | `make setup ARGS="--mock"` | `MOCK_MODE=script` 离线协作桩：查余额、转账两种业务照演，其余照实反问 |
 | 4. 演示跑脏了复原 | `make reseed`（等价 `python3.12 -m scripts.seed --force`） | 删库重建初始态，末行 `seed.ok random_seed=… tables=30 window_days=180` |
 | 5. 换模型 / 换厂商 | 改 `.env` 三行 → `make smoke` | 4/4 PASS 才算配好，见下一节「模型配置」 |
+| 6. 满数据演示库 | `make demo-db` → `make demo-run` | 生成 `data/demo_full.db`（储蓄目标 / 3 个计划 / 2 条提醒 / 1 张待接管单 / 1 条预算提醒 / 3 条助手提醒）并在 8000 端口起服务；真库 `data/bank.db` 不动。也可以只造库：`BANK_DB_PATH=data/demo_full.db python3.12 -m uvicorn app.main:app --port 8000` |
 
 依赖清单在 `requirements.txt`（fastapi / uvicorn / pydantic / httpx / pyyaml），`make setup` 会装进 `.venv`；系统 `python3.12` 已装好依赖时也可以直接跑，两条路都实测过。
 

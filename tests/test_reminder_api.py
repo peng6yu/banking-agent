@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
 from pathlib import Path
 
 import httpx
@@ -17,6 +18,7 @@ import pytest
 
 import app.planner.assist as assist
 import app.plans as plans
+import app.reminder_time as reminder_time
 from app import db
 from app.clock import now_ms
 from app.main import app
@@ -181,3 +183,37 @@ def test_once_reminder_finishes_and_leaves_the_active_list(bank: Path) -> None:
         conn.close()
     # 一次性提醒响过就不再是「进行中的提醒」
     assert _reminders()["count"] == 0
+
+
+def test_a_repeating_reminder_does_not_keep_a_conflicting_due_ms(bank: Path) -> None:
+    """重复提醒的「下次」只能由日历规则算：过去把调用方给的 due_ms 原样落库，
+    于是同一张卡上出现「每月 8 号 10:00」和「下次 11-16 00:10」两个说法。
+    """
+    conflicting = int(time.mktime((2026, 11, 16, 0, 10, 0, 0, 0, -1)) * 1000)
+    res = post(
+        "/api/reminders",
+        {"text": "每月 8 号还信用卡 1500 元", "repeat": "monthly", "day": 8, "hour": 10,
+         "due_ms": conflicting},
+    )
+    assert res.status_code == 200, res.text
+    created = res.json()
+    assert created["repeat_label"] == "每月 8 号 10:00"
+    assert created["due_ms"] == reminder_time.next_after(
+        now_ms(), repeat="monthly", day=8, hour=10
+    )
+    assert created["due_text"].endswith("10:00")
+    assert created["due_text"][8:10] == "08"
+
+
+def test_monthly_without_a_day_takes_the_day_from_its_due_date(bank: Path) -> None:
+    """只写「每月」不写几号时，标签和「下次」必须指同一天（过去标签默认 1 号）。"""
+    due = int(time.mktime((2026, 11, 16, 10, 0, 0, 0, 0, -1)) * 1000)
+    res = post(
+        "/api/reminders",
+        {"text": "每月提醒我还信用卡 1500 元", "repeat": "monthly", "due_ms": due},
+    )
+    assert res.status_code == 200, res.text
+    created = res.json()
+    assert created["repeat_label"] == "每月 16 号 09:00"
+    assert created["plan"]["steps"][0]["payload"]["day"] == 16
+    assert created["due_ms"] == reminder_time.next_after(now_ms(), repeat="monthly", day=16)

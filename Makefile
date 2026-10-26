@@ -6,7 +6,7 @@ PY ?= python3.12
 PIP_INDEX ?= https://pypi.tuna.tsinghua.edu.cn/simple
 VENV_PY ?= .venv/bin/python
 
-.PHONY: help setup install venv run seed reseed test cov docs-check redteam smoke browser-smoke latency fresh clean reset check-env
+.PHONY: help setup install venv run seed reseed demo-db demo-run test cov docs-check redteam smoke browser-smoke latency fresh clean reset check-env
 
 # make setup 的透传参数，例如 make setup ARGS="--dry-run" 或 ARGS="--ollama"
 ARGS ?=
@@ -18,6 +18,8 @@ help:
 	@echo   make check-env 打印解释器版本
 	@echo   make venv     建 .venv 并装依赖（绕开本机 pip.conf 的坏索引）
 	@echo   make run       启动服务 http://127.0.0.1:8000
+	@echo   make demo-db   造一份满数据演示库 data/demo_full.db（不碰 data/bank.db）
+	@echo   make demo-run  用演示库启动服务（六个页签都不是空态）
 	@echo   make seed      建库与种子数据（已有数据则跳过）
 	@echo   make reseed    删库重建（演示跑过转账、余额变了之后用）
 	@echo   make test      跑 pytest
@@ -56,6 +58,13 @@ seed:
 
 reseed:
 	$(PY) -m scripts.seed --force
+
+# 演示库：另一份文件，六个页签都不是空态；不碰 data/bank.db
+demo-db:
+	$(VENV_PY) scripts/make_demo_db.py --force
+
+demo-run:
+	@BANK_DB_PATH=data/demo_full.db $(VENV_PY) -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
 
 latency:
 	PYTHONPATH=. $(VENV_PY) scripts/measure_latency.py

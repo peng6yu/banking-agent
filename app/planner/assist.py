@@ -696,16 +696,23 @@ def _create_reminder(
     now = int(time.time() * 1000)
     if repeat not in reminder_time.REPEATS:
         repeat = "none"
-    if due_ms is None:
-        if repeat != "none":
-            due_ms = reminder_time.next_after(
-                now, repeat=repeat, hour=hour, minute=minute, day=day, weekday=weekday
-            )
-        else:
-            today = date.today()
-            due_ms = int(
-                time.mktime((today.year, today.month, today.day + 1, hour, minute, 0, 0, 0, -1)) * 1000
-            )
+    if repeat != "none":
+        # 重复提醒的「下一次」只能由日历规则决定。过去把调用方给的 due_ms 原样落库，
+        # 于是同一张卡上会出现「每月 8 号 10:00」和「下次 11-16 00:10」两个说法。
+        # 缺省的日子/星期从 due_ms 推（没给就用今天），再统一算下一次。
+        anchor_at = datetime.fromtimestamp(int(due_ms or now) / 1000)
+        if repeat == "monthly" and day is None:
+            day = anchor_at.day
+        if repeat == "weekly" and weekday is None:
+            weekday = anchor_at.weekday()
+        due_ms = reminder_time.next_after(
+            now, repeat=repeat, hour=hour, minute=minute, day=day, weekday=weekday
+        )
+    elif due_ms is None:
+        today = date.today()
+        due_ms = int(
+            time.mktime((today.year, today.month, today.day + 1, hour, minute, 0, 0, 0, -1)) * 1000
+        )
     payload = {
         "text": text,
         "repeat": repeat,

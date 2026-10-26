@@ -321,7 +321,10 @@ def _alerts(conn: sqlite3.Connection, user_id: str, *, limit: int = 10) -> dict[
                 "goal_id": str(row["goal_id"]),
                 "goal_name": row["goal_name"],
                 "reason": str(row["reason"]),
-                "reason_text": ALERT_REASON_TEXT.get(str(row["reason"]), str(row["reason"])),
+                # 兜底也要是人话：机器码不许出现在界面上（未知原因只写「需要你看一眼」）
+                "reason_text": ALERT_REASON_TEXT.get(
+                    str(row["reason"]), "有一条提醒需要你看一眼"
+                ),
                 "suggestion": str(row["suggestion"] or ""),
                 "evidence": evidence,
                 "created_ms": int(row["created_ms"]),
