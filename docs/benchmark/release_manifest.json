@@ -1,10 +1,10 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-10-27T00:15:40+08:00",
+  "generated_at": "2026-10-27T07:52:38+08:00",
   "git": {
-    "head": "0056d367b5292654cbca835a82ad77dda3cb9e03",
-    "head_short": "0056d36",
-    "subject": "feat(demo): 满数据演示库一条命令生成，并修三处页面上的自相矛盾",
+    "head": "20ba11629c48fff087487ea1d11337f70af5618b",
+    "head_short": "20ba116",
+    "subject": "docs: 复跑耗时同步到 20.01s",
     "branch": "main",
     "dirty": false,
     "changed_paths": 0
@@ -108,10 +108,10 @@
   },
   "tests": {
     "command": ".venv/bin/python -m pytest -q",
-    "passed": 1784,
+    "passed": 1796,
     "failed": 0,
     "skipped": 4,
-    "duration_s": 20.11,
+    "duration_s": 20.01,
     "log": "tmp/pytest_final.log",
     "parsed": true
   },
