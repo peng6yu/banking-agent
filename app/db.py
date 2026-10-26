@@ -26,9 +26,9 @@ PRAGMAS: Final[tuple[str, ...]] = (
     "PRAGMA busy_timeout=5000;",
 )
 
-# 36 张表（改造前 27 + 用户维度日累计 daily_user_limits、计划一次性授权
+# 35 张表（改造前 27 + 用户维度日累计 daily_user_limits、计划一次性授权
 # plan_authorizations、人工接管队列 handoffs、会话记忆 chat_turns、长期记忆 agent_memory、
-# 主动提醒 messages/message_feedback/message_insight_state；
+# 主动提醒 messages/message_insight_state；
 # 订阅推断字段在 subs、运行元数据在 dag_runs）
 TABLE_NAMES: Final[tuple[str, ...]] = (
     "users",
@@ -65,7 +65,6 @@ TABLE_NAMES: Final[tuple[str, ...]] = (
     "chat_turns",
     "agent_memory",
     "messages",
-    "message_feedback",
     "message_insight_state",
 )
 
@@ -327,11 +326,17 @@ CREATE TABLE IF NOT EXISTS monitor_rules (
   id          TEXT PRIMARY KEY,
   goal_id     TEXT NOT NULL REFERENCES savings_goals(id),
   kind        TEXT NOT NULL CHECK (kind IN ('progress','budget')),
-  -- progress：允许落后计划的百分点；budget：本期支出上限（分）
-  threshold   INTEGER NOT NULL CHECK (threshold > 0),
+  -- 两个阈值分列存：budget 用 threshold_fen（分），progress 用 threshold_pp
+  -- （百分点）。以前挤在同一列 threshold 里，读到的人必须先看 kind 才敢换算。
+  threshold_fen INTEGER CHECK (threshold_fen IS NULL OR threshold_fen > 0),
+  threshold_pp  INTEGER CHECK (threshold_pp IS NULL OR threshold_pp > 0),
   period      TEXT NOT NULL CHECK (period IN ('monthly','weekly')),
   enabled     INTEGER NOT NULL DEFAULT 1 CHECK (enabled IN (0,1)),
-  created_ms  INTEGER NOT NULL
+  created_ms  INTEGER NOT NULL,
+  CHECK (
+    (kind = 'budget' AND threshold_fen IS NOT NULL AND threshold_pp IS NULL)
+    OR (kind = 'progress' AND threshold_pp IS NOT NULL AND threshold_fen IS NULL)
+  )
 );
 CREATE INDEX IF NOT EXISTS idx_monitor_rules_goal ON monitor_rules(goal_id, enabled);
 
@@ -552,16 +557,6 @@ CREATE TABLE IF NOT EXISTS messages (
 );
 CREATE INDEX IF NOT EXISTS idx_messages_user_time ON messages(user_id, created_ms DESC);
 
--- 反馈只追加：采纳/忽略/不再提醒都留一条，用来算「这一类还要不要继续提醒」。
-CREATE TABLE IF NOT EXISTS message_feedback (
-  id         INTEGER PRIMARY KEY AUTOINCREMENT,
-  message_id TEXT NOT NULL,
-  user_id    TEXT NOT NULL,
-  action     TEXT NOT NULL CHECK (action IN ('adopted','dismissed','muted')),
-  note       TEXT NOT NULL DEFAULT '',
-  created_ms INTEGER NOT NULL
-);
-CREATE INDEX IF NOT EXISTS idx_message_feedback_msg ON message_feedback(message_id);
 
 -- 每一类洞察的静默状态：忽略 3 次或点「不再提醒」后，这一类长期不再打扰。
 -- 单独一张表而不是塞进 messages：静默是「以后」的规则，不是某条消息的属性。
@@ -675,10 +670,6 @@ _ADDED_COLUMNS: Final[tuple[tuple[str, str, str], ...]] = (
     ("accounts", "status", "TEXT NOT NULL DEFAULT 'active'"),
     # hold 建卡时的裁决等级：commit 据此决定能不能跨过日累计风险阈值（见 SCHEMA_SQL 注释）
     ("holds", "risk_level", "TEXT NOT NULL DEFAULT 'yellow'"),
-    # 订阅来源：recorded=银行代扣记录，inferred=从流水推断（必须带证据与置信度）
-    ("subs", "source", "TEXT NOT NULL DEFAULT 'recorded'"),
-    ("subs", "confidence", "REAL NOT NULL DEFAULT 1.0"),
-    ("subs", "evidence_json", "TEXT NOT NULL DEFAULT '{}'"),
     # 运行元数据：重建 RunState 需要 account_id / user_text
     ("dag_runs", "meta_json", "TEXT NOT NULL DEFAULT '{}'"),
     # 自动监测的节流时间：同一时间窗内不重复跑，重启后也不会重复
@@ -699,6 +690,73 @@ def _ensure_columns(conn: sqlite3.Connection) -> None:
             continue
         if column not in {str(row["name"]) for row in rows}:
             conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {ddl}")
+
+
+def _migrate_monitor_rules(conn: sqlite3.Connection) -> None:
+    """老库的 monitor_rules 只有一列 threshold：按 kind 拆到两列。
+
+    SQLite 不能把带 CHECK 的列直接改名/换语义，只能重建表。重建期间先关外键：
+    proactive_alerts.rule_id 指着这张表，DROP 老表时打开外键会被拒绝。
+    """
+    columns = {
+        str(row["name"]) for row in conn.execute("PRAGMA table_info(monitor_rules)").fetchall()
+    }
+    if not columns or "threshold" not in columns or "threshold_fen" in columns:
+        return
+    conn.execute("PRAGMA foreign_keys = OFF")
+    try:
+        conn.executescript(
+            """
+            CREATE TABLE monitor_rules_new (
+              id            TEXT PRIMARY KEY,
+              goal_id       TEXT NOT NULL REFERENCES savings_goals(id),
+              kind          TEXT NOT NULL CHECK (kind IN ('progress','budget')),
+              threshold_fen INTEGER CHECK (threshold_fen IS NULL OR threshold_fen > 0),
+              threshold_pp  INTEGER CHECK (threshold_pp IS NULL OR threshold_pp > 0),
+              period        TEXT NOT NULL CHECK (period IN ('monthly','weekly')),
+              enabled       INTEGER NOT NULL DEFAULT 1 CHECK (enabled IN (0,1)),
+              created_ms    INTEGER NOT NULL,
+              CHECK (
+                (kind = 'budget' AND threshold_fen IS NOT NULL AND threshold_pp IS NULL)
+                OR (kind = 'progress' AND threshold_pp IS NOT NULL AND threshold_fen IS NULL)
+              )
+            );
+            INSERT INTO monitor_rules_new
+              (id, goal_id, kind, threshold_fen, threshold_pp, period, enabled, created_ms)
+            SELECT id, goal_id, kind,
+                   CASE WHEN kind = 'budget' THEN threshold END,
+                   CASE WHEN kind = 'progress' THEN threshold END,
+                   period, enabled, created_ms
+            FROM monitor_rules;
+            DROP TABLE monitor_rules;
+            ALTER TABLE monitor_rules_new RENAME TO monitor_rules;
+            CREATE INDEX IF NOT EXISTS idx_monitor_rules_goal
+              ON monitor_rules(goal_id, enabled);
+            """
+        )
+    finally:
+        conn.execute("PRAGMA foreign_keys = ON")
+
+
+def _drop_legacy(conn: sqlite3.Connection) -> None:
+    """删掉后来被证明是多余的结构（只跑一次，重复执行无副作用）。
+
+    - message_feedback：反馈动作与备注已经完整写在 audit_log（message.feedback），
+      messages.status 也记得当前状态；再存一张表就是同一事实两份，且全仓没有读点。
+    - subs.source / confidence / evidence_json：加列时打算区分「银行代扣」与
+      「流水推断」，后来推断结果只在内存里算（app/subscriptions.py），三列从未被
+      写入或读取。
+    """
+    conn.execute("DROP TABLE IF EXISTS message_feedback")
+    subs_columns = {
+        str(row["name"]) for row in conn.execute("PRAGMA table_info(subs)").fetchall()
+    }
+    for column in ("source", "confidence", "evidence_json"):
+        if column in subs_columns:
+            try:
+                conn.execute(f"ALTER TABLE subs DROP COLUMN {column}")
+            except sqlite3.OperationalError:  # SQLite < 3.35 不支持 DROP COLUMN
+                pass
 
 
 def ensure_columns(conn: sqlite3.Connection) -> None:
@@ -726,6 +784,8 @@ def init_db(conn: sqlite3.Connection) -> None:
     _ensure_columns(conn)
     conn.executescript(SCHEMA_SQL)
     _ensure_columns(conn)
+    _migrate_monitor_rules(conn)
+    _drop_legacy(conn)
 
 
 def sweep_expired_holds(conn: sqlite3.Connection) -> int:

@@ -52,6 +52,7 @@ def messages_view(conn: sqlite3.Connection, *, user_id: str | None = None, limit
     rows = messages.list_messages(conn, uid, limit=limit)
     items = [message_view(row) for row in rows]
     return {
+        "ok": True,
         "items": items,
         "count": len(items),
         "counts": messages.counts(conn, uid),
@@ -66,13 +67,4 @@ def messages_view(conn: sqlite3.Connection, *, user_id: str | None = None, limit
     }
 
 
-def insights_view() -> dict[str, Any]:
-    """洞察目录：用户问「你凭什么想到这个」时，页面能摊开数据来源。"""
-    return {
-        "insights": [dict(item) for item in messages.CATALOG],
-        "count": len(messages.CATALOG),
-        "source": "app/messages.py 的 CATALOG（与探测器一一对应）",
-    }
-
-
-__all__ = ["message_view", "messages_view", "insights_view"]
+__all__ = ["message_view", "messages_view"]

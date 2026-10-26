@@ -67,7 +67,10 @@ def _savings_goals(
                 {
                     "rule_id": str(rule["id"]),
                     "kind": str(rule["kind"]),
-                    "threshold": int(rule["threshold"]),
+                    # 分成两列下发：前端画「预算 3000 元」还是「容差 5 个百分点」，
+                    # 不用再按 kind 猜单位。
+                    "threshold_fen": rule["threshold_fen"],
+                    "threshold_pp": rule["threshold_pp"],
                     "period": str(rule["period"]),
                     "enabled": bool(int(rule["enabled"])),
                 }
@@ -179,7 +182,7 @@ def _handoffs_view(conn: sqlite3.Connection, *, limit: int = 10) -> dict[str, An
     try:
         rows = handoffs.list_handoffs(conn, limit=max(1, min(int(limit), 20)))
     except Exception:  # noqa: BLE001 - 队列读不到不能让整个首页返回 500
-        return {"items": [], "count": 0, "empty_reason": "接管队列暂时读不到。"}
+        return {"ok": True, "items": [], "count": 0, "empty_reason": "接管队列暂时读不到。"}
     items: list[dict[str, Any]] = []
     for row in rows:
         status = str(row.get("status") or "")
@@ -223,6 +226,7 @@ def _handoffs_view(conn: sqlite3.Connection, *, limit: int = 10) -> dict[str, An
             }
         )
     return {
+        "ok": True,
         "items": items,
         "count": len(items),
         "empty_reason": None if items else "现在没有需要人工接管的单。",
@@ -361,11 +365,13 @@ def _scheduler_block() -> dict[str, Any]:
     """
     interval = ticker.tick_interval_ms()
     running = ticker.is_started()
+    monitor_interval = proactive.monitor_interval_ms()
     return {
         "kind": "in_process_ticker",
         "enabled": interval > 0,
         "running": running,
         "interval_ms": interval,
+        "interval_text": "已关闭" if interval <= 0 else f"{interval / 1000:.0f} 秒",
         "manual_endpoint": "/api/scheduled/run",
         "note": (
             "预约转账由应用进程内的定时器推进。进程退出期间不会执行，"
@@ -373,7 +379,10 @@ def _scheduler_block() -> dict[str, Any]:
         ),
         "monitor": {
             "auto": True,
-            "interval_ms": proactive.monitor_interval_ms(),
+            "interval_ms": monitor_interval,
+            "interval_text": (
+                "已关闭" if monitor_interval <= 0 else f"{monitor_interval / 1000:.0f} 秒"
+            ),
             "note": (
                 "储蓄目标监测：只有你自己打开监测开关的目标才会被节拍器唤起，"
                 "同一个目标按上面的间隔节流（默认 6 小时一次），只写提醒、不动钱。"

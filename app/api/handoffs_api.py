@@ -59,14 +59,14 @@ def api_list(
     """按状态列工单（新单在前）；不带 status 就是全量最近 N 张。"""
     with db.open_conn() as conn:
         rows = handoffs.list_handoffs(conn, status=status, limit=limit)
-    return {"handoffs": rows, "count": len(rows)}
+    return {"ok": True, "handoffs": rows, "count": len(rows)}
 
 
 @router.get("/{handoff_id}")
 def api_get(handoff_id: str) -> dict[str, Any]:
     """单张工单：原请求、DAG、已完成/失败节点、裁决、授权与备注都在里面。"""
     with db.open_conn() as conn:
-        return {"handoff": handoffs.get(conn, handoff_id)}
+        return {"ok": True, "handoff": handoffs.get(conn, handoff_id)}
 
 
 @router.post("")

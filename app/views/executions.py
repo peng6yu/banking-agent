@@ -14,7 +14,7 @@ from app import timefmt
 from app.clock import now_ms
 
 from app.views.queue import _handoffs_view
-from app.views.labels import MAX_LIST, TASK_STATE_LABELS
+from app.views.labels import DENIAL_REASON_LABELS, MAX_LIST, TASK_STATE_LABELS
 
 
 def executions_view(
@@ -37,12 +37,16 @@ def executions_view(
     ).fetchall()
     chain_ok = audit.verify_chain(conn)
     return {
+        "ok": True,
         "generated_text": timefmt.maybe_minute_text(stamp),
         "sessions": session_items,
         "handoffs": _handoffs_view(conn, limit=20),
         "denials": [
             {
                 "reason": str(row["reason"]),
+                "reason_label": DENIAL_REASON_LABELS.get(
+                    str(row["reason"]), f"被安全策略拦下（{row['reason']}）"
+                ),
                 "ts_ms": int(row["ts_ms"]),
                 "ts_text": timefmt.maybe_minute_text(int(row["ts_ms"])),
                 "session_id": str(row["session_id"]) if row["session_id"] else None,

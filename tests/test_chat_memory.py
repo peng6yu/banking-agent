@@ -80,7 +80,13 @@ def test_latest_finds_the_most_recently_used_session(conn) -> None:
 
 
 def test_latest_on_empty_library_is_honest(conn) -> None:
-    assert chat_history.latest(conn) == {"session_id": "", "turns": [], "last_ms": 0, "title": ""}
+    assert chat_history.latest(conn) == {
+        "session_id": "",
+        "turns": [],
+        "last_ms": 0,
+        "last_text": None,
+        "title": "",
+    }
 
 
 def test_history_survives_a_restart(tmp_path: Path) -> None:

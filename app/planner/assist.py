@@ -1340,7 +1340,7 @@ def _handle_subscription(conn, text: str, user_id: str) -> dict[str, Any]:
         note = str(row.get("note") or "").strip()
         tail = f" · {note}" if note else ""
         lines.append(
-            f"{index}) {row['time_text']} · {row['amount_yuan']} 元 · {row['category']}"
+            f"{index}) {row['ts_text']} · {row['amount_yuan']} 元 · {row['category']}"
             f" · {row['channel_label']}{tail}"
         )
     candidate = next(

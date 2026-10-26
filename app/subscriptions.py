@@ -161,7 +161,7 @@ def _candidate(rows: list[Any]) -> dict[str, Any] | None:
             {
                 "transaction_id": str(row["id"]),
                 "ts_ms": int(row["ts_ms"]),
-                "time_text": timefmt.date_text(int(row["ts_ms"])),
+                "ts_text": timefmt.date_text(int(row["ts_ms"])),
                 "amount_fen": int(row["amount_fen"]),
                 "amount_yuan": fen_to_yuan_str(int(row["amount_fen"])),
                 "category": str(row["category"]),
@@ -222,7 +222,7 @@ def merchant_transactions(
             {
                 "transaction_id": str(row["id"]),
                 "ts_ms": int(row["ts_ms"]),
-                "time_text": timefmt.date_text(int(row["ts_ms"])),
+                "ts_text": timefmt.date_text(int(row["ts_ms"])),
                 "amount_fen": int(row["amount_fen"]),
                 "amount_yuan": fen_to_yuan_str(int(row["amount_fen"])),
                 "category": str(row["category"]),
@@ -344,6 +344,7 @@ def upcoming(
             "period": str(row["period"]),
             "next_charge_ms": int(row["next_charge_ms"]),
             "next_charge_text": timefmt.date_text(int(row["next_charge_ms"])),
+            "period_label": _period_text(str(row["period"])),
             "days_left": round((int(row["next_charge_ms"]) - as_of) / _DAY_MS, 1),
         }
         for row in rows

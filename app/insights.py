@@ -362,7 +362,7 @@ def _spending_candidate(conn: sqlite3.Connection, user_id: str, now: int) -> dic
 def _budget_candidate(conn: sqlite3.Connection, user_id: str, now: int) -> dict[str, Any] | None:
     """预算节奏：已用 80% 而时间还没过 60%，比「已经超了」更早一步。"""
     rows = conn.execute(
-        "SELECT r.id, r.threshold, r.period, g.name FROM monitor_rules r"
+        "SELECT r.id, r.threshold_fen, r.period, g.name FROM monitor_rules r"
         " JOIN savings_goals g ON g.id = r.goal_id"
         " WHERE g.user_id = ? AND r.enabled = 1 AND r.kind = 'budget'",
         (user_id,),
@@ -380,7 +380,7 @@ def _budget_candidate(conn: sqlite3.Connection, user_id: str, now: int) -> dict[
         if span <= 0:
             continue
         spent = _spend_since(conn, user_id, start, now)
-        threshold = int(row["threshold"] or 0)
+        threshold = int(row["threshold_fen"] or 0)
         if threshold <= 0:
             continue
         used_pct = int(round(spent * 100 / threshold))

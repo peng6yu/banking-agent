@@ -113,7 +113,7 @@ def test_check_reads_every_transaction_with_time_amount_and_channel(subs) -> Non
     assert {row["channel_label"] for row in rows} == {"自动扣款"}
     # 每一笔都要在正文里念出来，且带序号
     for index, row in enumerate(rows, start=1):
-        assert f"{index}) {row['time_text']}" in out["summary"]
+        assert f"{index}) {row['ts_text']}" in out["summary"]
         assert row["amount_yuan"] in out["summary"]
     assert "逐笔" in out["summary"]
     # 边界必须说清：流水原文不是商户订单

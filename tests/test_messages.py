@@ -11,6 +11,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 import time
 
@@ -133,14 +134,17 @@ def test_budget_pace_warns_before_the_month_is_half_over(bank) -> None:
         (USER_ID, NOW, NOW),
     )
     bank.execute(
-        "INSERT INTO monitor_rules (id, goal_id, kind, threshold, period, enabled, created_ms)"
+        "INSERT INTO monitor_rules"
+        " (id, goal_id, kind, threshold_fen, period, enabled, created_ms)"
         " VALUES ('mr_budget', 'sg_budget', 'budget', 1000000, 'monthly', 1, ?)",
         (NOW,),
     )
     item = _found(bank)["I8_budget_pace"]
     assert int(item["facts"]["used_pct"]) >= 80
     assert int(item["facts"]["elapsed_pct"]) <= 60
-    bank.execute("UPDATE monitor_rules SET threshold = 100000000 WHERE id = 'mr_budget'")
+    bank.execute(
+        "UPDATE monitor_rules SET threshold_fen = 100000000 WHERE id = 'mr_budget'"
+    )
     assert "I8_budget_pace" not in _found(bank)
 
 
@@ -209,8 +213,11 @@ def test_adopt_flips_status_and_records_feedback(bank) -> None:
     assert row["status"] == "adopted"
     assert messages.counts(bank, USER_ID)["adopted"] == 1
     feedback_rows = [
-        item["action"]
-        for item in bank.execute("SELECT action FROM message_feedback WHERE message_id = ?", (created,))
+        json.loads(str(item["payload_json"]))["action"]
+        for item in bank.execute(
+            "SELECT payload_json FROM audit_log WHERE event_type = 'message.feedback'"
+            " ORDER BY seq"
+        )
     ]
     assert feedback_rows == ["adopted"]
 
@@ -222,7 +229,7 @@ def test_feedback_is_idempotent(bank) -> None:
     again = messages.feedback(bank, USER_ID, created, "adopted")
     assert again["status"] == "adopted"
     count = bank.execute(
-        "SELECT COUNT(*) FROM message_feedback WHERE message_id = ?", (created,)
+        "SELECT COUNT(*) FROM audit_log WHERE event_type = 'message.feedback'"
     ).fetchone()[0]
     assert count == 1
 

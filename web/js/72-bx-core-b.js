@@ -51,7 +51,7 @@ function bxAnomalyCard(item, full) {
         ['时间', '对手方', '分类', '方向', '金额'],
         txs.map(function (tx) {
           return [
-            textOf(tx.time_text),
+            textOf(tx.ts_text),
             textOf(tx.counterparty),
             textOf(tx.category),
             textOf(tx.direction) === 'in' ? '收入' : '支出',

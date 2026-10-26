@@ -136,17 +136,6 @@ def test_missing_message_is_a_chinese_404(bank) -> None:
     assert "Traceback" not in response.text, "错误响应不许带堆栈"
 
 
-def test_insights_catalog_explains_each_rule(bank) -> None:
-    """洞察目录：用户问「你凭什么想到这个」时，页面能摊开依据与数据来源。"""
-    body = call("GET", "/api/messages/insights").json()
-    assert body["count"] == len(body["insights"]) == 8
-    for insight in body["insights"]:
-        assert insight["why"], "每类洞察都要有一句人话的判定条件"
-        assert insight["source"], "每类洞察都要写清看的是哪张表"
-        assert insight["id"].startswith("I") and "_" in insight["id"]
-        assert insight["severity"] in {"info", "warning"}
-
-
 def test_limit_is_clamped_to_a_readable_page(bank) -> None:
     # FastAPI 的入参校验在这里被统一翻成 400 + 中文（不是 422 + 英文字段名）
     for url in ("/api/messages?limit=0", "/api/messages?limit=99"):

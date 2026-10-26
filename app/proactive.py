@@ -22,6 +22,7 @@ from typing import Any, Final
 
 import app.audit as audit
 import app.db as db
+from app import timefmt
 from app.clock import ValidationError, now_ms
 from app.ids import new_id
 from app.log import log
@@ -543,11 +544,20 @@ def rules_for_goal(conn, goal_id: str, *, enabled_only: bool = False) -> list[An
     return list(conn.execute(sql, (str(goal_id),)).fetchall())
 
 
+#: kind -> 阈值所在的列。列名只从这张白名单取，不拼外部输入。
+_RULE_THRESHOLD_COLUMNS: Final[dict[str, str]] = {
+    "budget": "threshold_fen",
+    "progress": "threshold_pp",
+}
+
+
 def _rule_view(row) -> dict[str, Any]:
+    """规则的对外形状：分与百分点分列给，调用方不用按 kind 猜单位。"""
     return {
         "rule_id": str(_get(row, "id")),
         "kind": str(_get(row, "kind")),
-        "threshold": int(_get(row, "threshold", 0)),
+        "threshold_fen": int(_get(row, "threshold_fen")) if _get(row, "threshold_fen") is not None else None,
+        "threshold_pp": int(_get(row, "threshold_pp")) if _get(row, "threshold_pp") is not None else None,
         "period": str(_get(row, "period")),
         "enabled": bool(_get(row, "enabled", 0)),
     }
@@ -555,22 +565,28 @@ def _rule_view(row) -> dict[str, Any]:
 
 def _insert_rule(conn, goal_id: str, kind: str, threshold: int, period: str, created: int) -> str:
     rule_id = new_id("mr")
+    column = _RULE_THRESHOLD_COLUMNS[kind]
     conn.execute(
-        "INSERT INTO monitor_rules (id, goal_id, kind, threshold, period, enabled, created_ms)"
+        f"INSERT INTO monitor_rules (id, goal_id, kind, {column}, period, enabled, created_ms)"
         " VALUES (?, ?, ?, ?, ?, 1, ?)",
         (rule_id, goal_id, kind, int(threshold), period, int(created)),
     )
     return rule_id
 
 
-def _set_rule_threshold(conn, rule_id: str, threshold: int, *, period: str | None = None) -> None:
+def _set_rule_threshold(
+    conn, rule_id: str, threshold: int, *, kind: str, period: str | None = None
+) -> None:
+    column = _RULE_THRESHOLD_COLUMNS[kind]
     if period:
         conn.execute(
-            "UPDATE monitor_rules SET threshold = ?, period = ? WHERE id = ?",
+            f"UPDATE monitor_rules SET {column} = ?, period = ? WHERE id = ?",
             (int(threshold), period, rule_id),
         )
     else:
-        conn.execute("UPDATE monitor_rules SET threshold = ? WHERE id = ?", (int(threshold), rule_id))
+        conn.execute(
+            f"UPDATE monitor_rules SET {column} = ? WHERE id = ?", (int(threshold), rule_id)
+        )
 
 
 def count_open_alerts(conn, goal_id: str) -> int:
@@ -628,13 +644,13 @@ def goal_view(
         kept, _ = dedupe_transactions(transactions)
         actual_fen = _spend_in_window(kept, window_start, window_end)
         deviation = budget_deviation(
-            budget_fen=int(budget_rule["threshold"]), actual_fen=actual_fen, period=cadence
+            budget_fen=int(budget_rule["threshold_fen"]), actual_fen=actual_fen, period=cadence
         )
         budget_view = {
             "rule_id": str(budget_rule["id"]),
             "period": cadence,
             "period_label": _period_label(cadence, today),
-            "budget_fen": int(budget_rule["threshold"]),
+            "budget_fen": int(budget_rule["threshold_fen"]),
             "budget_yuan": deviation["budget_yuan"],
             "actual_fen": actual_fen,
             "actual_yuan": deviation["actual_yuan"],
@@ -846,10 +862,12 @@ def update_goal(
                 rule_changes["progress"] = _insert_rule(
                     conn, str(goal_id), "progress", tolerance, "monthly", stamp
                 )
-            elif int(_get(rule, "threshold")) != tolerance:
-                _set_rule_threshold(conn, str(_get(rule, "id")), tolerance)
+            elif int(_get(rule, "threshold_pp")) != tolerance:
+                _set_rule_threshold(
+                    conn, str(_get(rule, "id")), tolerance, kind="progress"
+                )
                 rule_changes["progress_threshold"] = [
-                    int(_get(rule, "threshold")), tolerance
+                    int(_get(rule, "threshold_pp")), tolerance
                 ]
         if budget is not None:
             rule = rule_rows.get("budget")
@@ -857,9 +875,9 @@ def update_goal(
                 rule_changes["budget"] = _insert_rule(
                     conn, str(goal_id), "budget", budget, "monthly", stamp
                 )
-            elif int(_get(rule, "threshold")) != budget:
-                _set_rule_threshold(conn, str(_get(rule, "id")), budget)
-                rule_changes["budget_threshold"] = [int(_get(rule, "threshold")), budget]
+            elif int(_get(rule, "threshold_fen")) != budget:
+                _set_rule_threshold(conn, str(_get(rule, "id")), budget, kind="budget")
+                rule_changes["budget_threshold"] = [int(_get(rule, "threshold_fen")), budget]
         if want_monitor is not None:
             conn.execute(
                 "UPDATE monitor_rules SET enabled = ? WHERE goal_id = ?",
@@ -1153,7 +1171,8 @@ def _candidate_alerts(
             continue
         kind = str(_get(rule, "kind"))
         period = str(_get(rule, "period", "monthly"))
-        threshold = int(_get(rule, "threshold", 0))
+        # 两个单位不再共用一列：progress 读百分点，budget 读分。
+        threshold = int(_get(rule, "threshold_pp" if kind == "progress" else "threshold_fen", 0) or 0)
         label = _period_label(period, today)
         period_start = _period_day_start_ms(_period_start(period, today))
         if kind == "progress":
@@ -1307,11 +1326,14 @@ def run_monitor(
         if goal_id is None or str(row["id"]) == str(goal_id)
     ]
     if goal_id is not None and not goals:
+        not_found_finished = monitor_now(conn)
         return {
             "run_id": run_id,
             "status": "failed",
             "started_ms": stamp,
-            "finished_ms": monitor_now(conn),
+            "started_text": timefmt.maybe_minute_text(stamp),
+            "finished_ms": not_found_finished,
+            "finished_text": timefmt.maybe_minute_text(not_found_finished),
             "goals_checked": 0,
             "rules_checked": 0,
             "alerts_created": 0,
@@ -1412,7 +1434,9 @@ def run_monitor(
             "run_id": run_id,
             "status": "ok",
             "started_ms": stamp,
+            "started_text": timefmt.maybe_minute_text(stamp),
             "finished_ms": finished,
+            "finished_text": timefmt.maybe_minute_text(finished),
             "goals_checked": len(goals),
             "rules_checked": rules_checked,
             "alerts_created": len(created),
@@ -1459,7 +1483,9 @@ def run_monitor(
             "run_id": run_id,
             "status": "failed",
             "started_ms": stamp,
+            "started_text": timefmt.maybe_minute_text(stamp),
             "finished_ms": finished,
+            "finished_text": timefmt.maybe_minute_text(finished),
             "goals_checked": len(goals),
             "rules_checked": rules_checked,
             "alerts_created": 0,

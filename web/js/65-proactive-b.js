@@ -42,9 +42,11 @@ function pfStartEdit(goal) {
   }
   rules.forEach(function (rule) {
     const kind = textOf(rule && rule.kind);
-    if (kind === 'budget' && budgetFen === null) { budgetFen = Number(rule.threshold); }
+    if (kind === 'budget' && budgetFen === null && rule.threshold_fen !== null) {
+      budgetFen = Number(rule.threshold_fen);
+    }
     if (kind === 'progress') {
-      tolerance = Number(rule.threshold);
+      tolerance = rule.threshold_pp === null ? null : Number(rule.threshold_pp);
       period = textOf(rule.period) || 'monthly';
     }
   });

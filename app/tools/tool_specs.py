@@ -522,15 +522,15 @@ TOOL_SPECS: Final[tuple[ToolSpec, ...]] = (
     ),
     ToolSpec(
         name='change_card_pin',
-        description='修改一张卡的密码，必须是 6 位数字。密码本身不会被回显。',
+        description='修改一张卡的密码，必须是 6 位数字。已经设过密码的卡要带上原密码，否则改不了。密码本身不会被回显。',
         params={
             "type": "object",
             "properties": {
                 "card_tail": _CARD_TAIL,
-                "pin": {"type": "string", "minLength": 6, "maxLength": 6, "pattern": "^[0-9]{6}$", "description": "6 位数字新密码"}
+                "pin": {"type": "string", "minLength": 6, "maxLength": 6, "pattern": "^[0-9]{6}$", "description": "6 位数字新密码"},
+                "old_pin": {"type": "string", "minLength": 6, "maxLength": 6, "pattern": "^[0-9]{6}$", "description": "原 6 位密码；这张卡已经设过密码时必填"}
             },
-            "required": ['card_tail', 'pin'],
-            "additionalProperties": False,
+            "required": ['card_tail', 'pin'], "additionalProperties": False,
         },
         handler=cards.change_card_pin,
         writes=True,

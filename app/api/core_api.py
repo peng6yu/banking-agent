@@ -10,7 +10,7 @@ from pathlib import Path
 import json
 
 from app.tools.registry import TOOL_NAMES, tool_schemas
-from app import audit, clock, db
+from app import audit, clock, db, timefmt
 from app.planner import assist, executor, intent, payment_guard, recover, ticker
 
 from app.api.chat_trace import (
@@ -35,6 +35,7 @@ async def health() -> dict[str, Any]:
         "status": "ok",
         "model": _model_name(),
         "now_ms": clock.now_ms(),
+        "now_text": timefmt.maybe_minute_text(clock.now_ms()),
         "tools": len(TOOL_NAMES),
         "db": _db_ok(),
         "sessions": len(executor.active_sessions()),
@@ -44,7 +45,7 @@ async def health() -> dict[str, Any]:
 @router.get("/api/tools")
 async def list_tools() -> dict[str, Any]:
     """在册工具的 JSON Schema，前端用它渲染参数表单。"""
-    return {"count": len(TOOL_NAMES), "tools": tool_schemas()}
+    return {"ok": True, "count": len(TOOL_NAMES), "tools": tool_schemas()}
 
 
 @router.get("/api/audit")
@@ -60,12 +61,14 @@ async def audit_trail(session_id: str, limit: int = 100) -> dict[str, Any]:
             {
                 "seq": int(row["seq"]),
                 "ts_ms": int(row["ts_ms"]),
+                "ts_text": timefmt.maybe_minute_text(int(row["ts_ms"])),
                 "event_type": str(row["event_type"]),
                 "payload": json.loads(row["payload_json"]),
             }
             for row in rows
         ]
         return {
+            "ok": True,
             "session_id": session_id,
             "count": len(events),
             "events": events,

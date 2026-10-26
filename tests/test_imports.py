@@ -239,9 +239,9 @@ ALLOWED: dict[str, frozenset[str]] = {
     # 聊天主流程：解析→澄清→建图→执行，唯一该碰模型与执行器的端点模块
     "app.api.chat_flow": _deps("app.api.chat_hints app.api.chat_state app.api.chat_trace app.audit app.chat_history app.clock app.db app.ids app.llm app.memory app.memory_extract app.planner app.planner.assist app.planner.clarify app.planner.dag app.planner.executor app.planner.intent app.planner.payment_guard app.planner.recover app.planner.ticker app.proactive app.scope"),
     # 聊天端点：只把请求转给主流程，外加会话回看与确认卡
-    "app.api.chat_api": _deps("app.api.chat_flow app.api.chat_state app.api.chat_trace app.api.http app.api.schemas app.audit app.chat_history app.clock app.db app.models app.planner app.planner.assist app.planner.clarify app.planner.events app.planner.executor app.planner.intent app.planner.payment_guard app.planner.recover app.planner.ticker app.use_cases"),
+    "app.api.chat_api": _deps("app.api.chat_flow app.api.chat_state app.api.chat_trace app.api.http app.api.schemas app.audit app.chat_history app.clock app.db app.models app.money app.planner app.planner.assist app.planner.clarify app.planner.events app.planner.executor app.planner.intent app.planner.payment_guard app.planner.recover app.planner.ticker app.timefmt app.use_cases app.views.labels"),
     # 基础端点：健康、工具清单、审计链、根路径
-    "app.api.core_api": _deps("app.api.chat_trace app.audit app.clock app.db app.planner app.planner.assist app.planner.executor app.planner.intent app.planner.payment_guard app.planner.recover app.planner.ticker app.tools.registry"),
+    "app.api.core_api": _deps("app.api.chat_trace app.audit app.clock app.db app.planner app.planner.assist app.planner.executor app.planner.intent app.planner.payment_guard app.planner.recover app.planner.ticker app.timefmt app.tools.registry"),
     # 计划端点：计划/生日/预约/提醒，写操作只经用例层
     "app.api.plans_api": _deps("app.api.http app.api.schemas app.audit app.birthday app.clock app.db app.planner app.planner.assist app.planner.executor app.planner.intent app.planner.payment_guard app.planner.recover app.planner.ticker app.plans app.proactive app.use_cases"),
     # 钱端点：储蓄/订阅/理财/预警/手动记账/重置，写操作只经用例层
@@ -312,7 +312,7 @@ ALLOWED: dict[str, frozenset[str]] = {
     "app.planner.clarify": _deps("app.clock"),
     "app.planner.subscription": _deps("app.clock app.planner.intent_schema"),
     "app.policy": _deps("app.policy.engine app.policy.rules"),
-    "app.proactive": _deps("app.audit app.clock app.db app.ids app.log app.money"),
+    "app.proactive": _deps("app.audit app.clock app.db app.ids app.log app.money app.timefmt"),
     "app.policy.engine": _deps("app.clock app.models app.money app.policy.rules"),
     "app.policy.rules": _deps("app.models app.money"),
     # 提醒时间：纯函数，没有 app 内依赖
@@ -346,7 +346,7 @@ ALLOWED: dict[str, frozenset[str]] = {
     # 抽取层：调模型抽事实，写入仍走 app.memory，异常只记日志
     "app.memory_extract": _deps("app.clock app.llm app.log app.memory app.scope"),
     # 会话记忆：只读写 chat_turns/sessions，不碰工具、不碰权限
-    "app.chat_history": _deps("app.clock app.db"),
+    "app.chat_history": _deps("app.clock app.db app.timefmt"),
     "app.smoke": _deps(""),
     "app.tools": _deps("app.tools.base app.tools.registry"),
     "app.tools.base": _deps("app.clock app.funds app.models app.policy.rules app.security app.security.token"),

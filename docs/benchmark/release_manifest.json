@@ -1,13 +1,13 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-10-26T21:18:44+08:00",
+  "generated_at": "2026-10-26T21:51:26+08:00",
   "git": {
-    "head": "92040e99a3818ff64a5d9e9808885f6abf3f319c",
-    "head_short": "92040e9",
-    "subject": "fix(planner,api): 取消补终帧、挑战统一成 challenges 列表、删掉孤儿接口 GET suitability",
+    "head": "2742f2bf1db9faa8bd61feb81a81e0be2ef4ca24",
+    "head_short": "2742f2b",
+    "subject": "feat(insights): 助手提醒从 3 类扩到 8 类，事实层独立成 app/insights.py",
     "branch": "main",
     "dirty": true,
-    "changed_paths": 7
+    "changed_paths": 38
   },
   "code": {
     "tools": {
@@ -52,7 +52,7 @@
         "assess_suitability"
       ]
     },
-    "db_tables": 36,
+    "db_tables": 35,
     "db_table_names": [
       "users",
       "accounts",
@@ -88,11 +88,10 @@
       "chat_turns",
       "agent_memory",
       "messages",
-      "message_feedback",
       "message_insight_state"
     ],
     "audit_event_types": 68,
-    "api_paths": 51,
+    "api_paths": 50,
     "policy_rules": 13,
     "intent_templates": 9,
     "test_files": 106,
@@ -109,10 +108,10 @@
   },
   "tests": {
     "command": ".venv/bin/python -m pytest -q",
-    "passed": 1763,
+    "passed": 1768,
     "failed": 0,
     "skipped": 4,
-    "duration_s": 18.14,
+    "duration_s": 22.04,
     "log": "tmp/pytest_final.log",
     "parsed": true
   },

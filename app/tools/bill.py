@@ -137,6 +137,8 @@ def _bill_summary(
         "range": {
             "start_ms": start_ms,
             "end_ms": end_ms,
+            "start_text": timefmt.maybe_minute_text(start_ms),
+            "end_text": timefmt.maybe_minute_text(end_ms),
             "label": _range_label(period, year, month),
         },
         "account_tail": account_tail,
@@ -188,7 +190,12 @@ def _top_merchants(
         amount, count = buckets.get(merchant, (0, 0))
         buckets[merchant] = (amount + int(row["amount_fen"]), count + 1)
     items = [
-        {"merchant": merchant, "amount_fen": amount, "count": count}
+        {
+            "merchant": merchant,
+            "amount_fen": amount,
+            "amount_yuan": fen_to_yuan_str(amount),
+            "count": count,
+        }
         for merchant, (amount, count) in buckets.items()
     ]
     return sorted(items, key=lambda item: (-item["amount_fen"], item["merchant"]))[:limit]

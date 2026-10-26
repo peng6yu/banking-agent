@@ -33,6 +33,7 @@ def management_view(conn: sqlite3.Connection) -> dict[str, Any]:
     user_id = str(account["user_id"])
     products, holdings_summary = _products_view(conn, user_id)
     return {
+        "ok": True,
         "accounts": _accounts(conn),
         "cards": _cards_view(conn, user_id),
         "subscriptions": _subscriptions_view(conn, account_id, user_id),
@@ -96,16 +97,18 @@ def _subscriptions_view(
         for row in sub_rows
     ]
 
+    monthly_active = sum(
+        int(row["amount_fen"])
+        for row in sub_rows
+        if str(row["period"]) == "monthly" and str(row["status"]) == "active"
+    )
     return {
         "items": subs_items,
         "count": len(subs_items),
         # 页面把这句边界文案和「月合计」写在同一行，所以月合计必须由后端算好下发
         # （前端用 bxMoney(subs, 'monthly_active') 取，键名是拼出来的，别只看字面量）。
-        "monthly_active_fen": sum(
-            int(row["amount_fen"])
-            for row in sub_rows
-            if str(row["period"]) == "monthly" and str(row["status"]) == "active"
-        ),
+        "monthly_active_fen": monthly_active,
+        "monthly_active_yuan": fen_to_yuan_str(monthly_active),
         "boundary": "订阅数据来自本行代扣记录，不是商户会员系统。",
         # 已知代扣之外：疑似订阅（流水推断）与近期扣费窗口。
         "inferred": _inferred_view(conn, account_id, user_id),

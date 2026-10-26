@@ -15,7 +15,7 @@ from app import db
 from app.api.http import payload
 from app.api.routes import require_api_token
 from app.use_cases import messages as message_cases
-from app.views.messages import insights_view, messages_view
+from app.views.messages import messages_view
 
 router = APIRouter(prefix="/api/messages", tags=["messages"],
                    dependencies=[Depends(require_api_token)])
@@ -39,12 +39,6 @@ def api_list_messages(limit: int = Query(20, ge=1, le=50)) -> dict[str, Any]:
 def api_refresh() -> dict[str, Any]:
     """现在想一想：跑一轮探测器，按去重/封顶/静默规则落库后返回最新列表。"""
     return payload(message_cases.message_refresh())
-
-
-@router.get("/insights")
-def api_insights() -> dict[str, Any]:
-    """洞察目录：每类提醒的依据与数据来源，供页面解释「你凭什么提醒我」。"""
-    return insights_view()
 
 
 @router.post("/{message_id}/feedback")

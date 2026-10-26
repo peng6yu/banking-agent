@@ -406,7 +406,7 @@ python3.12 -m app.smoke                    # 实测 4/4 PASS，主脑延迟约 1
 | `app/policy/` | 裁决引擎与 13 条规则 R01–R13（纯函数，无网络无模型；R13 为可选的绝对日上限，默认不启用） |
 | `app/security/` | 入口访问令牌、能力令牌、签名信封、注入扫描、熔断器 |
 | `app/tools/` | 35 个工具：查人、查余额、账单、卡片、订阅、转账、资金冻结 + 7 个主动财务（只读/需确认，无动钱语义） |
-| `app/api/` | 会话/确认/审计等 51 条 API 路径（50 条 `/api/*` + 根路径 `/`），含人工接管队列 `handoffs_api.py`；另有只读业务视图 `business.py`（overview / bill / management / plans / executions 五个 GET，六个区域的唯一数据来源） |
+| `app/api/` | 会话/确认/审计等 50 条 API 路径（49 条 `/api/*` + 根路径 `/`），含人工接管队列 `handoffs_api.py`；另有只读业务视图 `business.py`（overview / bill / management / plans / executions 五个 GET，六个区域的唯一数据来源） |
 | `web/index.html` | 前端壳：只放 DOM（原生 JS，无框架、无 CDN、零外链） |
 | `web/app.css` | 全站唯一样式表（设计系统变量层在 `:root`） |
 | `web/js/*.js` | 17 个模块脚本，按 10→95 的文件名序加载，共享全局作用域 |

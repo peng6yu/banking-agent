@@ -54,6 +54,7 @@ def overview_view(conn: sqlite3.Connection) -> dict[str, Any]:
     # 只有"本来能算但现在算不出来"的才进这个列表（目前只有缺账户一种）。
 
     return {
+        "ok": True,
         "generated_text": timefmt.maybe_minute_text(stamp),
         "month_label": bill_data.get("range", {}).get("label"),
         "account": next((a for a in accounts if a["account_id"] == account_id), None),

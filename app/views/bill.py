@@ -40,6 +40,7 @@ def bill_view(
     ).data
     anomalies = _enrich_anomalies(conn, list(data.get("anomalies") or []))
     return {
+        "ok": True,
         "generated_text": timefmt.maybe_minute_text(stamp),
         "period": period,
         "year": int(year),

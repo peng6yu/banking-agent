@@ -33,6 +33,9 @@ from app.api.schemas import (
 from app.planner.clarify import augment as augment_clarification
 from app.planner.clarify import forget as forget_clarification
 import app.chat_history as chat_history
+from app import timefmt
+from app.money import fen_to_yuan_str
+from app.views.labels import TASK_STATE_LABELS
 from app import audit, clock, db
 from app.planner import assist, executor, intent, payment_guard, recover, ticker
 from app.planner import events as planner_events
@@ -185,8 +188,11 @@ async def session(session_id: str) -> dict[str, Any]:
                 "node_id": row["node_id"],
                 "tool": row["tool"],
                 "state": row["state"],
+                "state_label": TASK_STATE_LABELS.get(str(row["state"]), str(row["state"])),
                 "decision": json.loads(row["decision_json"] or "null"),
                 "result": json.loads(row["result_json"] or "null"),
+                "ts_ms": int(row["ts_ms"]) if row["ts_ms"] else None,
+                "ts_text": timefmt.maybe_minute_text(row["ts_ms"]),
             }
             for row in conn.execute(
                 "SELECT * FROM dag_nodes WHERE run_id = (SELECT id FROM dag_runs WHERE session_id = ?"
@@ -200,15 +206,20 @@ async def session(session_id: str) -> dict[str, Any]:
         balance = conn.execute(
             "SELECT balance_fen FROM accounts ORDER BY CASE type WHEN 'debit' THEN 0 ELSE 1 END, id LIMIT 1"
         ).fetchone()
+    balance_fen = int(balance["balance_fen"]) if balance is not None else None
     return {
+        "ok": True,
         "session_id": session_id,
         "found": True,
         "status": str(head["status"]),
         "created_ms": int(head["created_ms"]),
+        "created_text": timefmt.maybe_minute_text(int(head["created_ms"])),
         "last_ms": int(head["last_ms"]),
+        "last_text": timefmt.maybe_minute_text(int(head["last_ms"])),
         "nodes": nodes,
         "confirmations": cards,
-        "balance_fen": int(balance["balance_fen"]) if balance is not None else None,
+        "balance_fen": balance_fen,
+        "balance_yuan": fen_to_yuan_str(balance_fen) if balance_fen is not None else None,
     }
 
 

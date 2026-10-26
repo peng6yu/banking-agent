@@ -63,8 +63,12 @@ def _accounts(conn: sqlite3.Connection) -> list[dict[str, Any]]:
             available = funds.available_fen(conn, str(row["id"]))
             view["available_fen"] = available
             view["available_yuan"] = fen_to_yuan_str(available)
-            view["held_fen"] = funds.held_fen(conn, str(row["id"]))
-            view["reserved_budget_fen"] = funds.reserved_budget_fen(conn, str(row["id"]))
+            held = funds.held_fen(conn, str(row["id"]))
+            reserved = funds.reserved_budget_fen(conn, str(row["id"]))
+            view["held_fen"] = held
+            view["held_yuan"] = fen_to_yuan_str(held)
+            view["reserved_budget_fen"] = reserved
+            view["reserved_budget_yuan"] = fen_to_yuan_str(reserved)
         else:
             view["available_fen"] = None
             view["available_yuan"] = None
@@ -89,6 +93,18 @@ def _tx_map(conn: sqlite3.Connection, ids: list[str]) -> dict[str, dict[str, Any
     return {str(row["id"]): queries.tx_view(row) for row in rows}
 
 
+def _comparison_view(raw: Any) -> dict[str, Any] | None:
+    """异常里的「对比」：分和元都给，前端不用自己做除法。"""
+    if not isinstance(raw, dict):
+        return None
+    out = dict(raw)
+    for key in ("previous", "current"):
+        fen = raw.get(f"{key}_fen")
+        if isinstance(fen, int):
+            out[f"{key}_yuan"] = fen_to_yuan_str(fen)
+    return out
+
+
 def _anomaly_view(
     item: dict[str, Any], index: int, tx_map: dict[str, dict[str, Any]]
 ) -> dict[str, Any]:
@@ -110,13 +126,15 @@ def _anomaly_view(
         "merchant": item.get("merchant"),
         "occurrence_count": item.get("occurrence_count"),
         "window_start_ms": item.get("window_start_ms"),
+        "window_start_text": timefmt.maybe_minute_text(item.get("window_start_ms")),
         "window_end_ms": item.get("window_end_ms"),
+        "window_end_text": timefmt.maybe_minute_text(item.get("window_end_ms")),
         "window_text": (
             f"{timefmt.maybe_minute_text(item.get('window_start_ms'))} ~ {timefmt.maybe_minute_text(item.get('window_end_ms'))}"
             if item.get("window_start_ms") and item.get("window_end_ms")
             else None
         ),
-        "comparison": item.get("comparison"),
+        "comparison": _comparison_view(item.get("comparison")),
         "rule": {
             "id": rule.get("rule_id", ""),
             "text": rule.get("rule_text", ""),

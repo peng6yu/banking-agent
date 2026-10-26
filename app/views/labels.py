@@ -17,6 +17,9 @@ MAX_LIST: Final[int] = 50
 
 #: 交易状态的中文标签。前后端必须共用同一套说法，不能一处叫"处理中"一处叫"执行中"。
 TASK_STATE_LABELS: Final[dict[str, str]] = {
+    # dag_runs.status 也会是 waiting（图建好了、还没轮到这一步）。
+    # 少这一条，页面就把英文原样显示出来。
+    "waiting": "还没轮到",
     "draft": "草稿",
     "pending": "还没执行",
     "need_info": "等待补充信息",
@@ -111,4 +114,11 @@ HANDOFF_STATUS_LABELS: Final[dict[str, str]] = {
 HANDOFF_REASON_LABELS: Final[dict[str, str]] = {
     "PAYEE_AMBIGUOUS": "收款人有歧义，等你选定",
     "PAYEE_NOT_FOUND": "没找到这个收款人",
+}
+#: 安全拒绝的原因（denials.reason 存的是拦下这次操作的错误码）。
+DENIAL_REASON_LABELS: Final[dict[str, str]] = {
+    "POLICY_BLOCKED": "策略拒绝：这类操作不在允许范围内",
+    "INJECTION_DETECTED": "疑似提示词注入，已拦下",
+    "BREAKER_OPEN": "连续被拒后熔断，本会话暂时停止处理",
+    "FACTOR_REQUIRED": "缺少必须的验证步骤",
 }

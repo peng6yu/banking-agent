@@ -23,6 +23,7 @@ from __future__ import annotations
 from typing import Any, Final
 
 import app.db as db
+from app import timefmt
 from app.clock import now_ms
 
 #: 允许落库的角色：只有用户与助手，工具/系统消息不进对话记忆。
@@ -79,7 +80,13 @@ def recent(conn, session_id: str, *, limit: int = DEFAULT_LIMIT) -> list[dict[st
         (sid, max(1, int(limit))),
     ).fetchall()
     return [
-        {"role": str(row["role"]), "content": str(row["content"]), "ts_ms": int(row["ts_ms"]), "seq": int(row["seq"])}
+        {
+            "role": str(row["role"]),
+            "content": str(row["content"]),
+            "ts_ms": int(row["ts_ms"]),
+            "ts_text": timefmt.maybe_minute_text(int(row["ts_ms"])),
+            "seq": int(row["seq"]),
+        }
         for row in reversed(rows)
     ]
 
@@ -108,12 +115,14 @@ def latest(conn, *, limit: int = DEFAULT_LIMIT) -> dict[str, Any]:
         " GROUP BY session_id ORDER BY last_ms DESC LIMIT 1"
     ).fetchone()
     if head is None:
-        return {"session_id": "", "turns": [], "last_ms": 0, "title": ""}
+        return {"session_id": "", "turns": [], "last_ms": 0, "last_text": None, "title": ""}
     sid = str(head["session_id"])
+    last_ms = int(head["last_ms"])
     return {
         "session_id": sid,
         "turns": recent(conn, sid, limit=limit),
-        "last_ms": int(head["last_ms"]),
+        "last_ms": last_ms,
+        "last_text": timefmt.maybe_minute_text(last_ms),
         "title": title(conn, sid),
     }
 

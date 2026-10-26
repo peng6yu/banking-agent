@@ -236,17 +236,19 @@ def feedback(
         return row
     with db.tx(conn):
         conn.execute("UPDATE messages SET status = ? WHERE id = ?", (status, message_id))
-        conn.execute(
-            "INSERT INTO message_feedback (message_id, user_id, action, note, created_ms)"
-            " VALUES (?, ?, ?, ?, ?)",
-            (message_id, user_id, action, str(note or "")[:300], now),
-        )
         if action in ("dismissed", "muted"):
             _bump_state(conn, user_id, str(row["insight_id"]), now, mute=action == "muted")
+        # 反馈事实只留一份：审计里这条就是权威记录（动作、备注、时间都在），
+        # 不再另建一张没人读的 message_feedback 表。
         audit.append(
             conn,
             "message.feedback",
-            {"message_id": message_id, "insight_id": str(row["insight_id"]), "action": action},
+            {
+                "message_id": message_id,
+                "insight_id": str(row["insight_id"]),
+                "action": action,
+                "note": str(note or "")[:300],
+            },
         )
     return get_message(conn, user_id, message_id)
 

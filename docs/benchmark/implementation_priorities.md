@@ -97,7 +97,7 @@
 | 沙箱条款 | 采用「消除执行面」设计：主 Agent 不执行模型生成代码，提供静态调用链与 0 命中的实证，**不冒充已部署容器沙箱** | `docs/security_sandbox.md`、`scripts/prove_no_exec_surface.py` |
 | 评测证据 | A/B 改为 8 轮配对统计并明确「方向不稳定、不宣称提升」；浏览器 7 条旅程由当前脚本实际执行 | `docs/benchmark/ab_paired_stats.md`、`docs/交付/browser_journeys.json` |
 
-> 口径提醒：本节数字与 `docs/benchmark/release_manifest.json` 同源（pytest 1763 passed / 4 skipped、红队 43/43、e2e 13/13、旅程 7/7）；若与旧章节冲突，以清单与本轮验收报告为准。
+> 口径提醒：本节数字与 `docs/benchmark/release_manifest.json` 同源（pytest 1768 passed / 4 skipped、红队 43/43、e2e 13/13、旅程 7/7）；若与旧章节冲突，以清单与本轮验收报告为准。
 ---
 
 ## 二、功能取舍
@@ -212,7 +212,7 @@
 | 图数据库 / 知识图谱 | ontology YAML 已能表达别名与关系；图库运维与演示环境不符 | YAML `relations` + 代码内遍历 |
 | 多 Agent 框架 / LangGraph | README 明确不用；多 Agent 会打断"单一审计链 + 令牌七步"的可验证性；赛题不要求 | 现有 DAG + 单一执行器 |
 | 真实短信/UKey/人脸 | 需银行侧通道；R6 已标注 mock | 可插拔 `factor provider` 接口 + 演示桩 |
-| 多用户 / 登录 / RBAC | R7；改动覆盖所有工具与 36 张表 | 单用户演示 + 文档写明边界 |
+| 多用户 / 登录 / RBAC | R7；改动覆盖所有工具与 35 张表 | 单用户演示 + 文档写明边界 |
 | 原生移动 App / 语音 | 时间不够；语音入口 AIR 仅 B1 提及（未核实） | 响应式 Web + 手势入口 |
 | 第三方 MCP / 开放 API | 写工具外露=越权面放大；无外部调用方 | 技术文档给只读工具 schema 设计 |
 | 7×24 主动推送 | 无推送通道；误报风险高；AIR 无主动服务证据 | "打开即见提醒"+ 手动扫描 |

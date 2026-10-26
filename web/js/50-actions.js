@@ -47,6 +47,8 @@ async function confirmAction(confirmationId, approve, factor, proofs, sid) {
     return;
   } else if (status === 'rejected') {
     appendBubble('sys', '已经拒绝，这一轮不会继续执行，后面没有执行的节点会标成跳过。');
+  } else if (status === 'expired') {
+    appendBubble('sys', '这条确认已经过期作废，没有执行任何操作，也不会扣款。要办的话请重新发起一次。');
   } else if (status === 'approved') {
     appendBubble('sys', approve ? '后端已批准这次授权，正在执行。执行结果以服务端会话状态为准。' : '已提交。');
   } else if (status) {

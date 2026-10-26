@@ -263,6 +263,7 @@ def test_executions_expose_task_state_labels_and_audit_chain(bank: Path) -> None
     data = get("/api/business/executions").json()
     labels = data["state_labels"]
     assert set(labels) == {
+        "waiting",
         "draft",
         "pending",
         "need_info",
@@ -340,3 +341,76 @@ def test_every_dynamic_money_key_has_a_backend_field() -> None:
         if f'"{base}_fen"' not in backend and f'"{base}_yuan"' not in backend
     ]
     assert not missing, f"前端拼出来的金额字段后端没有：{missing}"
+
+
+# ---------------------------------------------------------------- 契约形状
+
+_READ_ENDPOINTS = (
+    "/api/health",
+    "/api/tools",
+    "/api/chat/latest",
+    "/api/messages",
+    "/api/handoffs",
+    "/api/business/overview",
+    "/api/business/bill",
+    "/api/business/management",
+    "/api/business/plans",
+    "/api/business/executions",
+)
+
+#: JSON schema 里的参数边界不是金额字段，只是名字像。
+_UNIT_ALLOWED_KEYS = frozenset({"min_fen", "max_fen"})
+
+
+def _walk(node: Any, path: str = ""):
+    if isinstance(node, dict):
+        for key, value in node.items():
+            yield f"{path}/{key}", node, key, value
+            yield from _walk(value, f"{path}/{key}")
+    elif isinstance(node, list):
+        for item in node:
+            yield from _walk(item, f"{path}[]")
+
+
+def test_every_read_endpoint_answers_with_ok(bank: Path) -> None:
+    """读端点也要有一致的信封：页面不用为「这块有没有 ok」写两套判断。"""
+    conn = db.connect()
+    try:
+        session_id = str(conn.execute("SELECT id FROM sessions LIMIT 1").fetchone()["id"])
+    finally:
+        conn.close()
+    endpoints = _READ_ENDPOINTS + (
+        f"/api/audit?session_id={session_id}",
+        f"/api/session/{session_id}",
+    )
+    for url in endpoints:
+        res = get(url)
+        assert res.status_code == 200, (url, res.status_code, res.text[:120])
+        body = res.json()
+        assert body.get("ok") is True, f"{url} 的响应缺少 ok=true：{list(body)[:6]}"
+
+
+def test_every_fen_and_ms_field_has_a_readable_twin(bank: Path) -> None:
+    """有 _fen 就要有 _yuan，有 _ms 就要有 _text：前端不该自己做除法和时间格式化。"""
+    conn = db.connect()
+    try:
+        session_id = str(conn.execute("SELECT id FROM sessions LIMIT 1").fetchone()["id"])
+    finally:
+        conn.close()
+    endpoints = _READ_ENDPOINTS + (
+        f"/api/audit?session_id={session_id}",
+        f"/api/session/{session_id}",
+    )
+    missing: list[str] = []
+    for url in endpoints:
+        body = get(url).json()
+        for path, parent, key, value in _walk(body):
+            if "/payload/" in path:
+                continue  # 审计 payload 是内部证据，不按展示字段的规矩来
+            if key in _UNIT_ALLOWED_KEYS or not isinstance(value, int):
+                continue
+            if key.endswith("_fen") and key[:-4] + "_yuan" not in parent:
+                missing.append(f"{url} {path}")
+            if key.endswith("_ms") and key[:-3] + "_text" not in parent:
+                missing.append(f"{url} {path}")
+    assert not missing, "这些字段缺配套的可读值：" + chr(10) + chr(10).join(missing)
