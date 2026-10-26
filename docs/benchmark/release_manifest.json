@@ -1,13 +1,13 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-10-26T23:31:47+08:00",
+  "generated_at": "2026-10-26T23:40:59+08:00",
   "git": {
-    "head": "4da413ad2b552f1886ebf70c33756432b59bae2f",
-    "head_short": "4da413a",
-    "subject": "fix(planner): 确认超时的文案不再虚报退款",
+    "head": "1db54ee410dd7f5b06e78382dd9348b6948ca279",
+    "head_short": "1db54ee",
+    "subject": "test(api): 钉住 SSE 各帧的键集合",
     "branch": "main",
-    "dirty": false,
-    "changed_paths": 0
+    "dirty": true,
+    "changed_paths": 1
   },
   "code": {
     "tools": {
@@ -108,10 +108,10 @@
   },
   "tests": {
     "command": ".venv/bin/python -m pytest -q",
-    "passed": 1779,
+    "passed": 1780,
     "failed": 0,
     "skipped": 4,
-    "duration_s": 19.9,
+    "duration_s": 18.96,
     "log": "tmp/pytest_final.log",
     "parsed": true
   },
