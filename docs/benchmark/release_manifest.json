@@ -1,13 +1,13 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-10-26T23:07:23+08:00",
+  "generated_at": "2026-10-26T23:17:14+08:00",
   "git": {
-    "head": "1103f1c768da7bf97972dcb43ae060afa5a01eb1",
-    "head_short": "1103f1c",
-    "subject": "fix(web,views): 满数据真浏览器点出来的 6 处可见缺陷",
+    "head": "836aa99e1a341b82124082e1645680089b46ec65",
+    "head_short": "836aa99",
+    "subject": "refactor(api,planner): SSE 终帧补元、api 层裸 SQL 搬进视图、删 5 个没人读的响应字段",
     "branch": "main",
-    "dirty": true,
-    "changed_paths": 1
+    "dirty": false,
+    "changed_paths": 0
   },
   "code": {
     "tools": {
@@ -108,10 +108,10 @@
   },
   "tests": {
     "command": ".venv/bin/python -m pytest -q",
-    "passed": 1777,
+    "passed": 1779,
     "failed": 0,
     "skipped": 4,
-    "duration_s": 20.72,
+    "duration_s": 18.8,
     "log": "tmp/pytest_final.log",
     "parsed": true
   },
