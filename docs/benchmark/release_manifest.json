@@ -1,10 +1,10 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-10-26T23:17:14+08:00",
+  "generated_at": "2026-10-26T23:31:47+08:00",
   "git": {
-    "head": "836aa99e1a341b82124082e1645680089b46ec65",
-    "head_short": "836aa99",
-    "subject": "refactor(api,planner): SSE 终帧补元、api 层裸 SQL 搬进视图、删 5 个没人读的响应字段",
+    "head": "4da413ad2b552f1886ebf70c33756432b59bae2f",
+    "head_short": "4da413a",
+    "subject": "fix(planner): 确认超时的文案不再虚报退款",
     "branch": "main",
     "dirty": false,
     "changed_paths": 0
@@ -111,7 +111,7 @@
     "passed": 1779,
     "failed": 0,
     "skipped": 4,
-    "duration_s": 18.8,
+    "duration_s": 19.9,
     "log": "tmp/pytest_final.log",
     "parsed": true
   },
