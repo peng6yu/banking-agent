@@ -171,6 +171,8 @@
             <button class="btn btn-mini" type="button" id="bill-refresh">刷新</button>
           </div>
         </div>
+        <div class="cap-chips" id="bill-account-chips" role="group" aria-label="切到哪张卡看账单"></div>
+        <div class="card-note" id="bill-scope-note"></div>
         <div class="grid grid-3" id="bill-summary"></div>
       </div>
 
@@ -194,6 +196,16 @@
             </label>
           </div>
           <div class="pf-row">
+            <label class="pf-field"><span class="field-label">记到哪张卡</span>
+              <select id="bill-manual-account" class="pf-in">
+                <option value="">默认（主储蓄卡）</option>
+              </select>
+            </label>
+            <label class="pf-field"><span class="field-label">发生时间（留空=现在）</span>
+              <input id="bill-manual-ts" class="pf-in" type="datetime-local" />
+            </label>
+          </div>
+          <div class="pf-row">
             <label class="pf-field"><span class="field-label">方向</span>
               <select id="bill-manual-direction" class="pf-in">
                 <option value="out">支出（从余额扣）</option>
@@ -210,7 +222,7 @@
           <div class="pf-row">
             <button id="bill-manual-submit" class="btn btn-green" type="submit">记到本行流水</button>
           </div>
-          <div class="card-note">这笔是你自己补录的：只写本行流水与演示余额，不对应任何真实支付，也不会替你向商户付款。同一天重复提交同一笔只会记一次。</div>
+          <div class="card-note">这笔是你自己补录的：只写本行流水与演示余额，不对应任何真实支付，也不会替你向商户付款。可以补最近 90 天内的账（不能填未来）；同一笔重复提交只记一次，改了金额或时间就是新的一笔。记完会立刻按这笔发生的那一个月跑一遍账单规则，并把命中的规则列在下面。</div>
         </form>
         <div id="bill-manual-result"></div>
       </div>

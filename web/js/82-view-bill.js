@@ -2,6 +2,50 @@
 'use strict';
 
 /* ----------------------------------------------------- 手动记一笔 */
+
+/* 一次提交的身份证：同一次提交重试（比如网络抖了一下又点一次）只记一笔；
+   用户改了金额/时间/商户就换一张身份证，变成新的一笔。
+   这就是「一天两杯同价咖啡」能记成两笔、而手抖双击不会变两笔的原因。 */
+let bxManualNonce = '';
+
+function bxNewNonce() {
+  if (window.crypto && typeof window.crypto.randomUUID === 'function') {
+    return window.crypto.randomUUID();
+  }
+  return 'n' + Date.now().toString(36) + Math.random().toString(36).slice(2, 10);
+}
+
+/* 「记到哪张卡」的选项由账单响应里的 accounts 填：和上面切卡看账单用同一份，
+   不会出现「切卡时有这张卡、补录时没有」。 */
+function bxFillManualAccounts(accounts, current) {
+  const sel = $('bill-manual-account');
+  if (!sel) { return; }
+  /* 用户在表单里自己选过卡，就尊重他的选择；没动过则跟着上面切卡的那张走——
+     否则页面明明在看信用卡，补录却还记到储蓄卡上。 */
+  if (sel.dataset.touchedBound !== '1') {
+    sel.dataset.touchedBound = '1';
+    sel.addEventListener('change', function () { sel.dataset.touched = '1'; });
+  }
+  const touched = sel.dataset.touched === '1';
+  const keep = sel.value;
+  sel.replaceChildren();
+  const def = document.createElement('option');
+  def.value = '';
+  def.textContent = '默认（主储蓄卡）';
+  sel.appendChild(def);
+  bxArr(accounts).forEach(function (acct) {
+    const opt = document.createElement('option');
+    opt.value = textOf(acct.account_id);
+    opt.textContent = textOf(acct.name) + ' 尾号 ' + textOf(acct.tail) +
+      (textOf(acct.type) === 'credit' ? '（信用卡，总额度 ' + textOf(acct.credit_limit_yuan) + ' 元）' : '');
+    sel.appendChild(opt);
+  });
+  const target = touched
+    ? keep
+    : ((current && textOf(current.account_id)) || keep);
+  if (target) { sel.value = target; }
+}
+
 function bxBindManualForm() {
   const form = $('bill-manual-form');
   if (!form || form.dataset.bound === '1') { return; }
@@ -10,6 +54,8 @@ function bxBindManualForm() {
     event.preventDefault();
     bxSubmitManualTransaction();
   });
+  /* 改了内容就是另一笔：换一张提交编号，服务端不会再把这次当成上一次的重试。 */
+  form.addEventListener('input', function () { bxManualNonce = ''; });
 }
 
 function bxSubmitManualTransaction() {
@@ -21,6 +67,11 @@ function bxSubmitManualTransaction() {
   const category = textOf($('bill-manual-category') && $('bill-manual-category').value).trim() || '其他';
   const note = textOf($('bill-manual-note') && $('bill-manual-note').value).trim();
   const amountFen = bxYuanToFen(amountText);
+  const accountSel = $('bill-manual-account');
+  const accountId = textOf(accountSel && accountSel.value).trim();
+  const tsInput = $('bill-manual-ts');
+  const tsText = textOf(tsInput && tsInput.value).trim();
+  const tsMs = tsText ? new Date(tsText).getTime() : null;
   /* 校验提示写在这张表单自己的位置上：只发到 AI 助手页的话，人在账单页点提交
      会觉得按钮没反应（同 A21 那类反馈跑到别的页）。 */
   const say = function (text) {
@@ -30,24 +81,66 @@ function bxSubmitManualTransaction() {
   if (result) { result.replaceChildren(); }
   if (!merchant) { say('先写这笔是跟谁发生的，例如「楼下便利店」。'); return; }
   if (!amountFen) { say('金额要写大于 0 的数，例如 23.50。'); return; }
+  if (tsText && !isFinite(tsMs)) { say('发生时间没看懂，换一个日期时间，或者留空记成现在。'); return; }
+  /* 先在前端挡一次未来时间：让人当场改，而不是等后端 400。后端仍然会再挡一次。 */
+  if (tsMs !== null && tsMs > Date.now() + 60000) { say('发生时间不能是未来；补录过去的账才需要填时间。'); return; }
+  if (!bxManualNonce) { bxManualNonce = bxNewNonce(); }
   if (btn) { btn.disabled = true; }
-  bxSend('/api/transactions/manual', 'POST', {
-    merchant: merchant, amount_fen: amountFen, direction: direction, category: category, note: note
-  }).then(function (res) {
+  const payload = {
+    merchant: merchant, amount_fen: amountFen, direction: direction, category: category, note: note,
+    client_nonce: bxManualNonce
+  };
+  if (accountId) { payload.account_id = accountId; }
+  if (tsMs !== null) { payload.ts_ms = tsMs; }
+  bxSend('/api/transactions/manual', 'POST', payload).then(function (res) {
     const tx = bxIsObj(res && res.transaction) ? res.transaction : {};
+    const account = bxIsObj(res && res.account) ? res.account : {};
+    const isCredit = textOf(account.type) === 'credit';
     const balance = bxNum(res && res.balance_after_fen);
     if (btn) { btn.disabled = false; }
+    /* 记成功了这张编号就作废：下一次提交是另一笔，哪怕内容一模一样。 */
+    bxManualNonce = '';
     appendBubble('sys', '已记下：' + textOf(tx.counterparty) + ' ' + textOf(tx.amount_yuan) + ' 元（' +
       (textOf(tx.direction) === 'in' ? '收入' : '支出') + '）' +
-      (balance === null ? '' : '，记完余额 ' + pfYuanFromFen(balance) + ' 元') +
-      (res && res.idempotent ? '。这笔今天已经记过，没有重复记账。' : '。'), 'manual');
+      (balance === null ? '' : (isCredit ? '，这张卡还能用 ' : '，记完余额 ') + pfYuanFromFen(balance) + ' 元') +
+      (res && res.idempotent ? '。这一次提交刚才已经记过，没有重复记账。' : '。'), 'manual');
     if (res && res.notice) { appendBubble('sys', textOf(res.notice)); }
     if (result) {
       result.replaceChildren();
-      result.appendChild(el('div', 'card-note', '流水号 ' + textOf(tx.transaction_id) + ' · 渠道 manual · 分类 ' +
-        textOf(tx.category) + (tx.note ? ' · 备注 ' + textOf(tx.note) : '')));
+      const where = account.name
+        ? '账户 ' + textOf(account.name) + ' 尾号 ' + textOf(account.tail)
+        : '账户 ' + BX_NA;
+      result.appendChild(el('div', 'card-note', '流水号 ' + textOf(tx.transaction_id) + ' · 渠道 ' +
+        textOf(tx.channel || 'manual') + ' · 分类 ' + textOf(tx.category) + ' · ' + where +
+        (tx.note ? ' · 备注 ' + textOf(tx.note) : '')));
+      /* 余额与「记在信用卡上」的边界说明也留在表单下面：人正看着这张面板，
+         只发到 AI 助手页等于没说。 */
+      if (balance !== null) {
+        result.appendChild(el('div', 'card-note',
+          (isCredit ? '这张卡还能用 ' : '记完余额 ') + pfYuanFromFen(balance) + ' 元。'));
+      }
+      if (res && res.notice) { result.appendChild(el('div', 'card-note', textOf(res.notice))); }
+      const hits = bxArr(res && res.hits);
+      if (hits.length) {
+        result.appendChild(el('div', 'field-label', '这笔命中了 ' + bxCount(hits.length, ' 条账单规则')));
+        const list = el('div', 'list');
+        hits.forEach(function (hit) {
+          list.appendChild(bxRow(textOf(hit.title), textOf(hit.detail), bxMoney(hit, 'amount')));
+        });
+        result.appendChild(list);
+      } else if (res && res.hits_note) {
+        result.appendChild(el('div', 'card-note', textOf(res.hits_note)));
+      }
+      /* 补录之后去助手看：提醒是读时按最新账本算的，先刷新再切页，切过去不是旧数据。 */
+      const go = el('button', 'btn btn-mini', '让助手也看一眼');
+      go.type = 'button';
+      go.addEventListener('click', function () {
+        if (typeof bxMessagesRefresh === 'function') { bxMessagesRefresh(); }
+        bxSetView('overview');
+      });
+      result.appendChild(go);
     }
-    ['bill-manual-merchant', 'bill-manual-amount', 'bill-manual-note'].forEach(function (id) {
+    ['bill-manual-merchant', 'bill-manual-amount', 'bill-manual-note', 'bill-manual-ts'].forEach(function (id) {
       const node = $(id);
       if (node) { node.value = ''; }
     });

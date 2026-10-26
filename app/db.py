@@ -148,7 +148,10 @@ CREATE TABLE IF NOT EXISTS transactions (
   hold_id           TEXT REFERENCES holds(id),
   channel           TEXT NOT NULL DEFAULT 'app',
   reversal_of       TEXT,
-  reversed_by       TEXT
+  reversed_by       TEXT,
+  -- 客户端幂等键：手动补录重试时带同一个值只记一笔；换一笔就换一个值。
+  -- 其它写路径（转账/种子/模拟）不传，保持 NULL。
+  client_nonce      TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_tx_account_ts ON transactions(account_id, ts_ms DESC);
 CREATE INDEX IF NOT EXISTS idx_tx_category ON transactions(category);
@@ -669,6 +672,8 @@ _ADDED_COLUMNS: Final[tuple[tuple[str, str, str], ...]] = (
     ("payees", "phone", "TEXT"),
     ("transactions", "reversal_of", "TEXT"),
     ("transactions", "reversed_by", "TEXT"),
+    # 手动补录的客户端幂等键（老库补列；新库在 SCHEMA_SQL 里就有）
+    ("transactions", "client_nonce", "TEXT"),
     ("scheduled_transfers", "factor_verified_ms", "INTEGER NOT NULL DEFAULT 0"),
     ("scheduled_transfers", "defer_count", "INTEGER NOT NULL DEFAULT 0"),
     # 领取租约：多进程同时 tick 时，只有抢到租约的那一个执行（不是靠「谁先读到」）
@@ -808,6 +813,11 @@ def init_db(conn: sqlite3.Connection) -> None:
     _ensure_columns(conn)
     conn.executescript(SCHEMA_SQL)
     _ensure_columns(conn)
+    # 幂等键唯一索引必须放在补列之后：老库执行 SCHEMA_SQL 时还没有 client_nonce 列。
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_tx_client_nonce"
+        " ON transactions(client_nonce) WHERE client_nonce IS NOT NULL"
+    )
     _migrate_monitor_rules(conn)
     _migrate_transfer_category(conn)
     _drop_legacy(conn)

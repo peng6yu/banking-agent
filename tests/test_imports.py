@@ -261,7 +261,7 @@ ALLOWED: dict[str, frozenset[str]] = {
     # 待办与队列积木：待确认卡、接管单、预约、提醒、监测。只读既有事实，不产生新裁决
     "app.views.queue": _deps("app.clock app.handoffs app.money app.planner app.planner.ticker app.proactive app.timefmt app.tools app.tools.scheduled app.views.labels"),
     "app.views.overview": _deps("app.clock app.planner app.planner.assist app.proactive app.timefmt app.tools.base app.views.labels app.views.money app.views.queue"),
-    "app.views.bill": _deps("app.clock app.proactive app.timefmt app.tools app.tools.base app.tools.bill app.views.labels app.views.money"),
+    "app.views.bill": _deps("app.clock app.proactive app.timefmt app.tools app.tools.base app.tools.bill app.tools.queries app.views.labels app.views.money"),
     "app.views.management": _deps("app.clock app.memory app.money app.proactive app.subscriptions app.suitability app.timefmt app.tools.base app.views.money app.views.queue"),
     "app.views.plans": _deps("app.clock app.planner app.planner.assist app.plans app.subscriptions app.timefmt app.tools.base app.views.labels app.views.queue"),
     "app.views.executions": _deps("app.audit app.clock app.money app.models app.planner app.planner.events app.timefmt app.views.labels app.views.queue"),
@@ -387,7 +387,7 @@ ALLOWED: dict[str, frozenset[str]] = {
     "app.use_cases.savings": _deps("app.clock app.proactive app.use_cases.base"),
     "app.use_cases.scheduled": _deps("app.tools.scheduled app.use_cases.base"),
     "app.use_cases.subscriptions": _deps("app.proactive app.subscriptions app.use_cases.base"),
-    "app.use_cases.transactions": _deps("app.audit app.clock app.ids app.money app.proactive app.use_cases.base"),
+    "app.use_cases.transactions": _deps("app.audit app.clock app.ids app.money app.proactive app.tools app.tools.bill app.use_cases.base"),
     "app.api.http": _deps("app.use_cases.base"),
 }
 

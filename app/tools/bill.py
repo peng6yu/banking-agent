@@ -251,6 +251,39 @@ def _detect_anomalies(
     )
 
 
+def explain_transaction(
+    conn: sqlite3.Connection,
+    *,
+    account_id: str,
+    transaction_id: str,
+    ts_ms: int,
+) -> list[dict[str, Any]]:
+    """这笔新流水命中了哪几条账单规则（补录完立刻告诉用户，不用等下次刷新）。
+
+    检测本身是读时算的：按这笔发生的那一个月重新跑三条规则，再把证据里
+    含这笔 id 的那几条挑出来。只挑「与这笔有关」的，不把同月别的异常也算进来。
+    """
+    parts = _local(ts_ms)
+    year, month = int(parts.tm_year), int(parts.tm_mon)
+    start_ms, end_ms = _period_range("month", year, month)
+    rows = fetch_transactions(conn, account_id, start_ms, end_ms, None, None, None)
+    baseline = _hike_baseline(conn, account_id, "month", year, month)
+    hits: list[dict[str, Any]] = []
+    for item in _detect_anomalies(rows, baseline):
+        if str(transaction_id) not in [str(tx_id) for tx_id in item.get("tx_ids") or []]:
+            continue
+        hits.append(
+            {
+                "kind": str(item["kind"]),
+                "title": str(item["title"]),
+                "detail": str(item["detail"]),
+                "amount_fen": int(item["amount_fen"]),
+                "amount_yuan": fen_to_yuan_str(int(item["amount_fen"])),
+            }
+        )
+    return hits
+
+
 def _split_order_anomalies(rows: list[sqlite3.Row]) -> list[dict[str, Any]]:
     """规则一：同一家商户 60 分钟内 ≥3 笔、且单笔落在 500—1000 元，疑似拆单。"""
     spends = sorted(

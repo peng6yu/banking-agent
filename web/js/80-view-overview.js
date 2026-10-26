@@ -22,7 +22,11 @@ function bxRenderOverview(data) {
     }
     /* 支出只算钱真的离开净资产的：转给自己另一张卡、买理财是钱换个地方，单列在下面的「内部搬运」。
        以前总览把内部搬运也算进支出，账单页又把它排除，同一屏两个数谁都不服谁。 */
-    balHost.appendChild(bxStatCard('本月支出', month.spend_out_yuan ? textOf(month.spend_out_yuan) + ' 元' : BX_NA, bxCount(month.out_count, ' 笔') + '，不含账户互转与理财'));
+    /* 首页 KPI 只覆盖一张卡；账单页能切卡，这里不写清是哪张，切过卡的人会以为总览算错。 */
+    const cardLabel = month.account_name
+      ? textOf(month.account_name) + ' 尾号 ' + textOf(month.account_tail) + ' · '
+      : '';
+    balHost.appendChild(bxStatCard('本月支出', month.spend_out_yuan ? textOf(month.spend_out_yuan) + ' 元' : BX_NA, cardLabel + bxCount(month.out_count, ' 笔') + '，不含账户互转与理财'));
     balHost.appendChild(bxStatCard('本月收入', month.spend_in_yuan ? textOf(month.spend_in_yuan) + ' 元' : BX_NA, bxCount(month.in_count, ' 笔')));
   }
   setText($('ov-month-tag'), data.month_label || '—');
@@ -283,6 +287,34 @@ function bxRenderOverview(data) {
 function bxRenderBill(data) {
   data = bxIsObj(data) ? data : {};
   const range = bxIsObj(data.range) ? data.range : {};
+  const accounts = bxArr(data.accounts);
+  const scoped = bxIsObj(data.account) ? data.account : {};
+
+  /* 账单是「某一张卡」的视图：储蓄卡看花销，信用卡看刷卡与还款、还剩多少额度。
+     不把当前卡摆出来，用户切到信用卡后会觉得数字凭空变了。 */
+  const chipHost = $('bill-account-chips');
+  if (chipHost) {
+    chipHost.replaceChildren();
+    accounts.forEach(function (acct) {
+      const id = textOf(acct.account_id);
+      const active = id === textOf(scoped.account_id);
+      const btn = el('button', 'btn btn-mini' + (active ? ' btn-green' : ''),
+        '尾号 ' + textOf(acct.tail) + ' · ' + textOf(acct.name) + (textOf(acct.type) === 'credit' ? '（信用卡）' : ''));
+      btn.type = 'button';
+      btn.setAttribute('aria-pressed', active ? 'true' : 'false');
+      btn.addEventListener('click', function () {
+        /* 显式写死选中的卡，而不是「再点一下回到默认」：切走再切回来时，
+           用户期望看到的是同一张卡，不是悄悄换了默认。 */
+        bxBillAccount = id;
+        bxLoad('bill', true);
+      });
+      chipHost.appendChild(btn);
+    });
+  }
+  setText($('bill-scope-note'), textOf(data.scope_note));
+
+  /* 手动补录的「记到哪张卡」用同一份账户列表，两处不会出现一张卡有、一张没有。 */
+  if (typeof bxFillManualAccounts === 'function') { bxFillManualAccounts(accounts, scoped); }
 
   const host = $('bill-summary');
   if (host) {
@@ -291,14 +323,16 @@ function bxRenderBill(data) {
        单独列在下面的「内部搬运」里；把这两笔混进支出再算结余，就会和总览对不上。 */
     host.appendChild(bxStatCard('支出合计', bxMoney(data, 'spend_out'), textOf(range.label) + ' · ' + bxCount(data.out_count, ' 笔，不含账户互转与理财')));
     host.appendChild(bxStatCard('收入合计', bxMoney(data, 'spend_in'), bxCount(data.in_count, ' 笔')));
+    const internal = bxIsObj(data.internal) ? data.internal : {};
+    const internalItems = bxArr(internal.items);
     const netAll = bxMoney(data, 'net_all');
-    const netHint = netAll === BX_NA
+    /* 没有内部搬运时不要写「把内部搬运也算进去是 X」——这句话在这种卡上等于把同一个数说两遍，
+       还会让人以为差在哪。 */
+    const netHint = netAll === BX_NA || !internalItems.length
       ? '收入 − 支出，和总览同一个口径'
       : '收入 − 支出，和总览同一个口径。把内部搬运也算进去是 ' + netAll + '（明细见下方「内部搬运」）';
     host.appendChild(bxStatCard('净结余', bxMoney(data, 'net'), netHint));
 
-    const internal = bxIsObj(data.internal) ? data.internal : {};
-    const internalItems = bxArr(internal.items);
     if (internalItems.length) {
       const inner = el('div', 'card-note');
       inner.textContent = '内部搬运：' + internalItems.map(function (item) {

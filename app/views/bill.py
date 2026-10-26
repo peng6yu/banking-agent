@@ -10,22 +10,57 @@ from typing import Any
 
 from app import proactive
 from app import timefmt
-from app.tools import bill
-from app.clock import now_ms
+from app.clock import ValidationError, now_ms
+from app.tools import bill, queries
 from app.tools.base import primary_account
 from app.tools.bill import ANOMALY_KINDS
 
-from app.views.money import _ctx, _enrich_anomalies, _trend
+from app.views.money import _accounts, _ctx, _enrich_anomalies, _trend
 from app.views.labels import ANOMALY_RULES, DEFAULT_TREND_MONTHS
 
 
+def _bill_account(conn: sqlite3.Connection, account_id: str | None) -> tuple[str, dict[str, Any]]:
+    """账单看哪张卡：没指定就看主储蓄卡，指定了就必须真实存在。
+
+    账单是「某一张卡」的流水视图，不是全账户聚合：储蓄卡看花了多少，信用卡看
+    刷了多少、还了多少、还剩多少额度。切错卡比报错更糟，所以找不到就直接 400。
+    """
+    if account_id:
+        row = conn.execute(
+            "SELECT * FROM accounts WHERE id = ?", (str(account_id),)
+        ).fetchone()
+        if row is None:
+            raise ValidationError(
+                "找不到这个账户，可能已经被销户或者编号不对。",
+                reason="ACCOUNT_NOT_FOUND",
+                field="account_id",
+            )
+    else:
+        row = primary_account(conn)
+    return str(row["id"]), queries.account_view(row)
+
+
+def _scope_note(account: dict[str, Any]) -> str:
+    """说清这一屏是哪个口径，尤其是信用卡和储蓄卡不一样的那部分。"""
+    if str(account.get("type")) == "credit":
+        return (
+            "这张信用卡的口径：支出是刷卡、收入是还款；可用额度 = 总额度 − 已用，"
+            "刷信用卡不动储蓄卡余额，还款才动。"
+        )
+    return "这张储蓄卡的口径：支出/收入都是账面真实进出，不含账户互转与理财。"
+
+
 def bill_view(
-    conn: sqlite3.Connection, *, period: str, year: int, month: int | None
+    conn: sqlite3.Connection,
+    *,
+    period: str,
+    year: int,
+    month: int | None,
+    account_id: str | None = None,
 ) -> dict[str, Any]:
     """账单分析：统计 + 分类 + 趋势 + 异常（每条带依据、证据与后续动作）。"""
     stamp = now_ms()
-    account = primary_account(conn)
-    account_id = str(account["id"])
+    account_id, account = _bill_account(conn, account_id)
     today = proactive.local_date()
     period = (period or "month").strip().lower()
     if period not in ("month", "year"):
@@ -45,6 +80,11 @@ def bill_view(
         "year": int(year),
         "month": month if period == "month" else None,
         "range": data.get("range"),
+        # 账单是「某一张卡」的视图：把当前卡和可切换的账户一并带出去，
+        # 前端不必再打一次 /api/business/management 才知道有哪些卡。
+        "account": account,
+        "accounts": _accounts(conn),
+        "scope_note": _scope_note(account),
         # 主口径：钱真的离开净资产。账户互转/理财单独放在 internal 里交代。
         "spend_out_fen": data.get("spend_out_fen", 0),
         "spend_out_yuan": data.get("spend_out_yuan", "0.00"),

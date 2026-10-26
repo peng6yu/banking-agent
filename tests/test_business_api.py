@@ -190,6 +190,45 @@ def test_bill_period_year_is_supported(bank: Path) -> None:
     assert data["range"]["start_ms"] < data["range"]["end_ms"]
 
 
+def test_bill_defaults_to_the_savings_card_and_lists_the_choices(bank: Path) -> None:
+    """账单只覆盖一张卡，默认是主储蓄卡；可切换的卡必须一并给出，前端才不用猜。"""
+    data = get("/api/business/bill?period=month").json()
+    assert data["account"]["account_id"] == DEBIT_ACCOUNT_ID
+    assert data["account"]["type"] == "debit"
+    assert {row["account_id"] for row in data["accounts"]} >= {DEBIT_ACCOUNT_ID, CREDIT_ACCOUNT_ID}
+    assert "储蓄卡" in data["scope_note"]
+
+
+def test_bill_can_be_scoped_to_the_credit_card(bank: Path) -> None:
+    """切到信用卡看的是刷卡/还款和可用额度，不能还拿储蓄卡的流水充数。"""
+    data = get(f"/api/business/bill?period=month&account_id={CREDIT_ACCOUNT_ID}").json()
+    assert data["account"]["account_id"] == CREDIT_ACCOUNT_ID
+    assert data["account"]["type"] == "credit"
+    assert data["account"]["credit_limit_fen"] == CREDIT_LIMIT_FEN
+    assert "信用卡" in data["scope_note"]
+
+    window = data["range"]
+    conn = db.connect()
+    try:
+        row = conn.execute(
+            "SELECT COALESCE(SUM(amount_fen), 0) AS total, COUNT(*) AS n FROM transactions"
+            " WHERE account_id = ? AND direction = 'out' AND ts_ms >= ? AND ts_ms < ?"
+            " AND category NOT IN ('账户互转', '理财')",
+            (CREDIT_ACCOUNT_ID, window["start_ms"], window["end_ms"]),
+        ).fetchone()
+    finally:
+        conn.close()
+    assert data["spend_out_fen"] == int(row["total"])
+    assert data["out_count"] == int(row["n"])
+
+
+def test_bill_refuses_an_account_that_does_not_exist(bank: Path) -> None:
+    """切错卡比报错更糟：不存在的账户要明确拒绝，而不是静默回落到默认卡。"""
+    res = get("/api/business/bill?period=month&account_id=a_hacker")
+    assert res.status_code == 400
+    assert res.json()["code"] == "VALIDATION"
+
+
 # ---------------------------------------------------------------- 业务管理
 
 

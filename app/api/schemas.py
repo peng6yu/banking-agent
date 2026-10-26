@@ -272,6 +272,14 @@ class ManualTransactionRequest(BaseModel):
     direction: Literal["out", "in"] = "out"
     category: str = Field(default="其他", min_length=1, max_length=12)
     note: str = Field(default="", max_length=80)
+    #: 记到哪张卡/哪个账户；不传就是工资储蓄卡（演示环境的主账户）。
+    #: 信用卡消费只占这张卡的可用额度，不动储蓄卡余额。
+    account_id: str | None = Field(default=None, max_length=40)
+    #: 这笔实际发生的时间（毫秒）。不传＝现在；只接受最近 90 天内、且不在未来。
+    ts_ms: int | None = Field(default=None, ge=0)
+    #: 客户端幂等键：同一次提交重试带同一个值只记一笔，换一笔就换一个值。
+    #: 不传时不做幂等（每次都是一笔新的）。
+    client_nonce: str | None = Field(default=None, max_length=64)
 
 
 class SubscriptionVerdictClearRequest(BaseModel):

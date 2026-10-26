@@ -26,7 +26,7 @@ from app.views.queue import (
 from app.views.labels import DEFAULT_TREND_MONTHS, QUICK_ACTIONS
 
 
-def _month_scope(bill_data: dict[str, Any]) -> dict[str, Any]:
+def _month_scope(bill_data: dict[str, Any], account: dict[str, Any]) -> dict[str, Any]:
     """本期收支：和账单页同一个口径。
 
     「支出」只算钱真的离开净资产的；账户互转（本人卡间、亲属卡）与理财申购赎回
@@ -35,6 +35,11 @@ def _month_scope(bill_data: dict[str, Any]) -> dict[str, Any]:
     return {
         "label": bill_data.get("range", {}).get("label"),
         "window": bill_data.get("range"),
+        # 首页 KPI 只覆盖一张卡，必须在卡上写明是哪一张：账单页可以切卡，
+        # 不说清楚就会出现「首页 9,324、账单页 3,900」看着像算错。
+        "account_id": str(account.get("account_id") or ""),
+        "account_name": str(account.get("name") or ""),
+        "account_tail": str(account.get("tail") or ""),
         "spend_out_fen": bill_data.get("spend_out_fen", 0),
         "spend_out_yuan": bill_data.get("spend_out_yuan", "0.00"),
         "spend_in_fen": bill_data.get("spend_in_fen", 0),
@@ -71,6 +76,7 @@ def overview_view(conn: sqlite3.Connection) -> dict[str, Any]:
     reminders = assist.active_reminders(conn, user_id)
 
     accounts = _accounts(conn)
+    account_view = next((a for a in accounts if a["account_id"] == account_id), None)
     if not accounts:
         unavailable.append({"section": "account", "reason": "还没有任何账户数据。"})
     # 注意：空数据不算"暂不可用"。没有储蓄目标、没有预约任务、本月没有支出，
@@ -83,9 +89,9 @@ def overview_view(conn: sqlite3.Connection) -> dict[str, Any]:
         "ok": True,
         "generated_text": timefmt.maybe_minute_text(stamp),
         "month_label": bill_data.get("range", {}).get("label"),
-        "account": next((a for a in accounts if a["account_id"] == account_id), None),
+        "account": account_view,
         "accounts": accounts,
-        "this_month": _month_scope(bill_data),
+        "this_month": _month_scope(bill_data, account_view or {}),
         "trend": trend,
         "anomalies": {
             "items": anomalies[:3],

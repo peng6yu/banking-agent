@@ -42,11 +42,19 @@ def api_bill(
     period: str = Query("month", pattern="^(month|year)$"),
     year: int | None = Query(None, ge=2000, le=2100),
     month: int | None = Query(None, ge=1, le=12),
+    account_id: str | None = Query(None, max_length=40),
 ) -> dict[str, Any]:
-    """账单分析：统计、分类、趋势、异常（每条带规则依据与相关流水）。"""
+    """账单分析：统计、分类、趋势、异常（每条带规则依据与相关流水）。
+
+    account_id 不传就看主储蓄卡；传了就必须真实存在（否则 400），
+    因为「切错卡」比「报错」更难被用户发现。
+    """
     with db.open_conn() as conn:
         today = proactive.local_date()
-        return bill_view(conn, period=period, year=int(year or today.year), month=month)
+        return bill_view(
+            conn, period=period, year=int(year or today.year), month=month,
+            account_id=account_id,
+        )
 
 
 @router.get("/management")

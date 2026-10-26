@@ -77,6 +77,8 @@ const BX_HOSTS = {
 
 let bxView = 'overview';
 let bxBillPeriod = 'month';
+/* 账单默认看主储蓄卡；用户在 chips 里切了别的卡就记在这里（空=跟随后端默认）。 */
+let bxBillAccount = '';
 /* 接管队列写动作必须带操作员：演示环境固定一个名字，真实环境应取登录态里的工号。 */
 const BX_OPERATOR = '演示客服';
 const bxCache = {};
@@ -275,6 +277,7 @@ function bxUrl(view) {
   let url = BX_API[view] || '';
   if (view === 'bill') {
     url += '?period=' + encodeURIComponent(bxBillPeriod);
+    if (bxBillAccount) { url += '&account_id=' + encodeURIComponent(bxBillAccount); }
   }
   return url;
 }
