@@ -7,6 +7,7 @@ from typing import Any, Final
 from app import audit, clock, db, funds
 from app.clock import BankError, ValidationError
 from app.models import Action, Dag, Decision
+from app.money import fen_to_yuan_str
 from app.planner import conflict as run_conflict
 from app.planner import dag as planner_dag
 from app.planner.events import (
@@ -690,7 +691,13 @@ async def _done(state: RunState, emit: Emit, *, ended: str | None = None) -> Non
     if ended is None:
         set_run_status(state, "done")
     tail = "已经处理完了。" if ended is None else "已按你的要求取消这一轮，预授权都释放了，钱没有动。"
-    frame = {"summary": "；".join(state.notes) or tail, "balance_after_fen": balance_of(state), "question": state.question}
+    balance = balance_of(state)
+    frame = {
+        "summary": "；".join(state.notes) or tail,
+        "balance_after_fen": balance,
+        "balance_after_yuan": fen_to_yuan_str(balance) if balance is not None else None,
+        "question": state.question,
+    }
     await emit_event(emit, "done", {**frame, "ended": ended} if ended else frame)
 
 

@@ -249,7 +249,10 @@ def test_chat_transfer_flow_confirms_and_moves_the_money(bank: Path) -> None:
     assert card["confirmation_id"] and card["action_text"]
     assert card["expires_in_s"] == 120
     assert "transfer" in [data["tool"] for name, data in events if name == "trace"]
-    assert payload(events, "done")["balance_after_fen"] == before - AMOUNT_FEN
+    done = payload(events, "done")
+    assert done["balance_after_fen"] == before - AMOUNT_FEN
+    # 分与元必须成对下发：SSE 帧同样不许只给分不给元（前端不该自己除 100）。
+    assert done["balance_after_yuan"] == f"{(before - AMOUNT_FEN) / 100:,.2f}"
     assert balance() == before - AMOUNT_FEN
 
 
@@ -287,7 +290,8 @@ def test_confirm_twice_is_idempotent(bank: Path) -> None:
 
 def test_session_and_audit_endpoints_explain_the_run(bank: Path) -> None:
     events, _answers, _repeats = chat("s_api_s", "给李静转 500 元")
-    assert payload(events, "done")["balance_after_fen"]
+    done = payload(events, "done")
+    assert done["balance_after_fen"] and done["balance_after_yuan"]
     session = call("GET", "/api/session/s_api_s").json()
     assert session["found"] is True
     assert session["status"] in {"done", "cancelled"}

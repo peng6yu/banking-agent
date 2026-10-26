@@ -226,6 +226,6 @@ def _model_name() -> str:
 def _db_ok() -> bool:
     try:
         with db.open_conn() as conn:
-            return conn.execute("SELECT 1 FROM accounts LIMIT 1").fetchone() is not None
+            return db.has_accounts(conn)
     except Exception:  # noqa: BLE001 - 探活失败就是 False，不该把探活端点自己搞崩
         return False

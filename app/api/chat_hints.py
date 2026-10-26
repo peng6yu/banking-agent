@@ -11,6 +11,7 @@ import app.proactive as proactive
 from app import audit, clock, db
 from app.planner import assist, executor, intent, payment_guard, recover, ticker
 from app.tools.base import primary_account
+from app.views import chat_choices
 
 log = logging.getLogger(__name__)
 
@@ -98,42 +99,24 @@ def _amount_choices(add: _Add) -> None:
 
 
 def _payees_choices(conn: sqlite3.Connection, add: _Add) -> None:
-    rows = conn.execute("SELECT name, bank, card_tail FROM payees ORDER BY id LIMIT 8").fetchall()
-    for row in rows:
-        tail = str(row["card_tail"] or "")
-        add(f"{row['name']}（{row['bank']} 尾号 {tail}）", str(row["name"]))
+    for row in chat_choices.payees(conn):
+        add(f"{row['name']}（{row['bank']} 尾号 {row['card_tail'] or ''}）", str(row["name"]))
 
 
 def _payee_names_choices(conn: sqlite3.Connection, add: _Add) -> None:
-    rows = conn.execute("SELECT name FROM payees ORDER BY id LIMIT 8").fetchall()
-    for row in rows:
-        add(str(row["name"]), str(row["name"]))
+    for name in chat_choices.payee_names(conn):
+        add(name, name)
 
 
 def _card_choices(conn: sqlite3.Connection, user_id: str, add: _Add) -> None:
-    rows = conn.execute(
-        "SELECT c.tail, c.kind, c.status FROM cards c"
-        " JOIN accounts a ON a.id = c.account_id WHERE a.user_id = ?"
-        " ORDER BY CASE c.status WHEN 'active' THEN 0 ELSE 1 END, c.id",
-        (user_id,),
-    ).fetchall()
     kind_label = {"physical": "实体卡", "virtual": "虚拟卡"}
-    for row in rows:
+    for row in chat_choices.cards(conn, user_id):
         tail = str(row["tail"])
         add(f"尾号 {tail}（{kind_label.get(str(row['kind']), str(row['kind']))}）", f"尾号{tail}")
 
 
 def _product_choices(conn: sqlite3.Connection, user_id: str, add: _Add) -> None:
-    rows = conn.execute(
-        "SELECT p.name, p.code FROM fund_holdings h"
-        " JOIN fund_products p ON p.code = h.product_code WHERE h.user_id = ?",
-        (user_id,),
-    ).fetchall()
-    if not rows:
-        rows = conn.execute(
-            "SELECT name, code FROM fund_products ORDER BY risk_level, code LIMIT 6"
-        ).fetchall()
-    for row in rows:
+    for row in chat_choices.products(conn, user_id):
         add(str(row["name"]), str(row["name"]))
 
 
@@ -163,13 +146,8 @@ def _action_choices(parsed: intent.IntentResult, add: _Add) -> None:
 
 
 def _subscription_choices(conn: sqlite3.Connection, account_id: str, add: _Add) -> None:
-    rows = conn.execute(
-        "SELECT merchant FROM subs WHERE account_id = ? AND status = 'active'"
-        " ORDER BY merchant LIMIT 8",
-        (account_id,),
-    ).fetchall()
-    for row in rows:
-        add(str(row["merchant"]), f"停掉 {row['merchant']} 的订阅")
+    for merchant in chat_choices.subscriptions(conn, account_id):
+        add(merchant, f"停掉 {merchant} 的订阅")
 
 
 def _due_choices(add: _Add) -> None:

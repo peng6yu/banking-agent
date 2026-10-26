@@ -11,7 +11,6 @@ from typing import Any
 from app import proactive
 from app import timefmt
 from app.tools import bill
-from app.tools import queries
 from app.clock import now_ms
 from app.tools.base import primary_account
 from app.tools.bill import ANOMALY_KINDS
@@ -46,7 +45,6 @@ def bill_view(
         "year": int(year),
         "month": month if period == "month" else None,
         "range": data.get("range"),
-        "account_tail": data.get("account_tail"),
         "total_out_fen": data.get("total_out_fen", 0),
         "total_out_yuan": data.get("total_out_yuan", "0.00"),
         "total_in_fen": data.get("total_in_fen", 0),
@@ -56,7 +54,6 @@ def bill_view(
         "out_count": data.get("out_count", 0),
         "in_count": data.get("in_count", 0),
         "by_category": data.get("by_category") or [],
-        "top_merchants": data.get("top_merchants") or [],
         "summary": data.get("summary"),
         "trend": _trend(conn, account_id, DEFAULT_TREND_MONTHS),
         "anomalies": {
@@ -74,10 +71,7 @@ def bill_view(
                 for kind in ANOMALY_KINDS
             ],
         },
-        "method": {
-            "currency": "CNY",
-            "categories": list(queries.CATEGORIES),
-        },
+        "method": {"currency": "CNY"},
     }
 
 

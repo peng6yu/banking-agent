@@ -605,6 +605,11 @@ def open_conn(path: str | Path | None = None) -> Iterator[sqlite3.Connection]:
         conn.close()
 
 
+def has_accounts(conn: sqlite3.Connection) -> bool:
+    """探活用：库里是否已经有账户行。SQL 留在数据层，接口层只读结论。"""
+    return conn.execute("SELECT 1 FROM accounts LIMIT 1").fetchone() is not None
+
+
 #: SQLite 的「写锁没抢到」措辞；都在 OperationalError 里，靠文本来分类。
 _BUSY_MARKERS: Final[tuple[str, ...]] = (
     "database is locked",

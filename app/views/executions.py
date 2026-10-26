@@ -289,5 +289,4 @@ def audit_trail_view(
         "total": int(total_row["n"]) if total_row is not None else 0,
         "events": events,
         "chain_ok": audit.verify_chain(conn),
-        "chain_head": audit.chain_head(conn),
     }

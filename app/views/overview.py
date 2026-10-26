@@ -69,7 +69,6 @@ def overview_view(conn: sqlite3.Connection) -> dict[str, Any]:
             "out_count": bill_data.get("out_count", 0),
             "in_count": bill_data.get("in_count", 0),
             "by_category": list(bill_data.get("by_category") or [])[:6],
-            "top_merchants": list(bill_data.get("top_merchants") or [])[:3],
             "summary": bill_data.get("summary"),
         },
         "trend": trend,

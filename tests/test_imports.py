@@ -145,6 +145,8 @@ LAYERS: dict[str, int] = {
     "app.views.management": 5,
     "app.views.plans": 5,
     "app.views.executions": 5,
+    # 反问候选的只读取数（从 app/api/chat_hints 收回）：同层，只查库不塑形
+    "app.views.chat_choices": 5,
     # 人工接管单的仓储与状态机（W4 拆出）：只读写 handoffs 表与快照，不认识执行器
     "app.handoff_store": 2,
     # 人工接管队列的恢复/取消：搬运行级事实并驱动 recover，属于编排层之上
@@ -235,7 +237,7 @@ ALLOWED: dict[str, frozenset[str]] = {
     # 进程内状态：历史环、适配器类型、SSE 帧；只有模型层是为了 Adapter 类型
     "app.api.chat_state": _deps("app.llm"),
     # 缺槽位候选：读工具元数据与提醒/计划现状，纯拼装，不写库
-    "app.api.chat_hints": _deps("app.audit app.clock app.db app.planner app.planner.assist app.planner.executor app.planner.intent app.planner.payment_guard app.planner.recover app.planner.ticker app.proactive app.tools.base"),
+    "app.api.chat_hints": _deps("app.audit app.clock app.db app.planner app.planner.assist app.planner.executor app.planner.intent app.planner.payment_guard app.planner.recover app.planner.ticker app.proactive app.tools.base app.views app.views.chat_choices"),
     # 取证与记忆：审计、兜底写入、记忆回读，全部只写审计与记忆
     "app.api.chat_trace": _deps("app.api.chat_state app.api.http app.audit app.chat_history app.clock app.config app.db app.ids app.planner app.planner.assist app.planner.executor app.planner.intent app.planner.payment_guard app.planner.recover app.planner.ticker"),
     # 聊天主流程：解析→澄清→建图→执行，唯一该碰模型与执行器的端点模块
@@ -259,10 +261,12 @@ ALLOWED: dict[str, frozenset[str]] = {
     # 待办与队列积木：待确认卡、接管单、预约、提醒、监测。只读既有事实，不产生新裁决
     "app.views.queue": _deps("app.clock app.handoffs app.money app.planner app.planner.ticker app.proactive app.timefmt app.tools app.tools.scheduled app.views.labels"),
     "app.views.overview": _deps("app.clock app.planner app.planner.assist app.proactive app.timefmt app.tools.base app.views.labels app.views.money app.views.queue"),
-    "app.views.bill": _deps("app.clock app.proactive app.timefmt app.tools app.tools.base app.tools.bill app.tools.queries app.views.labels app.views.money"),
+    "app.views.bill": _deps("app.clock app.proactive app.timefmt app.tools app.tools.base app.tools.bill app.views.labels app.views.money"),
     "app.views.management": _deps("app.clock app.memory app.money app.proactive app.subscriptions app.suitability app.timefmt app.tools.base app.views.money app.views.queue"),
     "app.views.plans": _deps("app.clock app.planner app.planner.assist app.plans app.subscriptions app.timefmt app.tools.base app.views.labels app.views.queue"),
     "app.views.executions": _deps("app.audit app.clock app.money app.models app.planner app.planner.events app.timefmt app.views.labels app.views.queue"),
+    # 只回原始行，不拼文案（怎么排成「张三（招商 尾号 4417）」由接口层决定）
+    "app.views.chat_choices": _deps(""),
     # 入参模型里 FactorProof 复用公共契约（多因子凭证与 /api/confirm 同构）
     "app.api.schemas": _deps("app.models"),
     # 接管队列的 HTTP 面只依赖数据层与路由里的鉴权依赖
@@ -297,11 +301,11 @@ ALLOWED: dict[str, frozenset[str]] = {
     "app.planner.ticker": _deps("app.db app.plan_hooks app.plans app.proactive app.tools app.tools.scheduled"),
     "app.planner.dag": _deps("app.audit app.clock app.db app.ids app.models app.planner.card_actions app.planner.due app.planner.intent app.planner.refusal app.planner.split_plan app.planner.subscription app.tools.base app.tools.registry"),
     "app.planner.events": _deps("app.models app.money app.planner.state app.policy.engine app.subscriptions"),
-    "app.planner.executor": _deps("app.audit app.clock app.db app.funds app.models app.planner app.planner.conflict app.planner.dag app.planner.events app.planner.recover app.planner.runner app.planner.state app.policy.engine app.policy.rules app.security app.security.breaker app.security.factors app.security.injection app.tools app.tools.base"),
+    "app.planner.executor": _deps("app.audit app.clock app.db app.funds app.models app.money app.planner app.planner.conflict app.planner.dag app.planner.events app.planner.recover app.planner.runner app.planner.state app.policy.engine app.policy.rules app.security app.security.breaker app.security.factors app.security.injection app.tools app.tools.base"),
     "app.planner.intent": _deps("app.llm app.money app.planner app.planner.card_actions app.planner.intent_schema app.planner.kb_bridge app.planner.payment_guard app.planner.refusal app.security app.security.envelope app.security.injection"),
     "app.planner.refusal": _deps(""),
     "app.planner.intent_schema": _deps(""),
-    "app.planner.runner": _deps("app.audit app.clock app.funds app.handoff_store app.models app.planner app.planner.clarify app.planner.dag app.planner.events app.planner.state app.policy.engine app.policy.rules app.security app.security.token app.tools app.tools.base app.tools.registry"),
+    "app.planner.runner": _deps("app.audit app.clock app.funds app.handoff_store app.models app.money app.planner app.planner.clarify app.planner.dag app.planner.events app.planner.state app.policy.engine app.policy.rules app.security app.security.token app.tools app.tools.base app.tools.registry"),
     # 识别即执行：只读账户、建计划/提醒，钱一律走原有的确认与令牌路径
     "app.planner.assist": _deps("app.audit app.clock app.memory app.money app.plans app.proactive app.reminder_time app.scope app.subscriptions app.timefmt"),
     "app.planner.state": _deps("app.audit app.clock app.db app.funds app.ids app.models app.money app.security app.security.breaker app.tools app.tools.base"),
