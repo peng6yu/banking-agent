@@ -249,6 +249,16 @@ def _resolve_path(path, conn):
     return filled if "{" not in filled else None
 
 
+def _cap(obj, max_items=5, depth=0):
+    if depth > 6:
+        return "..."
+    if isinstance(obj, list):
+        return [_cap(v, max_items, depth + 1) for v in obj[:max_items]]
+    if isinstance(obj, dict):
+        return {k: _cap(v, max_items, depth + 1) for k, v in obj.items()}
+    return obj
+
+
 def sample_responses(ops, db_path):
     import asyncio
 
@@ -296,7 +306,8 @@ def sample_responses(ops, db_path):
                 except Exception:
                     payload = None
                 out[key] = {"status": r.status_code,
-                            "shape": infer_shape(payload) if payload is not None else {"type": "non-json"}}
+                            "shape": infer_shape(payload) if payload is not None else {"type": "non-json"},
+                            "raw": _cap(payload) if payload is not None else None}
 
     asyncio.run(run())
     conn.close()
