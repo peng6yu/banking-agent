@@ -66,7 +66,13 @@ async def scheduled_verify(
     scheduled_id: str, request: ScheduledVerifyRequest
 ) -> dict[str, Any]:
     """补一次强验证并立即尝试执行这笔预约（执行前仍会重新裁决）。"""
-    return payload(use_cases.scheduled.scheduled_submit_verify(scheduled_id, proofs=request.proofs))
+    # 这里必须 model_dump()：验证器只认纯 dict，直接把 pydantic 模型传下去会被
+    # factors._normalize 静默丢掉，表现为「给对了口令仍说没验证」。
+    return payload(
+        use_cases.scheduled.scheduled_submit_verify(
+            scheduled_id, proofs=[item.model_dump() for item in (request.proofs or [])]
+        )
+    )
 
 
 @router.post("/api/reminders")
