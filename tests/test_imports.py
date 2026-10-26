@@ -243,7 +243,7 @@ ALLOWED: dict[str, frozenset[str]] = {
     # 计划端点：计划/生日/预约/提醒，写操作只经用例层
     "app.api.plans_api": _deps("app.api.http app.api.schemas app.audit app.birthday app.clock app.db app.planner app.planner.assist app.planner.executor app.planner.intent app.planner.payment_guard app.planner.recover app.planner.ticker app.plans app.proactive app.use_cases"),
     # 钱端点：储蓄/订阅/理财/预警/手动记账/重置，写操作只经用例层
-    "app.api.money_api": _deps("app.api.chat_state app.api.http app.api.schemas app.audit app.clock app.db app.proactive app.suitability app.use_cases"),
+    "app.api.money_api": _deps("app.api.chat_state app.api.http app.api.schemas app.audit app.clock app.db app.proactive app.use_cases"),
     # W4 之后 business.py 只剩路由：鉴权 + 开只读连接 + 调 app.views
     "app.api.business": _deps("app.api.routes app.db app.proactive app.views app.views.labels"),
     # 视图包本身只有再导出，不认识业务

@@ -533,7 +533,7 @@ def test_cancel_releases_every_hold_and_skips_the_rest(bank: Path) -> None:
     built = planner_dag.build({"intent": "birthday_plan", "slots": {"payee_name": "李静", "amount_fen": 20_000}})
     events = drive("s_can", built, answers=[{"approve": True}], cancel_at=1, confirm_timeout_ms=5000)
     assert "factor" not in names(events)
-    assert names(events)[-1] in {"confirm", "tool", "error", "done"}
+    assert names(events)[-1] == "done" and events[-1][1]["ended"] == "cancelled" and events[-1][1]["summary"]  # 取消也要有终帧
     conn = db.connect()
     holds = conn.execute(
         "SELECT status FROM holds WHERE session_id='s_can' AND payee_id='p_system'"

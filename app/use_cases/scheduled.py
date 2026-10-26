@@ -10,8 +10,14 @@ from app.use_cases.base import write_case
 
 @write_case
 def scheduled_issue_challenge(conn: Any, scheduled_id: str, *, factor: str = "face") -> dict[str, Any]:
-    """给一笔到点复判变红的预约签发一次强验证挑战（绑定 sched:<id>，用一次就作废）。"""
-    return scheduled.challenge_scheduled(conn, scheduled_id, factor)
+    """给一笔到点复判变红的预约签发一次强验证挑战（绑定 sched:<id>，用一次就作废）。
+
+    出站形状与 POST /api/factor/challenge 对齐：挑战一律放在 challenges 列表里。
+    工具层 issue() 返回的是单张挑战的扁平字典，到这里包一层——前端因此只有
+    「读 challenges[i]」一条解析路径，不用按端点分成两套。
+    """
+    challenge = scheduled.challenge_scheduled(conn, scheduled_id, factor)
+    return {"challenges": [challenge]}
 
 
 @write_case

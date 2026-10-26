@@ -280,6 +280,7 @@ async def _drive(
     """主循环：拓扑序逐个节点跑，跑不动的下游标 skipped。"""
     for node in planner_dag.topo(state.dag):
         if state.cancelled:
+            await _done(state, emit, ended="cancelled")
             return
         rec = state.nodes[node.id]
         # 重启恢复时库里已经有终态节点：绝不能重跑，否则一笔转账会被扣两次。
@@ -289,6 +290,8 @@ async def _drive(
             persist_node(state, rec, "skipped", error_code="UPSTREAM_NOT_DONE")
             continue
         if await _step(state, node, rec, emit, confirm_timeout_ms, taint, halt_on_new_confirm=halt_on_new_confirm) == STOP:
+            if state.cancelled:  # 取消多半发生在等确认时：流不能就这么断掉
+                await _done(state, emit, ended="cancelled")
             return
     await _done(state, emit)
 
@@ -682,11 +685,13 @@ async def _rejected(state: RunState, rec: NodeRec, conf: Confirmation, emit: Emi
     await emit_event(emit, "tool", {"node_id": rec.node_id, "ok": False, "summary": state.notes[-1], "error_code": "USER_REJECTED"})
 
 
-async def _done(state: RunState, emit: Emit) -> None:
-    """正常收尾：发 done，标 run/session 完成。"""
-    summary = "；".join(state.notes) if state.notes else "已经处理完了。"
-    set_run_status(state, "done")
-    await emit_event(emit, "done", {"summary": summary, "balance_after_fen": balance_of(state), "question": state.question})
+async def _done(state: RunState, emit: Emit, *, ended: str | None = None) -> None:
+    """收尾帧：正常完成顺带标 run 完成；ended="cancelled" 只补帧（状态归 cancel() 写，不能改成 done）。"""
+    if ended is None:
+        set_run_status(state, "done")
+    tail = "已经处理完了。" if ended is None else "已按你的要求取消这一轮，预授权都释放了，钱没有动。"
+    frame = {"summary": "；".join(state.notes) or tail, "balance_after_fen": balance_of(state), "question": state.question}
+    await emit_event(emit, "done", {**frame, "ended": ended} if ended else frame)
 
 
 def _ready(state: RunState, node: Any) -> bool:

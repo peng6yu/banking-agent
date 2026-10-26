@@ -95,7 +95,7 @@
 |---|---|---|---|
 | 产品查询/风险等级/申赎 | 已实现且有测试证明 | app/tools/invest.py 四个工具；tests/test_invest.py:68/82/160/197 | 无 |
 | 申购/赎回强验证 | 已实现且有测试证明 | R10 face+otp 红牌；tests/test_invest.py:234 test_policy_keeps_fund_operations_red_with_face_and_otp | 无 |
-| 适当性评估（问卷/风险匹配） | 已实现且有测试证明 | 本轮补：app/suitability.py（5 题 15 分 → C1–C5，能力 1–5，investor_profiles 落库，suitability.assessed 审计），buy_fund 在起购校验之后、动钱之前调 `check`，未测评或超等级一律拒买；GET/POST /api/investment/suitability；tests/test_suitability.py 17 条 + tests/test_invest_intent_dag.py 覆盖拒买路径 | 演示级简化问卷：不是监管口径，无双录、冷静期、风险揭示书确认；产品没有期限/流动性/费率字段 |
+| 适当性评估（问卷/风险匹配） | 已实现且有测试证明 | 本轮补：app/suitability.py（5 题 15 分 → C1–C5，能力 1–5，investor_profiles 落库，suitability.assessed 审计），buy_fund 在起购校验之后、动钱之前调 `check`，未测评或超等级一律拒买；POST /api/investment/suitability（GET 孤儿端点已删，读侧走 business/management）；tests/test_suitability.py 16 条 + tests/test_invest_intent_dag.py 覆盖拒买路径 | 演示级简化问卷：不是监管口径，无双录、冷静期、风险揭示书确认；产品没有期限/流动性/费率字段 |
 | 期限/流动性/费率 | 尚未实现 | app/db.py:227-238 无 term/liquidity/fee 列 | 用户无法在申购前看到锁定期与费用 |
 | 净值真实性 | 部分实现 | fund_products.nav_micro 为本地种子静态值（app/db.py:227-238、app/tools/invest.py:222） | 不是行情源；收益/净值曲线不随时间变化 |
 | 赎回口径不暗示即时到账 | 已实现但测试不充分 | app/tools/invest.py:41 REDEEMED_TEXT「按本地账务记回账户」；:43-45 失败明说不重试 | 文案无测试断言，改回旧话术不会变红 |

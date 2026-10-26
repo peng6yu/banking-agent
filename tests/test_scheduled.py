@@ -120,3 +120,28 @@ def test_verify_route_passes_plain_dicts_to_the_use_case(monkeypatch) -> None:
     asyncio.run(plans_api.scheduled_verify("sch_1", request))
     assert seen and isinstance(seen[0][0], dict), "路由层必须先把模型转成 dict"
     assert seen[0][0]["challenge_id"] == "fc_1"
+
+
+def test_scheduled_challenge_uses_the_same_list_envelope(monkeypatch) -> None:
+    """F3 回归：挑战只有一种出站形状。
+
+    工具层 issue() 返回单张挑战的扁平字典；/api/factor/challenge 一直是
+    challenges 列表，而 /api/scheduled/{id}/challenge 曾经把字段摊在顶层，
+    前端得写两套解析。用例层负责包成同一形状，这里钉住它。
+    """
+    import contextlib
+
+    from app import db
+    from app.use_cases import scheduled as scheduled_uc
+
+    flat = {"challenge_id": "fc_x", "factor": "face", "code": "123456"}
+    monkeypatch.setattr(
+        scheduled_uc.scheduled,
+        "challenge_scheduled",
+        lambda conn, scheduled_id, factor: dict(flat, factor=factor),
+    )
+    monkeypatch.setattr(db, "open_conn", lambda *a, **k: contextlib.nullcontext(object()))
+    monkeypatch.setattr(db, "tx", lambda conn: contextlib.nullcontext())
+    outcome = scheduled_uc.scheduled_issue_challenge("sch_1", factor="face")
+    assert outcome.ok is True
+    assert [item["challenge_id"] for item in outcome.data["challenges"]] == ["fc_x"]

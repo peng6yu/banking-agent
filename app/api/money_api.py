@@ -31,7 +31,6 @@ from app.clock import BankError, NotFound, ValidationError
 from app import audit, clock, db
 from app.api.http import payload
 import app.proactive as proactive
-import app.suitability as suitability
 import app.use_cases as use_cases
 
 from app.api.chat_state import (
@@ -100,22 +99,6 @@ async def update_savings_goal(goal_id: str, request: SavingsGoalUpdate) -> dict[
     """调整目标：只改传了的字段，按新参数重算计划并写审计。"""
     fields = request.model_dump(exclude_unset=True)
     return payload(use_cases.savings.goal_update(goal_id, **fields))
-
-
-@router.get("/api/investment/suitability")
-async def get_suitability() -> dict[str, Any]:
-    """读风险测评画像；没测过时把 5 道题一起给前端，用户不用先问一遍。"""
-    with db.open_conn() as conn:
-        user_id = proactive.default_user_id(conn)
-        profile = suitability.load(conn, user_id)
-    return {
-        "ok": True,
-        "assessed": profile is not None,
-        "profile": profile,
-        "questions": suitability.QUESTIONS,
-        "level_bands": suitability.LEVEL_BANDS,
-        "disclaimer": "演示用简化问卷，不是监管口径的正式风险评估；不构成投资建议。",
-    }
 
 
 @router.post("/api/investment/suitability")

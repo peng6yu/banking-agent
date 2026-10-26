@@ -257,7 +257,9 @@ def test_cancel_endpoint_stops_the_run_and_frees_the_hold(bank: Path) -> None:
     before = balance()
     events, answers, _repeats = chat("s_api_c", "给李静转 500 元", cancel=True)
     assert answers[0].json()["cancelled"] is True
-    assert "done" not in names(events)
+    # 取消也要给一个终帧：客户端靠 done 区分「正常收尾」与「流被截断」。
+    assert names(events)[-1] == "done"
+    assert events[-1][1]["ended"] == "cancelled"
     assert balance() == before
     conn = db.connect()
     try:

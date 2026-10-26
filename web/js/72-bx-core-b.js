@@ -113,16 +113,18 @@ function bxScheduledVerify(scheduledId, factors, bar) {
         panel.appendChild(el('div', 'card-note', '拿不到' + bxFactorNames([item.factor]) + '的验证码：' + errorText(item.err)));
         return;
       }
+      /* 与 /api/factor/challenge 同一形状：挑战在 challenges 列表里，不再读扁平字段。 */
       const data = bxIsObj(item.res) ? item.res : {};
-      if (!data.challenge_id) { return; }
+      const challenge = bxArr(data.challenges)[0] || {};
+      if (!challenge.challenge_id) { return; }
       const row = el('div', 'factor-code-row');
-      row.appendChild(el('span', 'field-label', bxFactorNames([textOf(data.factor) || item.factor]) + ' 口令'));
+      row.appendChild(el('span', 'field-label', bxFactorNames([textOf(challenge.factor) || item.factor]) + ' 口令'));
       const input = el('input', 'factor-input');
       input.type = 'text';
       input.maxLength = 6;
-      input.value = textOf(data.code);
-      input.dataset.challenge = textOf(data.challenge_id);
-      input.dataset.factor = textOf(data.factor) || item.factor;
+      input.value = textOf(challenge.code);
+      input.dataset.challenge = textOf(challenge.challenge_id);
+      input.dataset.factor = textOf(challenge.factor) || item.factor;
       row.appendChild(input);
       panel.appendChild(row);
       boxes.push(input);
