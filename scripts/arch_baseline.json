@@ -262,7 +262,7 @@
     "tests/test_payee_discriminator.py": 79,
     "tests/test_payment_guard.py": 295,
     "tests/test_phone_payee.py": 69,
-    "tests/test_planner.py": 918,
+    "tests/test_planner.py": 922,
     "tests/test_plans.py": 328,
     "tests/test_policy.py": 462,
     "tests/test_proactive_api.py": 449,

@@ -462,6 +462,10 @@ def test_confirmation_timeout_voids_the_step(bank: Path) -> None:
     assert payload(events, "error")["code"] == "CONFIRM_TIMEOUT"
     conn = db.connect()
     assert balance(conn) == 1_286_050
+    # 文案不许虚报退款：只有真挂过预授权（released>0）才能说钱退回去了。
+    row = conn.execute("SELECT payload_json FROM audit_log WHERE event_type='confirm.expired' ORDER BY seq DESC LIMIT 1").fetchone()
+    released = json.loads(row[0])["released_holds"]
+    assert ("退回" in payload(events, "error")["user_text"]) is (released > 0)
     conn.close()
 
 

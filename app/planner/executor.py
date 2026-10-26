@@ -664,11 +664,9 @@ async def _timeout(state: RunState, rec: NodeRec, conf: Confirmation, emit: Emit
     )
     persist_node(state, rec, "failed", error_code="CONFIRM_TIMEOUT")
     state.notes.append(f"{rec.tool}：等确认超时，已作废。")
-    await emit_event(
-        emit,
-        "error",
-        {"code": "CONFIRM_TIMEOUT", "user_text": "等太久没等到你的确认，这笔我已经作废了，钱也退回账户了。"},
-    )
+    # 只有真的挂过预授权才说「退回」，没冻结过钱时说退回等于虚报退款。
+    tail = "预授权的钱已经退回账户。" if released else "没有扣任何钱。"
+    await emit_event(emit, "error", {"code": "CONFIRM_TIMEOUT", "user_text": f"等太久没等到你的确认，这笔已经作废了。{tail}"})
 
 
 async def _rejected(state: RunState, rec: NodeRec, conf: Confirmation, emit: Emit) -> None:
