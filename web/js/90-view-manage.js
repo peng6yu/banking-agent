@@ -93,10 +93,16 @@ function bxRenderManage(data) {
   const invest = bxIsObj(data.investments) ? data.investments : {};
   bxRenderSuitability($('mg-suit'), invest);
   const products = bxArr(invest.products);
+  /* summary 是 {holding_count, product_count} 对象；以前被 textOf 直接拼进正文，
+     页面上就露出一段 {"holding_count":2,...} 的 JSON。这里只说人话。 */
+  const invSummary = bxIsObj(invest.summary)
+    ? ('共 ' + bxCount(invest.summary.product_count, ' 只产品') + '，其中 ' +
+       bxCount(invest.summary.holding_count, ' 只有持仓') + '。')
+    : '';
   const productHost = $('mg-products');
   if (productHost) {
     if (!products.length) {
-      bxEmpty(productHost, '没有产品数据', textOf(invest.summary));
+      bxEmpty(productHost, '没有产品数据', invSummary || '后端没有返回产品。');
     } else {
       productHost.replaceChildren();
       productHost.appendChild(bxTable(
@@ -108,7 +114,7 @@ function bxRenderManage(data) {
             'R' + textOf(product.risk_level),
             textOf(product.min_buy_yuan) + ' 元',
             textOf(product.nav_updated_text),
-            bxCount(product.holding_shares_milli, ' 份')
+            textOf(product.holding_shares_text) + ' 份'
           ];
         }),
         [3, 5]
@@ -141,7 +147,7 @@ function bxRenderManage(data) {
   if (fitNote) {
     fitNote.textContent = (invest.suitability_note ? textOf(invest.suitability_note) + ' ' : '') +
       (invest.data_source ? '数据来源：' + textOf(invest.data_source) + '。' : '') +
-      (invest.summary ? textOf(invest.summary) : '');
+      invSummary;
   }
 
   const capHost = $('mg-caps');

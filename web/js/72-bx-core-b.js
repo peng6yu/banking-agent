@@ -36,8 +36,8 @@ function bxAnomalyCard(item, full) {
     if (item.window_text) { box.appendChild(kvRow('时间窗口', textOf(item.window_text))); }
     const cmp = bxIsObj(item.comparison) ? item.comparison : null;
     if (cmp) {
-      box.appendChild(kvRow('对比', textOf(cmp.previous_month) + ' ' + bxCount(cmp.previous_fen, ' 分') +
-        ' → ' + textOf(cmp.current_month) + ' ' + bxCount(cmp.current_fen, ' 分') +
+      box.appendChild(kvRow('对比', textOf(cmp.previous_month) + ' ' + bxMoney(cmp, 'previous') +
+        ' → ' + textOf(cmp.current_month) + ' ' + bxMoney(cmp, 'current') +
         '（涨幅 ' + bxCount(cmp.hike_pct, '%') + '）'));
     }
     if (item.occurrence_count) { box.appendChild(kvRow('涉及笔数', bxCount(item.occurrence_count, ' 笔'))); }

@@ -162,13 +162,13 @@ function bxRenderPlans(data) {
         const ignore = el('button', 'btn btn-mini', '忽略');
         ignore.type = 'button';
         ignore.addEventListener('click', function () {
-          pfResolveAlert(alert.alert_id, 'ignore').then(function () { bxRefresh(); });
+          pfResolveAlert(alert.alert_id, 'ignore');
         });
         bar.appendChild(ignore);
         const resolve = el('button', 'btn btn-mini btn-green', '标记已处理');
         resolve.type = 'button';
         resolve.addEventListener('click', function () {
-          pfResolveAlert(alert.alert_id, 'resolve').then(function () { bxRefresh(); });
+          pfResolveAlert(alert.alert_id, 'resolve');
         });
         bar.appendChild(resolve);
         box.appendChild(bar);

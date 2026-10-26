@@ -21,15 +21,15 @@ function bxSubmitManualTransaction() {
   const category = textOf($('bill-manual-category') && $('bill-manual-category').value).trim() || '其他';
   const note = textOf($('bill-manual-note') && $('bill-manual-note').value).trim();
   const amountFen = bxYuanToFen(amountText);
+  /* 校验提示写在这张表单自己的位置上：只发到 AI 助手页的话，人在账单页点提交
+     会觉得按钮没反应（同 A21 那类反馈跑到别的页）。 */
+  const say = function (text) {
+    appendBubble('sys', text, 'manual');
+    if (result) { result.replaceChildren(); result.appendChild(el('div', 'card-note', text)); }
+  };
   if (result) { result.replaceChildren(); }
-  if (!merchant) {
-    appendBubble('sys', '先写这笔是跟谁发生的，例如「楼下便利店」。', 'manual');
-    return;
-  }
-  if (!amountFen) {
-    appendBubble('sys', '金额要写大于 0 的数，例如 23.50。', 'manual');
-    return;
-  }
+  if (!merchant) { say('先写这笔是跟谁发生的，例如「楼下便利店」。'); return; }
+  if (!amountFen) { say('金额要写大于 0 的数，例如 23.50。'); return; }
   if (btn) { btn.disabled = true; }
   bxSend('/api/transactions/manual', 'POST', {
     merchant: merchant, amount_fen: amountFen, direction: direction, category: category, note: note

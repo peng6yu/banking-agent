@@ -65,7 +65,11 @@ const BX_BIRTHDAY_STATUS = {
 };
 
 function bxYuanToFen(value) {
-  const num = Number(String(value == null ? '' : value).replace(/[^0-9.]/g, ''));
+  /* 以前是「剔掉所有非数字字符」再转数：输入 -50 会被静默变成 50，
+     记账方向反了还不报错。现在只接受纯金额写法，其它一律当 0 由调用方提示。 */
+  const text = String(value == null ? '' : value).trim().replace(/[,\s]/g, '');
+  if (!/^[0-9]+(\.[0-9]{1,2})?$/.test(text)) { return 0; }
+  const num = Number(text);
   return isFinite(num) && num > 0 ? Math.round(num * 100) : 0;
 }
 

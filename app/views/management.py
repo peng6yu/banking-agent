@@ -202,8 +202,11 @@ def _products_view(
         ).fetchall()
     }
     products = []
+    held_count = 0
     for row in product_rows:
         shares = int(held[str(row["code"])]["shares_milli"]) if str(row["code"]) in held else 0
+        if shares > 0:
+            held_count += 1
         products.append(
             {
                 "code": str(row["code"]),
@@ -212,10 +215,11 @@ def _products_view(
                 "risk_level": int(row["risk_level"]),
                 "min_buy_fen": int(row["min_buy_fen"]),
                 "min_buy_yuan": fen_to_yuan_str(int(row["min_buy_fen"])),
-                "nav_micro": int(row["nav_micro"]),
                 "nav_updated_text": timefmt.maybe_minute_text(int(row["nav_updated_ms"])),
                 "description": str(row["description"]),
-                "holding_shares_milli": shares,
+                # 份额在库里是「千分之一份」（shares_milli）：界面直接印原值会大 1000 倍。
+                # 页面只拿格式化好的字符串，原始整数留在工具层，不再进这份响应。
+                "holding_shares_text": f"{shares / 1000:,.3f}" if shares else "0",
                 # 下面四个字段表里本来就没有，也没有可信来源：显式给 null
                 # 比编一个「约 30 天持有期 / 0.15% 费率」诚实。
                 "duration_days": None,
@@ -227,7 +231,7 @@ def _products_view(
         )
 
     holdings_summary = {
-        "holding_count": sum(1 for p in products if p["holding_shares_milli"] > 0),
+        "holding_count": held_count,
         "product_count": len(products),
     }
     return products, holdings_summary

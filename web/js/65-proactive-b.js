@@ -315,13 +315,17 @@ async function pfResolveAlert(alertId, action) {
       body: JSON.stringify({ action: act })
     });
     const idempotent = json && json.idempotent === true;
-    appendBubble('sys',
-      (act === 'ignore' ? '已忽略提醒 ' : '已把提醒标记为已解决 ') + id + '。' +
-      (idempotent ? ' 幂等：这条提醒之前已处理过，本次没有产生新的变更。' : '') +
-      ' audit_seq=' + textOf(json && json.audit_seq));
+    /* 反馈必须落在用户当下看的这一页：以前只往 AI 助手页写一条 sys 气泡，
+       计划页上点了「忽略」当场什么都看不到，卡片要整页刷新才消失。 */
+    if (typeof bxToast === 'function') {
+      bxToast((act === 'ignore' ? '已忽略这条提醒' : '已标记为已处理') +
+        (idempotent ? '（之前已经处理过，这次没有新变更）' : ''), 'ok');
+    }
     await loadProactive();
+    if (typeof bxRefresh === 'function') { bxRefresh(); }
   } catch (err) {
-    pfFail(err, act === 'ignore' ? '忽略提醒失败' : '标记提醒失败');
+    const message = pfFail(err, act === 'ignore' ? '忽略提醒失败' : '标记提醒失败');
+    if (typeof bxToast === 'function') { bxToast(message, 'bad'); }
   }
 }
 
