@@ -157,6 +157,8 @@ LAYERS: dict[str, int] = {
     "app.messages": 2,
     # 提醒的事实层（探测器 + 洞察目录）：只读账务表，不碰频控与落库
     "app.insights": 2,
+    # 后两条洞察单独成文件（insights.py 已贴 600 行上限）：同层，只读账务表
+    "app.insights_extra": 2,
     "app.views.messages": 5,
     "app.api.messages_api": 5,
     "app.api.schemas": 5,
@@ -269,7 +271,8 @@ ALLOWED: dict[str, frozenset[str]] = {
     "app.api.memory_api": _deps("app.api.http app.api.routes app.db app.memory app.use_cases app.views.management"),
     "app.api.messages_api": _deps("app.api.http app.api.routes app.db app.use_cases app.use_cases.messages app.views.messages"),
     "app.messages": _deps("app.audit app.clock app.db app.ids app.insights"),
-    "app.insights": _deps("app.money"),
+    "app.insights": _deps("app.insights_extra app.money"),
+    "app.insights_extra": _deps("app.money"),
     "app.views.messages": _deps("app.messages app.timefmt"),
     "app.audit": _deps("app.clock app.log"),
     "app.clock": _deps(""),

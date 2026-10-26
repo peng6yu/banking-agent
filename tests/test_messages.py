@@ -61,8 +61,11 @@ def test_detect_reports_night_spend_and_subscription_hike(bank) -> None:
 
 def test_detect_returns_nothing_on_an_empty_ledger(bank) -> None:
     """账本、收款人、目标、代扣都没有时不许编一条提醒出来。"""
-    for table in ("transactions", "payees", "subs", "scheduled_transfers", "monitor_rules", "savings_goals"):
+    for table in ("transactions", "payees", "subs", "scheduled_transfers", "monitor_rules",
+                  "savings_goals", "handoffs"):
         bank.execute(f"DELETE FROM {table}")
+    # 卡还挂在账户上（有外键），把余额清零一样能表达「没有可说的钱」。
+    bank.execute("UPDATE accounts SET balance_fen = 0")
     assert messages.detect_insights(bank, USER_ID, NOW) == []
 
 
@@ -156,6 +159,53 @@ def test_payday_suggests_a_tenth_of_the_income(bank) -> None:
     assert item["facts"]["suggest_yuan"] == "800.00"
     bank.execute("UPDATE transactions SET amount_fen = 100000 WHERE id = 't_pay'")
     assert "I4_payday_saving" not in _found(bank)
+
+
+# ---------------------------------------------------------------- 更远的两条（I9 / I10）
+
+HOUR = 3600 * 1000
+
+
+def _handoff(conn, handoff_id: str, *, status: str, created_ms: int) -> None:
+    """直接落一张接管单：只测「挂多久算久」，不测建单流程。"""
+    conn.execute(
+        "INSERT INTO handoffs (id, run_id, session_id, user_id, status, created_ms, updated_ms)"
+        " VALUES (?, ?, 's_test', ?, ?, ?, ?)",
+        (handoff_id, "r_" + handoff_id, USER_ID, status, created_ms, created_ms),
+    )
+
+
+def test_idle_balance_fires_when_money_sits_quiet(bank) -> None:
+    """活期放着 1.28 万、90 天没买过理财：只说事实，不推荐产品。"""
+    item = _found(bank)["I9_idle_balance"]
+    assert item["facts"] == {"balance_yuan": "12,860.50", "quiet_days": 90}
+    assert "理财有风险" in item["body"], "不许暗示稳赚，合规话必须留着"
+
+
+def test_idle_balance_ignores_a_small_balance(bank) -> None:
+    """余额只有 5,000 元时不叨叨：门槛就是 10,000 元。"""
+    bank.execute("UPDATE accounts SET balance_fen = 500000 WHERE id = ?", (DEBIT_ID,))
+    assert "I9_idle_balance" not in _found(bank)
+
+
+def test_idle_balance_ignores_recent_investment_activity(bank) -> None:
+    """最近 90 天买过理财，说明这笔钱在用，不算闲置。"""
+    _tx(bank, "t_invest", NOW - 10 * DAY, 100_000, "稳赢理财", "理财")
+    assert "I9_idle_balance" not in _found(bank)
+
+
+def test_stale_handoff_fires_after_a_day(bank) -> None:
+    """接管单挂了 25 小时：报张数、报最老那张挂了多久。"""
+    _handoff(bank, "ho_stale", status="pending", created_ms=NOW - 25 * HOUR)
+    item = _found(bank)["I10_stale_handoff"]
+    assert item["facts"] == {"count": 1, "oldest_hours": 25}
+
+
+def test_stale_handoff_ignores_fresh_and_finished(bank) -> None:
+    """刚建一小时的不算挂；已经拒掉的不算待接管。"""
+    _handoff(bank, "ho_fresh", status="pending", created_ms=NOW - 1 * HOUR)
+    _handoff(bank, "ho_old_done", status="rejected", created_ms=NOW - 48 * HOUR)
+    assert "I10_stale_handoff" not in _found(bank)
 
 
 # ---------------------------------------------------------------- 落库与频控

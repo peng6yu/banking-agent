@@ -24,6 +24,9 @@ from typing import Any, Callable, Final
 
 from app.money import INTERNAL_CATEGORIES, fen_to_yuan_str
 
+#: 两条「更远一点」的洞察单独成文件：本文件已贴 600 行硬上限，这里只做合并。
+from app.insights_extra import CATALOG_EXTRA, EXTRA_INFO_PROBES, EXTRA_WARNING_PROBES
+
 DAY_MS: Final[int] = 24 * 3600 * 1000
 
 #: 收款人重名不设门槛：两个同名不同卡号，转错一次就够麻烦。
@@ -38,7 +41,7 @@ BUDGET_USED_PCT: Final[int] = 80
 BUDGET_EARLY_PCT: Final[int] = 60
 
 #: 洞察目录：id 与探测器一一对应；severity 只有 info/warning 两档（messages 表有 CHECK）。
-CATALOG: Final[tuple[dict[str, str], ...]] = (
+_CATALOG_CORE: Final[tuple[dict[str, str], ...]] = (
     {"id": "I3_night_large", "title": "凌晨的大额消费",
      "why": "本月 0-5 点出现单笔 500 元以上的支出",
      "source": "transactions（按本地时间取 0-5 点）", "severity": "warning"},
@@ -64,6 +67,8 @@ CATALOG: Final[tuple[dict[str, str], ...]] = (
      "why": "本月至今的支出（不含转账/理财）比上月同期高 20% 以上",
      "source": "transactions（排除账户内部搬运）", "severity": "info"},
 )
+
+CATALOG: Final[tuple[dict[str, str], ...]] = _CATALOG_CORE + CATALOG_EXTRA
 
 
 # ---------------------------------------------------------------- 时间小工具
@@ -534,11 +539,13 @@ _PROBES: Final[tuple[Callable[[sqlite3.Connection, str, int], dict[str, Any] | N
     _night_candidate,
     _payee_candidate,
     _cash_gap_candidate,
+    *EXTRA_WARNING_PROBES,
     _hike_candidate,
     _budget_candidate,
     _goal_candidate,
     _payday_candidate,
     _spending_candidate,
+    *EXTRA_INFO_PROBES,
 )
 
 
