@@ -24,6 +24,7 @@ import pytest
 from app import audit, db
 from app.api import routes
 from app.clock import now_ms
+from app.use_cases import transactions as transaction_cases
 from app.main import app
 from scripts.seed import seed
 
@@ -120,7 +121,7 @@ def test_out_records_a_manual_row_and_debits_the_balance(bank: Path) -> None:
     before = _balance()
     body = call("POST", "/api/transactions/manual", _body()).json()
     assert body["ok"] is True and body["manual"] is True
-    assert body["notice"] == routes.MANUAL_NOTICE
+    assert body["notice"] == transaction_cases.MANUAL_NOTICE
     tx = body["transaction"]
     assert tx["manual"] is True and tx["channel"] == "manual"
     assert tx["amount_fen"] == 12345 and tx["amount_yuan"] == "123.45"

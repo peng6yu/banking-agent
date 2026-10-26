@@ -31,10 +31,10 @@ import app.memory_extract as memory_extract
 import app.plans as plans
 import app.proactive as proactive
 import app.scope as scope
-import app.subscriptions as subscriptions
 import app.suitability as suitability
-import app.tools.scheduled as scheduled
+import app.use_cases as use_cases
 from app import audit, clock, db
+from app.api.http import payload
 from app.api.schemas import (
     AlertResolveRequest,
     BirthdayPayRequest,
@@ -56,187 +56,21 @@ from app.api.schemas import (
     SubscriptionVerdictRequest,
     SuitabilityAssessRequest,
 )
-from app.clock import BankError, InsufficientFunds, ValidationError
+from app.clock import BankError, NotFound, ValidationError
 from app.ids import new_id
 from app.llm import LLMError, build_adapter
 from app.models import Action, ChatRequest, ConfirmRequest, Decision, FactorChallengeRequest
-from app.money import fen_to_yuan_str
 from app.planner import dag as planner_dag
 from app.planner import events as planner_events
 from app.planner import assist, executor, intent, payment_guard, recover, ticker
 from app.planner.clarify import augment as augment_clarification
 from app.planner.clarify import forget as forget_clarification
 from app.planner.clarify import remember_slots
-from app.security import api_auth, factors
+from app.security import api_auth
 from app.tools.base import primary_account
 from app.tools.registry import TOOL_NAMES, tool_schemas
 
 log = logging.getLogger(__name__)
-
-#: 模拟支出流水的审计事件类型（Lead 已加进 app/audit.py 闭集）。
-#: 本文件保留回退：万一跑在旧闭集上，退回 tool.executed，payload 仍带 simulated=true。
-_SIMULATED_EXPENSE_EVENT: Final[str] = "proactive.simulated_expense"
-#: 模拟流水单独一个渠道值，既方便幂等去重，也能一眼看出不是真实渠道。
-SIMULATED_CHANNEL: Final[str] = "simulated"
-_DAY_MS: Final[int] = 86_400_000
-#: 响应里固定附带的一句人话：这是演示注入，不是真实支付。
-SIMULATED_EXPENSE_NOTICE: Final[str] = "这是竞赛演示用的模拟流水，不对应任何真实支付。"
-
-
-def _simulated_event_type() -> str:
-    """审计事件类型：闭集里有专用类型就用专用的，旧闭集退回 tool.executed。"""
-    return _SIMULATED_EXPENSE_EVENT if _SIMULATED_EXPENSE_EVENT in audit.EVENT_TYPES else "tool.executed"
-
-
-def _simulated_transaction_view(row: Any) -> dict[str, Any]:
-    """把一条模拟流水整理成前端好读的形状（永远带 simulated=true）。"""
-    return {
-        "id": str(row["id"]),
-        "transaction_id": str(row["id"]),
-        "account_id": str(row["account_id"]),
-        "direction": str(row["direction"]),
-        "amount_fen": int(row["amount_fen"]),
-        "amount_yuan": fen_to_yuan_str(int(row["amount_fen"])),
-        "counterparty": str(row["counterparty"]),
-        "merchant": str(row["counterparty"]),
-        "category": str(row["category"]),
-        "note": str(row["note"]),
-        "ts_ms": int(row["ts_ms"]),
-        "balance_after_fen": int(row["balance_after_fen"]),
-        "channel": str(row["channel"]),
-        "simulated": True,
-    }
-
-
-def _simulate_expense(conn: Any, request: SimulatedExpenseRequest) -> dict[str, Any]:
-    """往演示库注入一笔模拟支出，并同步扣演示账户余额（同一事务）。
-
-    幂等口径：同账户 + 同金额 + 同商户 + 同分类 + 同备注，且 channel='simulated'、
-    落在同一个本地自然日里，就当作同一次请求——返回已有流水，不再扣钱。
-    """
-    user_id = proactive.default_user_id(conn)
-    account = conn.execute(
-        "SELECT id, balance_fen FROM accounts WHERE user_id = ?"
-        " ORDER BY CASE type WHEN 'debit' THEN 0 ELSE 1 END, id LIMIT 1",
-        (user_id,),
-    ).fetchone()
-    if account is None:
-        raise ValidationError("账户不存在", reason="NO_ACCOUNTS")
-
-    account_id = str(account["id"])
-    balance_fen = int(account["balance_fen"])
-    merchant = request.merchant.strip()
-    if not merchant:
-        raise ValidationError("商户名不能是空白", field="merchant")
-    note = (request.note or "").strip()
-    now = clock.now_ms()
-    day_start = proactive._period_day_start_ms(proactive.local_date(now))
-
-    existing = conn.execute(
-        "SELECT * FROM transactions WHERE account_id = ? AND direction = 'out'"
-        " AND amount_fen = ? AND counterparty = ? AND category = ? AND note = ?"
-        " AND channel = ? AND ts_ms >= ? AND ts_ms < ?"
-        " ORDER BY ts_ms DESC, id DESC LIMIT 1",
-        (
-            account_id,
-            request.amount_fen,
-            merchant,
-            request.category,
-            note,
-            SIMULATED_CHANNEL,
-            day_start,
-            day_start + _DAY_MS,
-        ),
-    ).fetchone()
-    if existing is not None:
-        transaction = _simulated_transaction_view(existing)
-        audit_seq = audit.append(
-            conn,
-            _simulated_event_type(),
-            {
-                "tool": "simulate_expense",
-                "ok": True,
-                "simulated": True,
-                "idempotent": True,
-                "account_id": account_id,
-                "transaction_id": transaction["id"],
-                "amount_fen": request.amount_fen,
-                "merchant": merchant,
-                "category": request.category,
-            },
-        )
-        return {
-            "transaction": transaction,
-            "balance_after_fen": int(existing["balance_after_fen"]),
-            "audit_seq": audit_seq,
-            "idempotent": True,
-        }
-
-    if request.amount_fen > balance_fen:
-        raise InsufficientFunds(
-            "演示账户余额不足，这笔模拟支出没有注入",
-            account_id=account_id,
-            balance_fen=balance_fen,
-            amount_fen=request.amount_fen,
-        )
-
-    balance_after_fen = balance_fen - request.amount_fen
-    transaction_id = new_id("t")
-    conn.execute(
-        "INSERT INTO transactions (id, account_id, direction, amount_fen, counterparty,"
-        " category, note, ts_ms, balance_after_fen, hold_id, channel)"
-        " VALUES (?, ?, 'out', ?, ?, ?, ?, ?, ?, NULL, ?)",
-        (
-            transaction_id,
-            account_id,
-            request.amount_fen,
-            merchant,
-            request.category,
-            note,
-            now,
-            balance_after_fen,
-            SIMULATED_CHANNEL,
-        ),
-    )
-    conn.execute("UPDATE accounts SET balance_fen = ? WHERE id = ?", (balance_after_fen, account_id))
-    audit_seq = audit.append(
-        conn,
-        _simulated_event_type(),
-        {
-            "tool": "simulate_expense",
-            "ok": True,
-            "simulated": True,
-            "idempotent": False,
-            "account_id": account_id,
-            "transaction_id": transaction_id,
-            "amount_fen": request.amount_fen,
-            "merchant": merchant,
-            "category": request.category,
-            "balance_after_fen": balance_after_fen,
-            "note": note,
-        },
-    )
-    return {
-        "transaction": {
-            "id": transaction_id,
-            "transaction_id": transaction_id,
-            "account_id": account_id,
-            "direction": "out",
-            "amount_fen": request.amount_fen,
-            "amount_yuan": fen_to_yuan_str(request.amount_fen),
-            "counterparty": merchant,
-            "merchant": merchant,
-            "category": request.category,
-            "note": note,
-            "ts_ms": now,
-            "balance_after_fen": balance_after_fen,
-            "channel": SIMULATED_CHANNEL,
-            "simulated": True,
-        },
-        "balance_after_fen": balance_after_fen,
-        "audit_seq": audit_seq,
-        "idempotent": False,
-    }
 
 
 class Unauthorized(BankError):
@@ -245,14 +79,6 @@ class Unauthorized(BankError):
     code = "UNAUTHORIZED"
     http_status = 401
     user_text = "这个请求没有带访问令牌，未执行。用启动日志里带 token 的地址打开页面再试。"
-
-
-class NotFound(BankError):
-    """记录不存在：404，仍然是一句人话，不把 id 回显成英文错误。"""
-
-    code = "NOT_FOUND"
-    http_status = 404
-    user_text = "没找到这条记录，可能已经删掉，或者不在这份演示数据里。"
 
 
 #: 不要求令牌的两个入口：首页只负责把令牌读进 sessionStorage，探活只报状态不碰业务
@@ -382,61 +208,10 @@ async def confirm(request: ConfirmRequest) -> dict[str, Any]:
     return result
 
 
-def _mask_phone(phone: str | None) -> str | None:
-    """手机号只在验证提示里露出后四位，别把完整号码回给前端。"""
-    if not phone:
-        return None
-    text = str(phone)
-    if len(text) <= 7:
-        return "*" * len(text)
-    return text[:3] + "****" + text[-4:]
-
-
 @router.post("/api/factor/challenge")
 async def factor_challenge(request: FactorChallengeRequest) -> dict[str, Any]:
     """签发多因子挑战：真正的放行依据在服务端，前端只拿得到挑战号和一次验证码。"""
-    with db.open_conn() as conn:
-        row = conn.execute(
-            "SELECT * FROM confirmations WHERE id = ? AND session_id = ?",
-            (request.confirmation_id, request.session_id),
-        ).fetchone()
-        if row is None:
-            raise ValidationError("确认不存在或已过期", confirmation_id=request.confirmation_id)
-        if str(row["status"]) != "pending":
-            raise ValidationError("这张确认已经处理过了", status=str(row["status"]))
-        if int(row["expires_ms"]) <= clock.now_ms():
-            raise ValidationError("这张确认已经过期了", confirmation_id=request.confirmation_id)
-        node = conn.execute(
-            "SELECT * FROM dag_nodes WHERE run_id = ? AND node_id = ?",
-            (row["run_id"], row["node_id"]),
-        ).fetchone()
-        decision = json.loads((node["decision_json"] if node else None) or "{}")
-        required = [str(item) for item in (decision.get("required_factors") or [])]
-        if request.factor:
-            if request.factor not in required:
-                raise ValidationError("这一步不需要这个验证因子", factor=request.factor)
-            required = [request.factor]
-        user = conn.execute("SELECT phone FROM users ORDER BY id LIMIT 1").fetchone()
-        target = _mask_phone(user["phone"] if user else None)
-        with db.tx(conn):
-            challenges = [
-                factors.issue(
-                    conn,
-                    session_id=request.session_id,
-                    confirmation_id=request.confirmation_id,
-                    factor=factor,
-                    target=target,
-                )
-                for factor in required
-            ]
-    return {
-        "ok": True,
-        "confirmation_id": request.confirmation_id,
-        "required": required,
-        "challenges": challenges,
-        "note": "验证码由服务端签发、服务端校验、只能用一次；演示环境直接回显，真实环境走短信/人脸网关。",
-    }
-
+    return payload(use_cases.confirmations.challenge_factor(**request.model_dump()))
 
 @router.post("/api/session/{session_id}/recover")
 async def recover_session(session_id: str) -> dict[str, Any]:
@@ -595,88 +370,23 @@ async def scheduled_challenge(
 
     挑战绑定 sched:<id>，复用一次就作废——它不能拿去给别的转账当证明。
     """
-    with db.open_conn() as conn, db.tx(conn):
-        return scheduled.challenge_scheduled(conn, scheduled_id, request.factor)
-
-
+    return payload(use_cases.scheduled.scheduled_issue_challenge(scheduled_id, factor=request.factor))
 @router.post("/api/scheduled/{scheduled_id}/verify")
 async def scheduled_verify(
     scheduled_id: str, request: ScheduledVerifyRequest
 ) -> dict[str, Any]:
     """补一次强验证并立即尝试执行这笔预约（执行前仍会重新裁决）。"""
-    with db.open_conn() as conn, db.tx(conn):
-        return scheduled.verify_and_execute(
-            conn, scheduled_id, proofs=request.proofs
-        )
-
-
+    return payload(use_cases.scheduled.scheduled_submit_verify(scheduled_id, proofs=request.proofs))
 @router.post("/api/demo/reset")
 async def reset_demo(request: ResetRequest | None = None) -> dict[str, Any]:
     """演示重置：收回智能体动过的钱、清掉 hold 与限额账，进行中的会话收掉。"""
-    from scripts.seed import seed
-
-    for session_id in executor.active_sessions():
-        executor.close(session_id)
     _history.clear()
-    with db.open_conn() as conn, db.tx(conn):
-        seed(conn)
-        balance = _rewind_demo(conn)
-    return {
-        "ok": True,
-        "reason": request.reason if request is not None else "演示重置",
-        "account_id": balance[0],
-        "balance_fen": balance[1],
-    }
-
-
-def _rewind_demo(conn: Any) -> tuple[str | None, int | None]:
-    """把 hold_id 非空的流水（只有智能体会产生）反向冲回，并清掉 hold 与限额。"""
-    rows = conn.execute(
-        "SELECT account_id, direction, amount_fen FROM transactions WHERE hold_id IS NOT NULL"
-    ).fetchall()
-    for row in rows:
-        # 出去的钱是当时扣掉的，冲回就是加回来；进来的反过来减掉。
-        delta = int(row["amount_fen"]) if row["direction"] == "out" else -int(row["amount_fen"])
-        conn.execute("UPDATE accounts SET balance_fen = balance_fen + ? WHERE id = ?", (delta, row["account_id"]))
-    conn.execute("DELETE FROM transactions WHERE hold_id IS NOT NULL")
-    conn.execute("DELETE FROM holds")
-    # 两本日累计账都要清：账户账是账单口径，用户账才是 R06/R07 的判级口径。
-    # 只清账户账会让重演示的下一笔直接撞上上一轮留下的用户级累计。
-    conn.execute("DELETE FROM daily_limits")
-    conn.execute("DELETE FROM daily_user_limits")
-    conn.execute("DELETE FROM confirmations")
-    account = conn.execute(
-        "SELECT id, balance_fen FROM accounts ORDER BY CASE type WHEN 'debit' THEN 0 ELSE 1 END, id LIMIT 1"
-    ).fetchone()
-    if account is None:
-        return None, None
-    return str(account["id"]), int(account["balance_fen"])
-
-
+    reason = request.reason if request is not None else "演示重置"
+    return payload(use_cases.demo.demo_reset(reason=reason))
 @router.post("/api/savings/goals")
 async def create_savings_goal(request: SavingsGoalCreate) -> dict[str, Any]:
     """建储蓄目标：同时落一条进度监测规则，给了预算再加预算规则。写审计。"""
-    with db.open_conn() as conn, db.tx(conn):
-        user_id = proactive.default_user_id(conn)
-        created = proactive.create_goal(
-            conn,
-            user_id=user_id,
-            name=request.name,
-            target_fen=request.target_fen,
-            target_date=request.target_date,
-            saved_fen=request.saved_fen,
-            budget_fen=request.budget_fen,
-            progress_tolerance=request.progress_tolerance,
-            period=request.period,
-        )
-    return {
-        "ok": True,
-        "goal": created["goal"],
-        "rule_ids": created["rule_ids"],
-        "audit_seq": created["audit_seq"],
-    }
-
-
+    return payload(use_cases.savings.goal_create(**request.model_dump()))
 @router.get("/api/savings/goals")
 async def list_savings_goals(status: str | None = None, limit: int = 20) -> dict[str, Any]:
     """目标列表 + 进度；status=all 时连已达成/已取消的一起给。"""
@@ -696,30 +406,7 @@ async def list_savings_goals(status: str | None = None, limit: int = 20) -> dict
 @router.post("/api/reminders")
 async def create_reminder(request: ReminderCreate) -> dict[str, Any]:
     """建一条提醒：页面上的表单和聊天里的自然语言走同一个落库函数。"""
-    with db.open_conn() as conn, db.tx(conn):
-        user_id = proactive.default_user_id(conn)
-        created = await asyncio.to_thread(
-            assist.create_reminder,
-            conn,
-            text=request.text,
-            user_id=user_id,
-            due_ms=request.due_ms,
-            repeat=request.repeat,
-            hour=request.hour,
-            minute=request.minute,
-            day=request.day,
-            weekday=request.weekday,
-        )
-    return {
-        "ok": True,
-        "plan": created["plan"],
-        "due_ms": created["due_ms"],
-        "due_text": created["due_text"],
-        "repeat": created["repeat"],
-        "repeat_label": created["repeat_label"],
-    }
-
-
+    return payload(use_cases.reminders.reminder_create(**request.model_dump()))
 @router.post("/api/subscriptions/verdict")
 async def subscription_verdict(request: SubscriptionVerdictRequest) -> dict[str, Any]:
     """给一条疑似订阅定性（不是我订的 / 确实是我订的）。
@@ -728,18 +415,7 @@ async def subscription_verdict(request: SubscriptionVerdictRequest) -> dict[str,
     去商户退订。两种结论都会让这条推断从管理页的「疑似订阅」待办里消失——
     「不是我订的」是误报，「确实是我订的」是确认，都不该继续挂着当待办。
     """
-    with db.open_conn() as conn:
-        user_id = proactive.default_user_id(conn)
-        verdict = subscriptions.record_verdict(
-            conn,
-            user_id=user_id,
-            merchant=request.merchant,
-            verdict=request.verdict,
-            note=request.note,
-        )
-    return {"ok": True, "verdict": verdict}
-
-
+    return payload(use_cases.subscriptions.verdict_set(**request.model_dump()))
 @router.post("/api/subscriptions/verdict/clear")
 async def subscription_verdict_clear(request: SubscriptionVerdictClearRequest) -> dict[str, Any]:
     """撤掉某条疑似订阅的定性，让它重新变回待办。
@@ -747,30 +423,12 @@ async def subscription_verdict_clear(request: SubscriptionVerdictClearRequest) -
     同样是只改一行 + 写审计：如果流水仍然满足周期性条件，这条会立刻回到管理
     页的「疑似订阅」里；已经不满足的就自然不再出现。
     """
-    with db.open_conn() as conn:
-        user_id = proactive.default_user_id(conn)
-        result = subscriptions.clear_verdict(conn, user_id=user_id, merchant=request.merchant)
-    return {"ok": True, **result}
-
-
+    return payload(use_cases.subscriptions.verdict_clear(**request.model_dump()))
 @router.patch("/api/savings/goals/{goal_id}")
 async def update_savings_goal(goal_id: str, request: SavingsGoalUpdate) -> dict[str, Any]:
     """调整目标：只改传了的字段，按新参数重算计划并写审计。"""
     fields = request.model_dump(exclude_unset=True)
-    with db.open_conn() as conn, db.tx(conn):
-        user_id = proactive.default_user_id(conn)
-        updated = proactive.update_goal(conn, goal_id, user_id=user_id, **fields)
-    if updated is None:
-        raise NotFound()
-    return {
-        "ok": True,
-        "goal": updated["goal"],
-        "changes": updated["changes"],
-        "rule_changes": updated["rule_changes"],
-        "audit_seq": updated["audit_seq"],
-    }
-
-
+    return payload(use_cases.savings.goal_update(goal_id, **fields))
 @router.get("/api/investment/suitability")
 async def get_suitability() -> dict[str, Any]:
     """读风险测评画像；没测过时把 5 道题一起给前端，用户不用先问一遍。"""
@@ -790,22 +448,12 @@ async def get_suitability() -> dict[str, Any]:
 @router.post("/api/investment/suitability")
 async def assess_suitability(request: SuitabilityAssessRequest) -> dict[str, Any]:
     """提交 5 题答案：算分、落画像、写一条 suitability.assessed 审计。"""
-    with db.open_conn() as conn, db.tx(conn):
-        user_id = proactive.default_user_id(conn)
-        profile = suitability.save(conn, user_id, request.answers)
-    return {"ok": True, "profile": profile}
-
-
+    return payload(use_cases.investments.assessment_submit(answers=request.answers))
 @router.post("/api/proactive/monitor/run")
 async def run_proactive_monitor(request: MonitorRunRequest | None = None) -> dict[str, Any]:
     """手动触发一次监测（可重复）：只写提醒与运行记录，不动一分钱。"""
     goal_id = request.goal_id if request is not None else None
-    with db.open_conn() as conn, db.tx(conn):
-        user_id = proactive.default_user_id(conn)
-        run = proactive.run_monitor(conn, user_id=user_id, goal_id=goal_id)
-    return {"ok": run["status"] == "ok", **run}
-
-
+    return payload(use_cases.proactive.monitor_run(goal_id=goal_id))
 @router.get("/api/proactive/alerts")
 async def list_proactive_alerts(
     status: str = "open", goal_id: str | None = None, limit: int = 20
@@ -826,34 +474,17 @@ async def resolve_proactive_alert(
     alert_id: str, request: AlertResolveRequest
 ) -> dict[str, Any]:
     """处理提醒：ignore=先放着，resolve=已解决；重复处理幂等，写审计。"""
-    with db.open_conn() as conn, db.tx(conn):
-        user_id = proactive.default_user_id(conn)
-        resolved = proactive.resolve_alert(conn, alert_id, request.action, user_id=user_id)
-    if resolved is None:
-        raise NotFound()
-    return {
-        "ok": True,
-        "alert": resolved["alert"],
-        "idempotent": bool(resolved.get("idempotent", False)),
-        "audit_seq": resolved["audit_seq"],
-    }
-
-
+    return payload(use_cases.proactive.alert_resolve(alert_id, action=request.action))
 @router.post("/api/plans")
 async def create_plan(request: PlanCreate) -> dict[str, Any]:
     """建跨场景计划：步骤落库，后台节拍按到点时间推进（资金动作只提醒、不代扣）。"""
-    with db.open_conn() as conn:
-        user_id = proactive.default_user_id(conn)
-        created = plans.create(
-            conn,
-            user_id=user_id,
+    return payload(
+        use_cases.plans.plan_create(
             title=request.title,
             steps=[item.model_dump() for item in request.steps],
             meta=request.meta,
         )
-    return {"ok": True, "plan": created}
-
-
+    )
 @router.get("/api/plans")
 async def list_plans(status: str | None = None, limit: int = 20) -> dict[str, Any]:
     """计划列表：默认只看当前用户的计划，status=all 时连已完成/已取消一起给。"""
@@ -891,22 +522,7 @@ async def get_plan(plan_id: str) -> dict[str, Any]:
 async def update_plan(plan_id: str, request: PlanUpdate) -> dict[str, Any]:
     """改计划：标题、状态（用来取消/暂停）、还没跑过的步骤。"""
     fields = request.model_dump(exclude_unset=True)
-    steps = fields.get("steps")
-    with db.open_conn() as conn:
-        user_id = proactive.default_user_id(conn)
-        updated = plans.update(
-            conn,
-            plan_id,
-            user_id=user_id,
-            title=fields.get("title"),
-            status=fields.get("status"),
-            steps=steps,
-        )
-    if updated is None:
-        raise NotFound()
-    return {"ok": True, "plan": updated}
-
-
+    return payload(use_cases.plans.plan_update(plan_id, **fields))
 @router.post("/api/plans/run")
 async def run_plans(request: PlanRunRequest | None = None) -> dict[str, Any]:
     """手动推进到点的计划步骤（演示现场想立刻看到推进时用，等价于后台那次节拍）。
@@ -916,17 +532,7 @@ async def run_plans(request: PlanRunRequest | None = None) -> dict[str, Any]:
     plan_id 只缩小扫描范围，不改变任何安全校验。
     """
     target = request.plan_id if request is not None else None
-    with db.open_conn() as conn:
-        authorized = birthday.run_due_authorized(conn, plan_id=target)
-        result = plans.run_due(conn, plan_id=target)
-    return {
-        "ok": True,
-        "executed": result["executed"],
-        "count": result["count"],
-        "authorized": authorized,
-    }
-
-
+    return payload(use_cases.plans.plan_run_due(plan_id=target))
 @router.post("/api/plans/birthday")
 async def create_birthday_plan(request: BirthdayPlanCreate) -> dict[str, Any]:
     """建生日计划：预算、鲜花与蛋糕两项、生日前两天到点提醒，全部落库。
@@ -936,21 +542,16 @@ async def create_birthday_plan(request: BirthdayPlanCreate) -> dict[str, Any]:
     save_authorization=True 才保存与计划版本绑定的一次性授权，到点后仍按最新日累计
     重新裁决，红灯/改计划/取消/参数漂移都会停下来，不会无限期代扣。
     """
-    with db.open_conn() as conn:
-        user_id = proactive.default_user_id(conn)
-        created = birthday.create_plan(
-            conn,
-            user_id=user_id,
-            birthday=request.birthday,
+    return payload(
+        use_cases.plans.birthday_create(
+            birthday_date=request.birthday,
             budget_fen=request.budget_fen,
-            items=[item.model_dump() for item in request.items] or None,
+            items=[item.model_dump() for item in request.items],
             title=request.title,
             account_id=request.account_id,
             save_authorization=request.save_authorization,
         )
-    return {"ok": True, "plan": created}
-
-
+    )
 @router.post("/api/plans/{plan_id}/items/{item_key}/pay")
 async def pay_birthday_item(
     plan_id: str, item_key: str, request: BirthdayPayRequest | None = None
@@ -960,178 +561,16 @@ async def pay_birthday_item(
     后台调度只提醒不代扣，所以这个端点是唯一能真正花钱的入口；缺多因子凭证时
     一分钱都不会动，预算退回 reserved 等用户补验证。
     """
-    payload = request or BirthdayPayRequest()
-    # 缺省会话带 :pay 后缀：后台到点自动付款用的是 plan:{id}:{key}，两边不能共用
-    # 同一轮执行——否则用户这边的待验证确认卡会被后台调度「接手」。
-    session_id = payload.session_id or f"plan:{plan_id}:{item_key}:pay"
-    return await birthday.pay_item(
-        plan_id=plan_id,
-        item_key=item_key,
-        session_id=session_id,
-        approve=payload.approve,
-        proofs=[item.model_dump() for item in (payload.proofs or [])],
-    )
-
-
-#: 手动补录单独一个渠道值：既方便幂等去重，也能一眼看出这行不是银行同步来的。
-MANUAL_CHANNEL: Final[str] = "manual"
-MANUAL_NOTICE: Final[str] = "这笔是你自己补录的，只进本行流水与演示余额，不对应任何真实支付。"
-
-
-def _manual_transaction_view(row: Any) -> dict[str, Any]:
-    """把一条手动补录的流水整理成前端好读的形状（永远带 manual=true）。"""
-    return {
-        "id": str(row["id"]),
-        "transaction_id": str(row["id"]),
-        "account_id": str(row["account_id"]),
-        "direction": str(row["direction"]),
-        "amount_fen": int(row["amount_fen"]),
-        "amount_yuan": fen_to_yuan_str(int(row["amount_fen"])),
-        "counterparty": str(row["counterparty"]),
-        "merchant": str(row["counterparty"]),
-        "category": str(row["category"]),
-        "note": str(row["note"]),
-        "ts_ms": int(row["ts_ms"]),
-        "balance_after_fen": int(row["balance_after_fen"]),
-        "channel": str(row["channel"]),
-        "manual": True,
-    }
-
-
-def _record_manual_transaction(conn: Any, request: Any) -> dict[str, Any]:
-    """用户自己补一笔流水：写 transactions + 同步演示余额，同一事务。
-
-    幂等口径和模拟注入一致：同账户 + 同方向 + 同金额 + 同商户 + 同分类 + 同备注，
-    且 channel='manual'、落在同一个本地自然日里，就当作同一次补录——返回已有
-    流水，不再扣/加一次钱（表单重复提交不该变成两笔）。
-    """
-    user_id = proactive.default_user_id(conn)
-    account = conn.execute(
-        "SELECT id, balance_fen FROM accounts WHERE user_id = ?"
-        " ORDER BY CASE type WHEN 'debit' THEN 0 ELSE 1 END, id LIMIT 1",
-        (user_id,),
-    ).fetchone()
-    if account is None:
-        raise ValidationError("账户不存在", reason="NO_ACCOUNTS")
-    account_id = str(account["id"])
-    balance_fen = int(account["balance_fen"])
-    merchant = str(request.merchant or "").strip()
-    if not merchant:
-        raise ValidationError("商户名不能是空白", field="merchant")
-    direction = str(request.direction or "out")
-    amount_fen = int(request.amount_fen)
-    category = str(request.category or "其他").strip() or "其他"
-    note = str(request.note or "").strip()
-    now = clock.now_ms()
-    day_start = proactive._period_day_start_ms(proactive.local_date(now))
-
-    existing = conn.execute(
-        "SELECT * FROM transactions WHERE account_id = ? AND direction = ?"
-        " AND amount_fen = ? AND counterparty = ? AND category = ? AND note = ?"
-        " AND channel = ? AND ts_ms >= ? AND ts_ms < ?"
-        " ORDER BY ts_ms DESC, id DESC LIMIT 1",
-        (
-            account_id,
-            direction,
-            amount_fen,
-            merchant,
-            category,
-            note,
-            MANUAL_CHANNEL,
-            day_start,
-            day_start + _DAY_MS,
-        ),
-    ).fetchone()
-    if existing is not None:
-        transaction = _manual_transaction_view(existing)
-        audit_seq = audit.append(
-            conn,
-            "transaction.manual",
-            {
-                "tool": "manual_transaction",
-                "ok": True,
-                "idempotent": True,
-                "account_id": account_id,
-                "transaction_id": transaction["id"],
-                "amount_fen": amount_fen,
-                "direction": direction,
-                "merchant": merchant,
-                "category": category,
-            },
+    body = request or BirthdayPayRequest()
+    return payload(
+        await use_cases.plans.birthday_pay(
+            plan_id=plan_id,
+            item_key=item_key,
+            session_id=body.session_id,
+            approve=body.approve,
+            proofs=[item.model_dump() for item in (body.proofs or [])],
         )
-        return {
-            "transaction": transaction,
-            "balance_after_fen": int(existing["balance_after_fen"]),
-            "audit_seq": audit_seq,
-            "idempotent": True,
-        }
-
-    if direction == "out" and amount_fen > balance_fen:
-        raise InsufficientFunds(
-            "演示账户余额不足，这笔补录没有记上",
-            account_id=account_id,
-            balance_fen=balance_fen,
-            amount_fen=amount_fen,
-        )
-    balance_after_fen = balance_fen - amount_fen if direction == "out" else balance_fen + amount_fen
-    transaction_id = new_id("t")
-    conn.execute(
-        "INSERT INTO transactions (id, account_id, direction, amount_fen, counterparty,"
-        " category, note, ts_ms, balance_after_fen, hold_id, channel)"
-        " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?)",
-        (
-            transaction_id,
-            account_id,
-            direction,
-            amount_fen,
-            merchant,
-            category,
-            note,
-            now,
-            balance_after_fen,
-            MANUAL_CHANNEL,
-        ),
     )
-    conn.execute("UPDATE accounts SET balance_fen = ? WHERE id = ?", (balance_after_fen, account_id))
-    audit_seq = audit.append(
-        conn,
-        "transaction.manual",
-        {
-            "tool": "manual_transaction",
-            "ok": True,
-            "idempotent": False,
-            "account_id": account_id,
-            "transaction_id": transaction_id,
-            "amount_fen": amount_fen,
-            "direction": direction,
-            "merchant": merchant,
-            "category": category,
-            "balance_after_fen": balance_after_fen,
-            "note": note,
-        },
-    )
-    return {
-        "transaction": {
-            "id": transaction_id,
-            "transaction_id": transaction_id,
-            "account_id": account_id,
-            "direction": direction,
-            "amount_fen": amount_fen,
-            "amount_yuan": fen_to_yuan_str(amount_fen),
-            "counterparty": merchant,
-            "merchant": merchant,
-            "category": category,
-            "note": note,
-            "ts_ms": now,
-            "balance_after_fen": balance_after_fen,
-            "channel": MANUAL_CHANNEL,
-            "manual": True,
-        },
-        "balance_after_fen": balance_after_fen,
-        "audit_seq": audit_seq,
-        "idempotent": False,
-    }
-
 
 @router.post("/api/transactions/manual")
 async def manual_transaction(request: ManualTransactionRequest) -> dict[str, Any]:
@@ -1141,11 +580,7 @@ async def manual_transaction(request: ManualTransactionRequest) -> dict[str, Any
     支付、不建计划、不触发代扣。补录之后账单、月度统计与订阅推断都会把它算进去
     （这正是「我买了什么，账上就该有」的意思）。
     """
-    with db.open_conn() as conn, db.tx(conn):
-        result = _record_manual_transaction(conn, request)
-    return {"ok": True, "manual": True, "notice": MANUAL_NOTICE, **result}
-
-
+    return payload(use_cases.transactions.manual_record(**request.model_dump()))
 @router.get("/api/chat/history")
 async def chat_history_turns(session_id: str = "", limit: int = 20) -> dict[str, Any]:
     """某个会话最近几轮对话：刷新页面/换设备时把气泡画回来。"""
@@ -1180,16 +615,7 @@ async def simulate_expense(request: SimulatedExpenseRequest) -> dict[str, Any]:
     真实消费入口；这个端点只造演示流水（channel='simulated'），既不碰外部渠道，
     也不产生转账/申购/扣款语义。同一请求当天重复提交会复用已有流水（不重复扣钱）。
     """
-    with db.open_conn() as conn, db.tx(conn):
-        result = _simulate_expense(conn, request)
-    return {
-        "ok": True,
-        "simulated": True,
-        "notice": SIMULATED_EXPENSE_NOTICE,
-        **result,
-    }
-
-
+    return payload(use_cases.transactions.expense_simulate(**request.model_dump()))
 @router.get("/")
 async def index() -> Any:
     """根路径直接是前端那一页；文件不在就老实说一声。"""

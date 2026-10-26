@@ -19,6 +19,8 @@ from pydantic import BaseModel, Field
 
 import app.db as db
 import app.memory as memory
+import app.use_cases as use_cases
+from app.api.http import payload
 from app.api.routes import require_api_token
 from app.proactive import default_user_id
 
@@ -62,26 +64,13 @@ def list_memory() -> dict[str, Any]:
 @router.post("")
 def write_memory(body: MemoryWriteRequest) -> dict[str, Any]:
     """手动记一条；同一个 key 覆盖旧的，不新增长期记忆行。"""
-    with db.open_conn() as conn:
-        user_id = default_user_id(conn)
-        fact = memory.remember(
-            conn,
-            user_id=user_id,
-            key=body.key,
-            value=body.value,
-            kind=body.kind,
-            source=body.source or "user",
-        )
-        return {"ok": True, "fact": fact}
+    return payload(use_cases.memory.memory_remember(**body.model_dump()))
 
 
 @router.delete("/{key}")
 def delete_memory(key: str) -> dict[str, Any]:
     """忘掉一条；本来就没有也返回 ok，removed=False 说明没什么可忘的。"""
-    with db.open_conn() as conn:
-        user_id = default_user_id(conn)
-        result = memory.forget(conn, user_id=user_id, key=key)
-        return {"ok": True, "key": result["key"], "removed": result["removed"]}
+    return payload(use_cases.memory.memory_forget(key))
 
 
 __all__ = ["LIST_LIMIT", "MemoryWriteRequest", "router"]

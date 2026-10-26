@@ -117,6 +117,18 @@ class HoldExpired(BankError):
     user_text = "刚才那笔预留已经超时释放了，需要重新发起一次。"
 
 
+class NotFound(BankError):
+    """记录不存在：404，仍然是一句人话，不把 id 回显成英文错误。
+
+    W3 起放在内核里：用例层（app/use_cases）和路由层都要用它抛「没这条记录」，
+    以前它定义在 app/api/routes.py，用例层要用就得反过来 import api 层。
+    """
+
+    code = "NOT_FOUND"
+    http_status = 404
+    user_text = "没找到这条记录，可能已经删掉，或者不在这份演示数据里。"
+
+
 class InjectionDetected(BankError):
     code = "INJECTION_DETECTED"
     http_status = 400
@@ -163,6 +175,7 @@ __all__ = [
     "TokenMismatch",
     "InsufficientFunds",
     "HoldExpired",
+    "NotFound",
     "InjectionDetected",
     "BreakerOpen",
     "ToolNotFound",

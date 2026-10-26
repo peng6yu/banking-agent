@@ -703,3 +703,49 @@ W1 只做「立规矩 + 资金不变量」，不改任何对外行为。
 - 跨层反向依赖 4 条（全在 `tests/test_imports.py` 的 `UPWARD_EXCEPTIONS`），按计划 W4 清零
 - 长函数 32 个、重名 52 组、`web/index.html` 5954 行、`app/api/routes.py` 1894 行：W4/W5 的活
 - `app/db.py`（729 行）与 `tests/test_imports.py`（896 行）已超 600 行软线并入基线；前者 W3 拆用例层时一并按职责切分
+
+---
+
+## v2.9.0 W3 写操作只有一条路径（用例层）  2026-10-26
+
+W3 的目标是「契约 + 用例」：所有写操作从「每个端点自己开事务、自己拼 SQL」收敛成 **路由 → 用例（一个事务 + 一个 Outcome）→ 领域**。做法与验收如下。
+
+### 新增的一层
+
+| 新增 | 职责 |
+|---|---|
+| `app/use_cases/base.py` | `Outcome` / `ok()` / `fail()` / `@write_case`。`write_case` 装饰后函数首参必须是 `conn`，成功与失败都返回 `Outcome`，事务边界只有这一处 |
+| `app/use_cases/{transactions,savings,reminders,subscriptions,plans,scheduled,proactive,investments,memory,handoffs,demo,confirmations}.py` | 13 个域名各一个用例模块，入口一律「名词在前」：`manual_record` / `expense_simulate` / `goal_create` / `reminder_create` / `verdict_set` / `plan_create` / `birthday_pay` / `scheduled_submit_verify` / `monitor_run` / `assessment_submit` / `memory_remember` / `handoff_claim` / `demo_reset` / `challenge_factor` 等 |
+| `app/api/http.py` | `payload(fn, *args, **kwargs)`：调一次用例，把 `Outcome` 的失败分支还原成原始 `BankError` 抛出。状态码与中文 `user_text` 一个字不变——`app/main.py` 仍是唯一映射点，翻译只做一次 |
+
+**用例只收基本类型，不许 import `app.api.schemas`**：请求体在路由里就已经拆成参数，用例层拿不到 pydantic 模型，也就不会反向依赖协议层。
+
+### 5 个豁免端点（债的登记簿，写在 `tests/test_use_cases.py` 的 `ORCHESTRATION`）
+
+`chat`（SSE 流式编排）、`confirm`（授权执行）、`recover_session`（重启续跑）、`cancel`（中途取消）、`run_scheduled`（手动触发节拍器）——它们驱动执行器、返回事件流而不是响应体。理由必须写在表里，端点删了而没同步表也会失败。
+
+### 顺手修掉的两个真缺陷
+
+- `app/use_cases/demo.py` 里 `rewind(conn)` 没跟着改名，`tests/test_api.py` 14 条直接 NameError——已改 `demo_rewind(conn)`。
+- **`database is locked` 的根因**：生日付款经线程池 `asyncio.run` 另开连接写同一份库，外层事务持着写锁不放。修法是 `plans.run_due()` 去掉 `@write_case`、自己 `with db.open_conn()` 依次跑「生日到期」与「计划到期」两段，各自提交；`handoffs.cancel/resume` 与 `birthday_pay` 同因同理。**这条别回退成 write_case**。
+
+### 测试
+
+- 新增 `tests/test_use_cases.py`(7)：写端点必须经 `payload` 且调用用例层；豁免表要真实且有理由；路由里不许出现 `conn.execute(` / `db.tx(` / `db.open_conn(` / `db.connect(`；用例层不许反向 import `app.api.*`；`@write_case` 函数首参必须是 `conn`；用例模块不许 import `app.api.schemas`。
+- `tests/test_imports.py` 体量改造：ALLOWED 表从「每格 3—7 行 frozenset 字面量」改成**一格一行** `"app.x.y": _deps("app.a app.b"),`（`_deps` 把空白分隔的名字拆成 frozenset，空串 = 只依赖标准库），每格上方保留中文「为什么允许这些依赖」注释 —— **1011 行压到 473 行**，守住 400—600 行软线上限而不拆文件。
+- `app/use_cases/transactions.py` 重构到 367 行：`_Entry` 数据类 + `_audit_payload` / `_flow_result` / `_record_same_day` / `_record_fresh`，`manual_record` 与 `expense_simulate` 共用同一条记账路径。
+
+### 验收（2026-10-26 实测）
+
+- 全量 `.venv/bin/python -m pytest -q` → **1669 passed, 4 skipped, 1 warning in 19.73s**（`tmp/pytest_w3d.log`；W2 基线 1632 + `test_use_cases` 7 条 + 用例层改造后各域的补测）
+- 规模：openapi **47 path / 53 operation**、表 **33 张**、审计事件 **66 类**、`tests/test_*.py` **103 个**、app 模块 **98 个**
+- 架构基线用 `scripts/arch_report.py --write-baseline` 重生成：重名函数组 55→**53**（多出定义 68→60），长函数 >80 行 **31** 个，跨层违规仍 4 条（W4 清零），未登记依赖 0，前端缺失 id 0
+- `scripts/check_frontend.py` **66/66**；内联 `<script>` 抽出后 `node --check` 通过
+- 文档：`docs/00` 铁律加第 11 条「写操作只有一条路径」，标题改「十一条铁律」；`docs/02` 补 `app/api/http.py`、整张 `app/use_cases/` 登记表与 5 个豁免端点，补 `tests/test_use_cases.py`(7)，`routes.py` 行的 39/44 改 **47/53**，模块登记数 77→**98**
+
+### 遗留（W4—W6）
+
+- 跨层反向依赖 4 条（`planner.conflict/runner → handoffs`、`planner.ticker → birthday`、`plans → birthday`）留 W4 清零
+- `app/api/business.py`（1377 行）的只读视图要搬 `app/views/`、`routes.py`（1320 行）按域拆分 —— W4
+- `web/index.html` 5954 行 → 壳 + js/css 模块（目标 ≤600 行）—— W5
+- 文档手抄数字 ~20 处（39 path / 44 operation 等历史口径仍在 `docs/技术文档.md`、`docs/10`、`docs/09`、`docs/架构图.mmd`）—— W6 由 `scripts/check_docs_numbers.py` 统一
