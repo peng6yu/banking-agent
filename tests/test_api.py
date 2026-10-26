@@ -205,6 +205,29 @@ def test_sse_frame_is_exactly_two_lines(bank: Path) -> None:
     assert routes.frame("tool", {"ok": True}) == 'event: tool\ndata: {"ok": true}\n\n'
 
 
+def test_sse_frames_keep_the_keys_the_page_reads(bank: Path) -> None:
+    """把 SSE 帧的键集合钉住：改名字要改这条测试，不能让页面静默读到 undefined。
+
+    前端 30-chat.js / 40-confirm.js / 95-session.js 直接读这些键，
+    而它们不在 openapi 里（SSE 不是普通响应），契约测试扫不到，只能在这里钉。
+    """
+    events, _answers, _repeats = chat("s_api_shape", "给李静转 500 元")
+    expected = {
+        "start": {"session_id", "now_ms"},
+        "intent": {"intent", "slots", "missing", "confidence", "session_id"},
+        "trace": {"node_id", "tool", "tool_name", "level", "rule_id", "reason_text", "amount_fen"},
+        "confirm": {
+            "confirmation_id", "node_id", "tool", "level", "rule_id", "action_text",
+            "amount_fen", "amount_yuan", "expires_in_s", "reason_text", "source_account",
+        },
+        "tool": {"node_id", "ok", "summary"},
+        "done": {"summary", "balance_after_fen", "balance_after_yuan", "question"},
+    }
+    for frame, keys in expected.items():
+        got = set(payload(events, frame))
+        assert not keys - got, f"{frame} 帧少了 {sorted(keys - got)}；现在有 {sorted(got)}"
+
+
 def test_health_reports_the_authoritative_tool_count_and_a_live_db(bank: Path) -> None:
     resp = call("GET", "/api/health")
     assert resp.status_code == 200
