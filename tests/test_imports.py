@@ -259,11 +259,11 @@ ALLOWED: dict[str, frozenset[str]] = {
     # 纯常量：状态→中文说法、异常规则、快捷入口，只有标准库
     "app.views.labels": _deps(""),
     # 金额与流水积木：账户、账单、趋势。读工具层的只读查询，不执行任何动作
-    "app.views.money": _deps("app.funds app.money app.proactive app.timefmt app.tools app.tools.base app.tools.bill app.tools.queries app.views.labels"),
+    "app.views.money": _deps("app.funds app.money app.proactive app.subscriptions app.timefmt app.tools app.tools.base app.tools.bill app.tools.queries app.views.labels"),
     # 待办与队列积木：待确认卡、接管单、预约、提醒、监测。只读既有事实，不产生新裁决
     "app.views.queue": _deps("app.clock app.handoffs app.money app.planner app.planner.ticker app.proactive app.timefmt app.tools app.tools.scheduled app.views.labels"),
     "app.views.overview": _deps("app.clock app.planner app.planner.assist app.proactive app.timefmt app.tools.base app.views.labels app.views.money app.views.queue"),
-    "app.views.bill": _deps("app.clock app.proactive app.timefmt app.tools app.tools.base app.tools.bill app.tools.queries app.views.labels app.views.money"),
+    "app.views.bill": _deps("app.clock app.proactive app.subscriptions app.timefmt app.tools app.tools.base app.tools.bill app.tools.queries app.views.labels app.views.money"),
     "app.views.management": _deps("app.clock app.memory app.money app.proactive app.subscriptions app.suitability app.timefmt app.tools.base app.views.money app.views.queue"),
     "app.views.plans": _deps("app.clock app.planner app.planner.assist app.plans app.subscriptions app.timefmt app.tools.base app.views.labels app.views.queue"),
     "app.views.executions": _deps("app.audit app.clock app.money app.models app.planner app.planner.events app.timefmt app.views.labels app.views.queue"),

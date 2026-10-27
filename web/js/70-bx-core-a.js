@@ -68,11 +68,11 @@ const BX_TOOL_PROMPT = {
   scheduled_transfer: '帮我预约下个月 1 号转 500 元给张三'
 };
 const BX_HOSTS = {
-  overview: ['ov-balance', 'ov-flow', 'ov-cats', 'ov-anomalies', 'ov-pending', 'ov-goals', 'ov-plans', 'ov-handoffs', 'ov-actions'],
-  bill: ['bill-summary', 'bill-cats', 'bill-trend', 'bill-anomalies', 'bill-tx'],
-  plans: ['plan-banner', 'plan-goals', 'plan-tasks', 'plan-alerts'],
+  overview: ['ov-balance', 'ov-inbox', 'ov-goals', 'ov-plans', 'ov-actions'],
+  bill: ['bill-summary', 'bill-cats', 'bill-trend', 'bill-anomalies'],
+  plans: ['plan-banner', 'plan-goals', 'plan-tasks', 'plan-alerts', 'plan-messages'],
   manage: ['mg-cards', 'mg-subs', 'mg-products', 'mg-caps', 'mg-memory'],
-  security: ['sec-summary', 'sec-sessions', 'sec-handoffs', 'sec-denials', 'sec-note']
+  security: ['sec-summary', 'sec-sessions', 'sec-denials', 'sec-note']
 };
 
 let bxView = 'overview';

@@ -14,6 +14,7 @@ from typing import Any
 from app import funds
 from app import proactive
 from app import timefmt
+from app.subscriptions import CONFIDENCE_LABELS
 from app.tools import bill
 from app.tools import queries
 from app.money import fen_to_yuan_str
@@ -140,6 +141,8 @@ def _anomaly_view(
             "text": rule.get("rule_text", ""),
             "severity": rule.get("severity", "info"),
             "confidence": rule.get("confidence", "low"),
+            # 页面上只出现中文把握度；原始枚举留着给前端分组用。
+            "confidence_label": CONFIDENCE_LABELS.get(rule.get("confidence", "low"), "低"),
         },
         "possible_false_positive": rule.get("possible_false_positive", ""),
         "evidence": {

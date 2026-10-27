@@ -1,10 +1,10 @@
-/* 74-view-messages.js — 总览里的「助手提醒」卡片。
+/* 74-view-messages.js — 「计划与提醒」里的「助手提醒」卡片（首页只显示待看条数）。
    读：GET /api/messages（不生成）；想现在就算一轮：POST /api/messages/refresh；
    采纳/忽略/静音：POST /api/messages/{id}/feedback。生成是写动作，所以刷新必须由人点。 */
 'use strict';
 
 function bxMessagesTag(data) {
-  const tag = $('ov-messages-tag');
+  const tag = $('plan-messages-tag');
   if (!tag) { return; }
   const daily = bxIsObj(data && data.daily) ? data.daily : {};
   const used = Number(daily.used || 0);
@@ -37,10 +37,16 @@ function bxMessageAction(btnKey, msg) {
   });
 }
 
+/* 一条提醒只露一个主按钮，「这次不用 / 这类别再提醒」收进「不用了」里：
+   同一屏三条提醒时按钮从九个降到六个，主次也不打架了。 */
 function bxMessageFeedback(btnKey, msg) {
+  const more = el('div', 'cap-chips');
+  more.hidden = true;
+  let extra = 0;
   bxArr(msg.feedback_actions).forEach(function (fb) {
     if (!bxIsObj(fb) || !fb.action) { return; }
-    const btn = el('button', 'btn btn-mini' + (fb.primary ? ' btn-green' : ' btn-ghost'), textOf(fb.label));
+    const primary = !!fb.primary;
+    const btn = el('button', 'btn btn-mini' + (primary ? ' btn-green' : ' btn-ghost'), textOf(fb.label));
     btn.type = 'button';
     btn.addEventListener('click', function () {
       if (btn.disabled) { return; }
@@ -55,8 +61,18 @@ function bxMessageFeedback(btnKey, msg) {
           bxToast('没记上：' + errorText(err), 'bad');
         });
     });
-    btnKey.appendChild(btn);
+    if (primary) { btnKey.appendChild(btn); } else { more.appendChild(btn); extra += 1; }
   });
+  if (!extra) { return; }
+  const toggle = el('button', 'btn btn-mini btn-ghost', '不用了');
+  toggle.type = 'button';
+  toggle.setAttribute('aria-expanded', 'false');
+  toggle.addEventListener('click', function () {
+    more.hidden = !more.hidden;
+    toggle.setAttribute('aria-expanded', more.hidden ? 'false' : 'true');
+  });
+  btnKey.appendChild(toggle);
+  btnKey.appendChild(more);
 }
 
 /* 顶部导航的待看徽标：不点开总览也知道助手有几条话要说。计数就是 status=new 的条数，
@@ -71,7 +87,7 @@ function bxMessagesBadge(count) {
 }
 
 function bxRenderMessages(data) {
-  const host = $('ov-messages');
+  const host = $('plan-messages');
   if (!host) { return; }
   data = bxIsObj(data) ? data : {};
   bxMessagesTag(data);
@@ -111,7 +127,7 @@ function bxRenderMessages(data) {
 }
 
 function bxLoadMessages() {
-  const host = $('ov-messages');
+  const host = $('plan-messages');
   if (!host) { return Promise.resolve(null); }
   bxLoading(host, 2);
   return bxFetch('/api/messages?limit=10').then(function (data) {
@@ -119,6 +135,20 @@ function bxLoadMessages() {
     return data;
   }).catch(function (err) {
     bxError(host, err);
+    return null;
+  });
+}
+
+/* 首页收件箱只需要「有几条没看」，不要把整张卡片拉过来重渲染一遍：
+   提醒的正文与反馈按钮只属于「计划与提醒」那一页。 */
+function bxMessagesSummary(cb) {
+  return bxFetch('/api/messages?limit=1').then(function (data) {
+    const counts = bxIsObj(data) && bxIsObj(data.counts) ? data.counts : {};
+    if (typeof cb === 'function') { cb(counts); }
+    if (typeof bxMessagesBadge === 'function') { bxMessagesBadge(counts.new); }
+    return counts;
+  }).catch(function () {
+    /* 取不到就什么也不显示：收件箱不能因为提醒接口失败而整块空掉。 */
     return null;
   });
 }
@@ -146,7 +176,7 @@ function bxMessagesRefresh(btn) {
 
 (0, function () {
   document.addEventListener('DOMContentLoaded', function () {
-    const btn = $('ov-messages-refresh');
+    const btn = $('plan-messages-refresh');
     if (btn) { btn.addEventListener('click', function () { bxMessagesRefresh(btn); }); }
   });
 })();

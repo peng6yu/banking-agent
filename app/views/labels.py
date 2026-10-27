@@ -83,10 +83,10 @@ ANOMALY_RULES: Final[dict[str, dict[str, Any]]] = {
         "severity": "info",
         "confidence": "medium",
         "possible_false_positive": "套餐升级、一次性加购、按用量计费都会命中。",
+        #: 订阅只有一个归属页：这里只给「去业务管理看」，停止代扣/退订都在那页说，
+        #: 免得同一件事在账单页和业务管理页各有一套按钮、说得还不一样。
         "actions": [
-            {"id": "open_subscriptions", "label": "看订阅管理", "kind": "inspect"},
-            {"id": "ask_assistant", "label": "查这个订阅能不能停", "kind": "prompt",
-             "prompt": "我这个订阅涨价了，能帮我看下怎么处理吗？"},
+            {"id": "open_subscriptions", "label": "去业务管理看订阅", "kind": "inspect"},
         ],
     },
 }

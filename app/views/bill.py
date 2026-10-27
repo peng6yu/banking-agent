@@ -11,6 +11,7 @@ from typing import Any
 from app import proactive
 from app import timefmt
 from app.clock import ValidationError, now_ms
+from app.subscriptions import CONFIDENCE_LABELS
 from app.tools import bill, queries
 from app.tools.base import primary_account
 from app.tools.bill import ANOMALY_KINDS
@@ -115,6 +116,9 @@ def bill_view(
                     "rule_id": ANOMALY_RULES.get(kind, {}).get("rule_id", ""),
                     "rule_text": ANOMALY_RULES.get(kind, {}).get("rule_text", ""),
                     "confidence": ANOMALY_RULES.get(kind, {}).get("confidence", "low"),
+                    "confidence_label": CONFIDENCE_LABELS.get(
+                        ANOMALY_RULES.get(kind, {}).get("confidence", "low"), "低"
+                    ),
                 }
                 for kind in ANOMALY_KINDS
             ],

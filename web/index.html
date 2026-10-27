@@ -49,61 +49,27 @@
 
       <div class="grid grid-3" id="ov-balance"></div>
 
-      <div class="grid grid-2">
-        <div class="card">
-          <div class="card-head"><h3>近期收支</h3><span class="spacer"></span><span class="tag" id="ov-month-tag">—</span></div>
-          <div id="ov-flow"></div>
-        </div>
-        <div class="card">
-          <div class="card-head"><h3>主要支出类别</h3></div>
-          <div id="ov-cats"></div>
-          <div class="card-note">占比是占本月「全部支出」的比例，含账户互转、理财这类账户内部搬运，和上面的支出总数同一口径。</div>
-        </div>
+      <div class="card">
+        <div class="card-head"><h3>需要你过目</h3><span class="spacer"></span><span class="tag warn" id="ov-inbox-tag">—</span></div>
+        <div id="ov-inbox"></div>
+        <div class="card-note" id="ov-inbox-note">这里只放「需要你决定」的事：待你确认的授权、待核实的异常、待人工接管的单、没看的助手提醒、到点的计划提醒。每件事只给一个入口，前因后果在它所属的栏目里；已经处理完的会自动从这里消失。</div>
       </div>
 
       <div class="grid grid-2">
         <div class="card">
-          <div class="card-head"><h3>需要核实的异常</h3><span class="spacer"></span><span class="tag warn">待核实 ≠ 欺诈认定</span></div>
-          <div id="ov-anomalies"></div>
-        </div>
-        <div class="card">
-          <div class="card-head"><h3>待处理的授权</h3><span class="spacer"></span><span class="tag info">只有你确认才会执行</span></div>
-          <div id="ov-pending"></div>
-        </div>
-      </div>
-
-      <div class="grid grid-2">
-        <div class="card">
-          <div class="card-head"><h3>储蓄目标</h3><span class="spacer"></span>
+          <div class="card-head"><h3>正在进行</h3><span class="spacer"></span><span class="tag" id="ov-month-tag">—</span>
             <button class="btn btn-mini" type="button" data-goto="plans">去计划中心</button>
           </div>
           <div id="ov-goals"></div>
-        </div>
-        <div class="card">
-          <div class="card-head"><h3>近期计划与提醒</h3></div>
           <div id="ov-plans"></div>
+          <div class="card-note">储蓄目标与预约任务的进度摘要；改目标、改提醒、补验证都在「计划与提醒」里做。</div>
         </div>
-      </div>
-
-      <div class="card">
-        <div class="card-head"><h3>助手提醒</h3><span class="spacer"></span>
-          <span class="tag info" id="ov-messages-tag">每天最多三条</span>
-          <button class="btn btn-mini" type="button" id="ov-messages-refresh">现在想一想</button>
-        </div>
-        <div id="ov-messages"></div>
-        <div class="card-note">每条提醒都写明依据的那个数字，数字只来自你自己的流水；同一类事 7 天内不重复，连续三次点「这类别再提醒」就不再出现。它只是把值得看一眼的地方指出来，判断仍然是你的。</div>
-      </div>
-
-      <div class="card">
-        <div class="card-head"><h3>待人工接管的单</h3><span class="spacer"></span><span class="tag warn" id="ov-handoffs-tag">—</span></div>
-        <div id="ov-handoffs"></div>
-        <div class="card-note">收款人有歧义、或找不到收款人时，这一轮会挂在这里等人工处理；领取、补信息、拒绝、恢复都要求写明操作员，全部进审计。</div>
-      </div>
 
       <div class="card">
         <div class="card-head"><h3>让 AI 助手来做</h3><span class="spacer"></span><span class="tag">点一下填入输入框</span></div>
         <div id="ov-actions" class="cap-chips"></div>
         <div class="card-note" id="ov-note">快捷入口只负责把话填好，真正的执行仍然要走权限判定与确认。</div>
+        </div>
       </div>
     </div>
   </section>
@@ -181,9 +147,7 @@
         <div class="card"><div class="card-head"><h3>月度趋势</h3><span class="spacer"></span><span class="tag">支出合计</span></div><div id="bill-trend"></div></div>
       </div>
 
-      <div class="card"><div class="card-head"><h3>异常与依据</h3><span class="spacer"></span><span class="tag warn">发现异常 / 建议核实</span></div><div id="bill-anomalies"></div></div>
-
-      <div class="card"><div class="card-head"><h3>异常相关流水</h3><span class="spacer"></span><span class="tag warn">只列命中规则的</span></div><div id="bill-tx"></div><div class="card-note" id="bill-note"></div></div>
+      <div class="card"><div class="card-head"><h3>异常与依据</h3><span class="spacer"></span><span class="tag warn">发现异常 / 建议核实</span></div><div id="bill-anomalies"></div><div class="card-note" id="bill-note"></div></div>
 
       <div class="card"><div class="card-head"><h3>流水明细</h3><span class="spacer"></span><span class="tag">这张卡的全部流水</span></div>
         <div class="pf-row">
@@ -200,6 +164,7 @@
           <label class="pf-field"><span class="field-label">关键词</span>
             <input id="ledger-q" class="pf-in" type="text" maxlength="40" placeholder="对手方或备注，例如：爱奇艺" />
           </label>
+          <label class="pf-check"><input id="ledger-flagged" type="checkbox" /> 只看命中账单规则的</label>
         </div>
         <div class="card-note" id="ledger-meta">正在按这张卡取流水…</div>
         <div id="ledger-tx"></div>
@@ -337,6 +302,15 @@
         </form>
         <div id="plan-reminders"></div>
         <div id="plan-alerts"></div>
+      </div>
+
+      <div class="card">
+        <div class="card-head"><h3>助手提醒</h3><span class="spacer"></span>
+          <span class="tag info" id="plan-messages-tag">每天最多三条</span>
+          <button class="btn btn-mini" type="button" id="plan-messages-refresh">现在想一想</button>
+        </div>
+        <div id="plan-messages"></div>
+        <div class="card-note">每条提醒都写明依据的那个数字，数字只来自你自己的流水；同一类事 7 天内不重复，连续三次点「这类别再提醒」就不再出现。它只是把值得看一眼的地方指出来，判断仍然是你的。</div>
       </div>
 
       <details class="panel lv-unknown" id="panel-proactive">
@@ -477,8 +451,6 @@
       <div class="grid grid-3" id="sec-summary"></div>
 
       <div class="card"><div class="card-head"><h3>最近的执行</h3><span class="spacer"></span><span class="tag" id="sec-session-tag">—</span></div><div id="sec-sessions"></div><div class="card-note">任务状态：草稿 / 等待补充信息 / 等待确认 / 等待验证 / 执行中 / 已成功 / 已失败 / 已取消 / 需要人工处理。</div></div>
-
-      <div class="card"><div class="card-head"><h3>人工接管队列</h3><span class="spacer"></span><span class="tag warn" id="sec-handoffs-tag">—</span></div><div id="sec-handoffs"></div><div class="card-note">这里的动作需要写明操作员：领取 → 补信息/拒绝/取消 → 恢复执行。恢复不会替用户点确认卡，新出现的确认仍然回到用户手里。</div></div>
 
       <div class="card"><div class="card-head"><h3>被拒绝的操作</h3><span class="spacer"></span><span class="tag bad" id="sec-denial-tag">—</span></div><div id="sec-denials"></div></div>
 

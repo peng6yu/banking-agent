@@ -3,6 +3,9 @@
 
 function bxRenderPlans(data) {
   data = bxIsObj(data) ? data : {};
+  /* 助手提醒的正文与反馈按钮住在这页：进计划页取一次就够，只读不生成
+     （生成要用户自己点「现在想一想」，免得每次开页面都多出消息）。 */
+  if (typeof bxLoadMessages === 'function') { bxLoadMessages(); }
   const banner = $('plan-banner');
   if (banner) {
     bxRenderScheduler(banner, data.scheduler, '「计划已保存」只是存了参数；只有调度器在跑、并且任务状态是 scheduled，才算「任务已安排」。');

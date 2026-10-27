@@ -25,6 +25,8 @@ function bxLedgerUrl(offset) {
   if (category) { parts.push('category=' + encodeURIComponent(category)); }
   const keyword = bxLedgerValue('ledger-q');
   if (keyword) { parts.push('q=' + encodeURIComponent(keyword)); }
+  const flagged = $('ledger-flagged');
+  if (flagged && flagged.checked) { parts.push('flagged=1'); }
   return '/api/transactions?' + parts.join('&');
 }
 
@@ -38,7 +40,8 @@ function bxLedgerMetaText(data) {
     '收入 ' + bxMoney(data, 'in'),
     '结余 ' + bxMoney(data, 'net')
   ];
-  const head = lines.filter(function (line) { return !!line; }).join(' · ');
+  const only = bxIsObj(data.filters) && data.filters.flagged ? '只看命中账单规则的笔 · ' : '';
+  const head = only + lines.filter(function (line) { return !!line; }).join(' · ');
   let text = '';
   if (bxNum(data.internal_out_fen)) {
     text += '；另有 ' + bxMoney(data, 'internal_out') +
@@ -222,6 +225,8 @@ function bxLedgerReset() {
     const node = $(id);
     if (node) { node.value = ''; }
   });
+  const flagged = $('ledger-flagged');
+  if (flagged) { flagged.checked = false; }
   return bxLoadLedger(true);
 }
 
@@ -246,6 +251,8 @@ function bxLedgerInit() {
   }
   const direction = $('ledger-direction');
   if (direction) { direction.addEventListener('change', function () { bxLoadLedger(true); }); }
+  const flagged = $('ledger-flagged');
+  if (flagged) { flagged.addEventListener('change', function () { bxLoadLedger(true); }); }
   ['ledger-category', 'ledger-q'].forEach(function (id) {
     const node = $(id);
     if (!node) { return; }

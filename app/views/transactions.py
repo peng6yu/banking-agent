@@ -149,6 +149,35 @@ def _anomaly_marks(
     return marks
 
 
+def _flagged_tx_ids(
+    conn: sqlite3.Connection, account_id: str, start_ms: int, end_ms: int
+) -> list[str]:
+    """这一段里命中账单规则的流水 id：按月份现算，与账单页共用同一处检测。
+
+    只用来把列表收窄成「有问题的那些笔」，不改任何一笔自己的判定。
+    """
+    ids: list[str] = []
+    first = datetime.fromtimestamp(start_ms / 1000)
+    last = datetime.fromtimestamp((max(start_ms, end_ms - 1)) / 1000)
+    year, month = first.year, first.month
+    while (year, month) <= (last.year, last.month):
+        for item in anomalies_for_month(conn, account_id, year, month):
+            ids.extend(str(tx_id) for tx_id in item.get("tx_ids") or [])
+        year, month = (year + 1, 1) if month == 12 else (year, month + 1)
+    return ids
+
+
+def _flag_where(
+    conn: sqlite3.Connection, account_id: str, start_ms: int, end_ms: int,
+    where: str, args: list[Any],
+) -> tuple[str, list[Any]]:
+    """把列表收窄成「命中规则的那些笔」；一笔都没命中就用 1 = 0 给个诚实的空页。"""
+    ids = _flagged_tx_ids(conn, account_id, start_ms, end_ms)
+    if not ids:
+        return where + " AND 1 = 0", args
+    return where + " AND id IN (" + ", ".join("?" for _ in ids) + ")", [*args, *ids]
+
+
 def _page_data(
     conn: sqlite3.Connection,
     account_id: str,
@@ -183,6 +212,7 @@ def transactions_view(
     direction: str | None = None,
     category: str | None = None,
     q: str = "",
+    flagged: bool = False,
     limit: int = DEFAULT_LIMIT,
     offset: int = 0,
 ) -> dict[str, Any]:
@@ -200,6 +230,8 @@ def transactions_view(
     account_id, account = resolve_account(conn, account_id)
     where, args = _where(account_id, start_ms, end_ms,
                          direction=direction, category=category, q=q)
+    if flagged:
+        where, args = _flag_where(conn, account_id, start_ms, end_ms, where, args)
     total, sums, items = _page_data(conn, account_id, where, args, limit, offset)
     in_fen = int(sums["in"]) - int(sums["internal_in"])
     out_fen = int(sums["out"]) - int(sums["internal_out"])
@@ -225,6 +257,7 @@ def transactions_view(
             "direction": direction or "",
             "category": category or "",
             "q": q,
+            "flagged": bool(flagged),
             "limit": limit,
             "offset": offset,
         },

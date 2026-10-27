@@ -116,6 +116,11 @@ def test_a_flagged_row_says_which_rule_it_hit(bank: Path) -> None:
     rules = {item["rule"]["id"] for item in bill["anomalies"]["items"]}
     assert hit["rule_id"] in rules, "明细里的规则必须与账单页同源"
     assert "不是欺诈认定" in data["anomaly_note"]
+    # 页面上只出现中文把握度：confidence 是给前端分组的枚举，label 才是人读的。
+    assert hit["confidence_label"] in {"高", "中", "低"}
+    bill_label = bill["anomalies"]["items"][0]["rule"]["confidence_label"]
+    assert bill_label in {"高", "中", "低"}
+    assert not any("a" <= ch.lower() <= "z" for ch in bill_label)
 
 
 def test_a_plain_row_carries_no_flag(bank: Path) -> None:
@@ -124,6 +129,30 @@ def test_a_plain_row_carries_no_flag(bank: Path) -> None:
     plain = [item for item in data["items"] if item["anomaly"] is None]
     assert plain, "正常流水不应该被标红"
     assert data["anomaly_count"] < data["count"]
+
+
+def test_flagged_only_shows_the_rows_with_a_rule(bank: Path) -> None:
+    """勾「只看命中账单规则的」= 列表只剩有问题的那几笔，合计也跟着收窄。"""
+    whole = get("/api/transactions?limit=100").json()
+    plain = get("/api/transactions?flagged=0&limit=100").json()
+    assert plain["filters"]["flagged"] is False
+    assert plain["total"] == whole["total"]
+    only = get("/api/transactions?flagged=1&limit=100").json()
+    assert only["filters"]["flagged"] is True
+    assert only["total"] == only["count"] == len(only["items"])
+    assert only["total"] == whole["anomaly_count"] >= 1
+    assert all(item["anomaly"] for item in only["items"])
+
+
+def test_flagged_with_nothing_hit_is_an_honest_empty_page(bank: Path) -> None:
+    """一个都没命中时，空列表要配 0 合计，不能把全量合计糊上去。"""
+    data = get(
+        "/api/transactions?flagged=1&direction=in&q=%E7%88%B1%E5%A5%87%E8%89%BA&limit=50"
+    ).json()
+    assert data["total"] == data["count"] == 0
+    assert data["items"] == []
+    assert data["out_fen"] == 0 and data["in_fen"] == 0 and data["net_fen"] == 0
+    assert data["has_more"] is False
 
 
 def test_unknown_account_is_a_400_with_a_human_sentence(bank: Path) -> None:

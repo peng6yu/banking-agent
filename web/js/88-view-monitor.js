@@ -48,12 +48,8 @@ function bxRenderPersistedPlans(block) {
     bxEmpty(host, '还没有跨场景计划', textOf(data.empty_reason));
     return;
   }
-  const bar = el('div', 'anomaly-actions');
-  const runAll = el('button', 'btn btn-mini', '立即推进到点步骤');
-  runAll.type = 'button';
-  runAll.addEventListener('click', function () { bxRunPlans(runAll, null); });
-  bar.appendChild(runAll);
-  host.appendChild(bar);
+  /* 只在每个计划上给「推进这个计划」：原来还有一个「立即推进到点步骤」跑全部计划，
+     两个按钮做同一件事，用户还得先猜哪个更安全。 */
   items.forEach(function (plan) {
     const status = textOf(plan.status);
     const box = el('div', 'anomaly');

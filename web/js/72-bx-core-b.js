@@ -32,7 +32,8 @@ function bxAnomalyCard(item, full) {
   if (full) {
     const rule = bxIsObj(item.rule) ? item.rule : {};
     if (rule.text) { box.appendChild(kvRow('规则依据', textOf(rule.text))); }
-    if (rule.confidence) { box.appendChild(kvRow('规则置信度', textOf(rule.confidence) + '（启发式，不是欺诈认定）')); }
+    const conf = textOf(rule.confidence_label) || textOf(rule.confidence);
+    if (conf) { box.appendChild(kvRow('规则置信度', conf + '（启发式，不是欺诈认定）')); }
     if (item.window_text) { box.appendChild(kvRow('时间窗口', textOf(item.window_text))); }
     const cmp = bxIsObj(item.comparison) ? item.comparison : null;
     if (cmp) {
@@ -389,7 +390,7 @@ function bxRunAction(act) {
   if (kind === 'inspect') {
     if (textOf(act.id) === 'open_subscriptions') { bxSetView('manage'); bxFlashCard('mg-subs'); return; }
     bxSetView('bill');
-    bxFlashCard('bill-tx');
+    bxFlashCard('bill-anomalies');
     return;
   }
   if (kind === 'tool') {

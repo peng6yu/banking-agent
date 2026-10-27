@@ -2,6 +2,238 @@
 'use strict';
 
 /* ------------------------------------------------------------- 财务总览 */
+/* 首页只回答三件事：我现在有多少钱、有没有事等我决定、正在推进什么。
+   具体数字的来龙去脉在账单页与计划页——以前首页把这两页的动作各抄了一份，
+   同一个订阅能从三个地方点出四种按钮，用户不知道该信哪个。 */
+function bxInboxBtn(label, cls, onClick) {
+  const btn = el('button', 'btn btn-mini' + (cls ? ' ' + cls : ''), label);
+  btn.type = 'button';
+  btn.addEventListener('click', function () { onClick(btn); });
+  return btn;
+}
+
+/* 待你确认的授权：能在页面批就地批，需要强验证的就地验证，其余回对话。 */
+function bxInboxPending(list, item) {
+  const expired = textOf(item.state_label).indexOf('过期') !== -1 || item.expired === true;
+  const cid = textOf(item.confirmation_id);
+  const sid = textOf(item.session_id);
+  const factors = bxArr(item.required_factors);
+  const facts = [textOf(item.state_label)];
+  if (textOf(item.level)) { facts.push(levelText(textOf(item.level))); }
+  if (factors.length) {
+    facts.push('需要验证：' + factors.map(function (key) {
+      return BX_FACTOR_TEXT[textOf(key)] || textOf(key);
+    }).join('/'));
+  }
+  if (item.stale) { facts.push('会话已失效'); }
+  list.appendChild(bxRow(
+    (textOf(item.payee_name) || '有一个操作') + ' · ' + (textOf(item.amount_yuan) || BX_NA) + ' 元',
+    textOf(item.created_text) + ' 发起 · ' + facts.join(' · '),
+    '等你确认'
+  ));
+  const bar = el('div', 'anomaly-actions');
+  if (item.can_confirm_here === true && !expired && cid) {
+    bar.appendChild(bxInboxBtn('批准执行', 'btn-green', function (btn) {
+      btn.disabled = true;
+      Promise.resolve(confirmAction(cid, true, null, null, sid)).then(function () { bxRefresh(); },
+        function () { btn.disabled = false; });
+    }));
+    bar.appendChild(bxInboxBtn('拒绝', 'btn-red', function (btn) {
+      btn.disabled = true;
+      Promise.resolve(confirmAction(cid, false, null, null, sid)).then(function () { bxRefresh(); },
+        function () { btn.disabled = false; });
+    }));
+    list.appendChild(bar);
+    return;
+  }
+  if (expired) {
+    bar.appendChild(el('span', 'card-note', '这条已经过期，批准入口失效，需要重新发起一笔。'));
+    list.appendChild(bar);
+    return;
+  }
+  if (item.can_verify_here === true && factors.length > 0 && cid) {
+    const box = el('div', 'factor-inline');
+    bar.appendChild(bxInboxBtn('就地验证并批准', 'btn-green', function (btn) {
+      btn.disabled = true;
+      bxInlineFactor(box, cid, sid, function () { bxRefresh(); });
+    }));
+    bar.appendChild(el('span', 'card-note', '验证码由服务端签发、一次性、5 分钟有效；验过才批准，服务端仍会重新裁决。'));
+    list.appendChild(bar);
+    list.appendChild(box);
+    return;
+  }
+  bar.appendChild(bxInboxBtn('去 AI 助手继续', '', function () {
+    bxAsk('我有一个待确认的操作，继续处理');
+  }));
+  list.appendChild(bar);
+}
+
+/* 待核实的异常：首页只给入口，规则、证据、涉及流水都在账单页。 */
+function bxInboxAnomaly(list, item) {
+  const rule = bxIsObj(item.rule) ? item.rule : {};
+  const confText = textOf(rule.confidence_label) || textOf(rule.confidence);
+  const tail = bxArr([textOf(rule.id), confText ? ('把握 ' + confText) : '']).filter(Boolean).join(' · ');
+  list.appendChild(bxRow(
+    textOf(item.title) || '有一条异常待核实',
+    textOf(item.detail) + (tail ? '（' + tail + '）' : ''),
+    (textOf(item.amount_yuan) || '') + ' 待核实'
+  ));
+  const bar = el('div', 'anomaly-actions');
+  bar.appendChild(bxInboxBtn('去账单分析看依据', '', function () {
+    bxSetView('bill');
+    bxFlashCard('bill-anomalies');
+  }));
+  list.appendChild(bar);
+}
+
+/* 待人工接管：接管单从此只在这一个地方操作，安全页只留执行记录与审计。 */
+function bxInboxHandoff(list, block, active) {
+  const needsUser = active.some(function (item) { return item.needs_user === true; });
+  list.appendChild(bxRow(
+    '有 ' + active.length + ' 张单等你定',
+    (needsUser ? '有的缺你本人决定（例如选哪一位收款人），操作员不能替选。' : '') +
+      '领取、要求补充信息、拒绝、取消都在这里，全部写明操作员并进审计。',
+    '待接管'
+  ));
+  const bar = el('div', 'anomaly-actions');
+  const box = el('div', 'list');
+  box.hidden = true;
+  const btn = bxInboxBtn('展开处理这几张单', '', function () {
+    box.hidden = !box.hidden;
+    btn.textContent = box.hidden ? '展开处理这几张单' : '收起这几张单';
+    if (!box.childNodes.length) { bxRenderHandoffs(box, block, null); }
+  });
+  bar.appendChild(btn);
+  list.appendChild(bar);
+  list.appendChild(box);
+}
+
+/* 计划提醒：只给入口，采纳/处理在「计划与提醒」页。 */
+function bxInboxAlert(list, alert) {
+  const goal = textOf(alert.goal_name);
+  list.appendChild(bxRow(
+    textOf(alert.reason_text) || '有一条提醒需要你看一眼',
+    (goal ? '目标：' + goal + ' · ' : '') + '点进去可以看依据、改计划或忽略这条。',
+    '待处理'
+  ));
+  const bar = el('div', 'anomaly-actions');
+  bar.appendChild(bxInboxBtn('去计划与提醒', '', function () {
+    bxSetView('plans');
+    bxFlashCard('plan-alerts');
+  }));
+  list.appendChild(bar);
+}
+
+function bxRenderInbox(data) {
+  const host = $('ov-inbox');
+  if (!host) { return; }
+  host.replaceChildren();
+  const list = el('div', 'list');
+  let count = 0;
+  const pending = bxIsObj(data.pending_authorizations) ? data.pending_authorizations : {};
+  bxArr(pending.items).slice(0, 3).forEach(function (item) { count += 1; bxInboxPending(list, item); });
+  const anomalyBlock = bxIsObj(data.anomalies) ? data.anomalies : {};
+  bxArr(anomalyBlock.items).slice(0, 3).forEach(function (item) { count += 1; bxInboxAnomaly(list, item); });
+  const handoffs = bxIsObj(data.handoffs) ? data.handoffs : {};
+  const active = bxArr(handoffs.items).filter(function (item) {
+    return ['pending', 'claimed', 'need_info'].indexOf(textOf(item.status)) >= 0;
+  });
+  if (active.length) { count += 1; bxInboxHandoff(list, handoffs, active); }
+  const plans = bxIsObj(data.plans_and_reminders) ? data.plans_and_reminders : {};
+  const alerts = bxArr((bxIsObj(plans.alerts) ? plans.alerts : {}).items);
+  alerts.slice(0, 2).forEach(function (alert) { count += 1; bxInboxAlert(list, alert); });
+
+  /* 助手提醒走独立端点（要写动作才生成），条数异步回来，先占一个位置。 */
+  const msgWrap = el('div', '');
+  msgWrap.hidden = true;
+  list.appendChild(msgWrap);
+  const emptyNote = el('div', 'card-note', '现在没有需要你过目的事。有需要你决定的才会出现在这里。');
+  emptyNote.hidden = count > 0;
+  list.appendChild(emptyNote);
+  host.appendChild(list);
+
+  const tag = $('ov-inbox-tag');
+  const paintTag = function () {
+    if (!tag) { return; }
+    tag.textContent = count ? (count + ' 件事') : '没有待办';
+    tag.className = 'tag ' + (count ? 'warn' : 'ok');
+  };
+  paintTag();
+
+  if (typeof bxMessagesSummary === 'function') {
+    bxMessagesSummary(function (counts) {
+      const pendingNew = Number((counts || {}).new || 0);
+      if (!pendingNew) { return; }
+      count += 1;
+      emptyNote.hidden = true;
+      msgWrap.hidden = false;
+      msgWrap.appendChild(bxRow('助手有话要跟你说 · ' + pendingNew + ' 条',
+        '每条都写明依据的那个数字；看完整理由、决定采纳还是别再提醒，都在「计划与提醒」。', '待你看'));
+      const bar = el('div', 'anomaly-actions');
+      bar.appendChild(bxInboxBtn('去计划与提醒', '', function () {
+        bxSetView('plans');
+        bxFlashCard('plan-messages');
+      }));
+      msgWrap.appendChild(bar);
+      paintTag();
+    });
+  }
+}
+
+/* 正在进行：只给进度与摘要，按钮在所属栏目里。 */
+function bxRenderProgress(data) {
+  const goalHost = $('ov-goals');
+  const savings = bxIsObj(data.savings_goals) ? data.savings_goals : {};
+  const goals = bxArr(savings.items);
+  if (goalHost) {
+    goalHost.replaceChildren();
+    goalHost.appendChild(el('div', 'field-label', '储蓄目标'));
+    if (!goals.length) {
+      goalHost.appendChild(el('div', 'card-note', '还没有储蓄目标，可以让 AI 助手帮你定一个。'));
+    } else {
+      const list = el('div', 'list');
+      goals.slice(0, 3).forEach(function (goal) {
+        const plan = bxIsObj(goal.plan) ? goal.plan : null;
+        const pct = plan ? bxNum(plan.progress_pct) : null;
+        list.appendChild(bxRow(
+          textOf(goal.name),
+          textOf(goal.saved_yuan) + ' / ' + textOf(goal.target_yuan) + ' 元 · 目标日 ' + textOf(goal.target_date),
+          BX_GOAL_STATUS[textOf(goal.status)] || textOf(goal.status)
+        ));
+        if (pct !== null) { list.appendChild(bxBar(pct, pct >= 100 ? 'ok' : '')); }
+        if (plan) {
+          const unit = BX_PERIOD_UNIT[textOf(plan.period_unit)] || textOf(plan.period_unit);
+          list.appendChild(el('div', 'card-note', '按后端计划：' + unit + '需要 ' + bxMoney(plan, 'required_per_period') +
+            (plan.feasibility ? '，' + (BX_FEASIBILITY[textOf(plan.feasibility)] || textOf(plan.feasibility)) : '')));
+        }
+      });
+      goalHost.appendChild(list);
+    }
+  }
+
+  const planHost = $('ov-plans');
+  const plans = bxIsObj(data.plans_and_reminders) ? data.plans_and_reminders : {};
+  if (planHost) {
+    planHost.replaceChildren();
+    planHost.appendChild(el('div', 'field-label', '预约与已保存的计划'));
+    const scheduled = bxIsObj(plans.scheduled) ? plans.scheduled : {};
+    const tasks = bxArr(scheduled.items);
+    if (!tasks.length) {
+      planHost.appendChild(el('div', 'card-note', textOf(scheduled.empty_reason) || '没有已安排的预约任务。'));
+    } else {
+      const list = el('div', 'list');
+      tasks.slice(0, 3).forEach(function (task) {
+        list.appendChild(bxRow(
+          task.payee_name ? ('转给 ' + textOf(task.payee_name)) : '预约任务',
+          textOf(task.due_text) + ' · ' + textOf(task.state_label),
+          textOf(task.amount_yuan) + ' 元'
+        ));
+      });
+      planHost.appendChild(list);
+    }
+  }
+}
+
 function bxRenderOverview(data) {
   data = bxIsObj(data) ? data : {};
   const month = bxIsObj(data.this_month) ? data.this_month : {};
@@ -20,244 +252,20 @@ function bxRenderOverview(data) {
     } else {
       balHost.appendChild(bxStatCard('账户余额', BX_NA, '后端没有返回账户'));
     }
-    /* 支出只算钱真的离开净资产的：转给自己另一张卡、买理财是钱换个地方，单列在下面的「内部搬运」。
-       以前总览把内部搬运也算进支出，账单页又把它排除，同一屏两个数谁都不服谁。 */
-    /* 首页 KPI 只覆盖一张卡；账单页能切卡，这里不写清是哪张，切过卡的人会以为总览算错。 */
+    /* 支出只算钱真的离开净资产的：转给自己另一张卡、买理财是钱换个地方，
+       账单页把它们单列成「内部搬运」，这里也不重复计算。 */
     const cardLabel = month.account_name
       ? textOf(month.account_name) + ' 尾号 ' + textOf(month.account_tail) + ' · '
       : '';
-    balHost.appendChild(bxStatCard('本月支出', month.spend_out_yuan ? textOf(month.spend_out_yuan) + ' 元' : BX_NA, cardLabel + bxCount(month.out_count, ' 笔') + '，不含账户互转与理财'));
-    balHost.appendChild(bxStatCard('本月收入', month.spend_in_yuan ? textOf(month.spend_in_yuan) + ' 元' : BX_NA, bxCount(month.in_count, ' 笔')));
+    balHost.appendChild(bxStatCard('本月支出', month.spend_out_yuan ? textOf(month.spend_out_yuan) + ' 元' : BX_NA,
+      cardLabel + bxCount(month.out_count, ' 笔') + '，不含账户互转与理财'));
+    balHost.appendChild(bxStatCard('本月结余', month.net_yuan !== undefined && month.net_yuan !== null ? textOf(month.net_yuan) + ' 元' : BX_NA,
+      '本月收入 ' + bxMoney(month, 'spend_in') + ' · 收入 − 支出，和账单页同一个口径'));
   }
   setText($('ov-month-tag'), data.month_label || '—');
 
-  /* 助手提醒走独立端点（要写动作才生成），不并进总览那份只读快照。 */
-  if (typeof bxLoadMessages === 'function') { bxLoadMessages(); }
-
-  const flowHost = $('ov-flow');
-  if (flowHost) {
-    flowHost.replaceChildren();
-    const list = el('div', 'list');
-    const window = bxIsObj(month.window) ? month.window : {};
-    list.appendChild(bxRow('收入', textOf(window.label) || textOf(month.label), bxMoney(month, 'spend_in')));
-    list.appendChild(bxRow('支出', bxCount(month.out_count, ' 笔') + '（不含账户互转与理财）', bxMoney(month, 'spend_out')));
-    const internal = bxIsObj(month.internal) ? month.internal : {};
-    if (internal.out_fen > 0) {
-      list.appendChild(bxRow(
-        '内部搬运·不算收支',
-        bxCount(internal.count, ' 笔') + '（转给自己的卡 / 买理财，钱还在你名下）',
-        textOf(internal.out_yuan) + ' 元'
-      ));
-    }
-    if (month.net_yuan !== undefined && month.net_yuan !== null) {
-      list.appendChild(bxRow(
-        '结余·' + (textOf(window.label) || textOf(month.label)),
-        '收入 − 支出，和账单页同一个口径',
-        textOf(month.net_yuan) + ' 元'
-      ));
-    }
-    flowHost.appendChild(list);
-    if (month.summary) { flowHost.appendChild(el('div', 'card-note', textOf(month.summary))); }
-  }
-
-  const catHost = $('ov-cats');
-  const cats = bxArr(month.by_category);
-  if (catHost) {
-    if (!cats.length) {
-      bxEmpty(catHost, '本期没有分类支出', '后端没有返回任何支出流水。');
-    } else {
-      catHost.replaceChildren();
-      const list = el('div', 'list');
-      cats.slice(0, 8).forEach(function (cat) {
-        list.appendChild(bxRow(
-          textOf(cat.category),
-          bxCount(cat.count, ' 笔') + ' · 占比 ' + bxCount(cat.pct, '%'),
-          bxMoney(cat, 'amount')
-        ));
-        list.appendChild(bxBar(cat.pct));
-      });
-      catHost.appendChild(list);
-    }
-  }
-
-  const anomalyHost = $('ov-anomalies');
-  const anomalyBlock = bxIsObj(data.anomalies) ? data.anomalies : {};
-  const anomalyItems = bxArr(anomalyBlock.items);
-  if (anomalyHost) {
-    if (!anomalyItems.length) {
-      bxEmpty(anomalyHost, textOf(anomalyBlock.state) || '本期没有命中任何规则', textOf(anomalyBlock.disclaimer));
-    } else {
-      anomalyHost.replaceChildren();
-      anomalyItems.slice(0, 3).forEach(function (item) { anomalyHost.appendChild(bxAnomalyCard(item, false)); });
-      if (anomalyBlock.more_count) {
-        anomalyHost.appendChild(el('div', 'card-note', '还有 ' + textOf(anomalyBlock.more_count) + ' 条在「账单分析」里。'));
-      }
-      if (anomalyBlock.disclaimer) { anomalyHost.appendChild(el('div', 'card-note', textOf(anomalyBlock.disclaimer))); }
-      const link = el('button', 'btn btn-mini', '去账单分析看依据');
-      link.type = 'button';
-      link.addEventListener('click', function () { bxSetView('bill'); });
-      anomalyHost.appendChild(link);
-    }
-  }
-
-  const pendingHost = $('ov-pending');
-  const pending = bxIsObj(data.pending_authorizations) ? data.pending_authorizations : {};
-  const pendingItems = bxArr(pending.items);
-  if (pendingHost) {
-    if (!pendingItems.length) {
-      bxEmpty(pendingHost, '没有待处理的授权', textOf(pending.empty_reason) || textOf(pending.source));
-    } else {
-      pendingHost.replaceChildren();
-      const list = el('div', 'list');
-      pendingItems.forEach(function (item) {
-        const expired = textOf(item.state_label).indexOf('过期') !== -1 || item.expired === true;
-        const cid = textOf(item.confirmation_id);
-        const ownerSid = textOf(item.session_id);
-        const level = textOf(item.level);
-        const factors = bxArr(item.required_factors);
-        const canHere = item.can_confirm_here === true && !expired;
-        const facts = [textOf(item.state_label)];
-        if (level) { facts.push(levelText(level)); }
-        if (factors.length) {
-          facts.push('需要验证：' + factors.map(function (key) {
-            return BX_FACTOR_TEXT[textOf(key)] || textOf(key);
-          }).join('/'));
-        }
-        if (item.stale) { facts.push('会话已失效'); }
-        list.appendChild(bxRow(
-          (textOf(item.payee_name) || '操作') + ' · ' + (textOf(item.amount_yuan) || BX_NA) + ' 元',
-          textOf(item.created_text) + ' 发起 · ' + facts.join(' · '),
-          ''
-        ));
-        const bar = el('div', 'anomaly-actions');
-        if (canHere && cid) {
-          /* 只有后端明确说「这一步在页面就能批」才放批准按钮。
-             需要人脸/短信验证、或者上一轮已经结束的，放上去就是点了会失败的假入口。 */
-          const ok = el('button', 'btn btn-mini btn-green', '批准执行');
-          ok.type = 'button';
-          ok.title = '批准这一次授权；批准后仍由服务端重新裁决再执行，全程留痕。';
-          ok.addEventListener('click', function () {
-            ok.disabled = true;
-            Promise.resolve(confirmAction(cid, true, null, null, ownerSid)).then(function () {
-              bxRefresh();
-            }, function () { ok.disabled = false; });
-          });
-          const no = el('button', 'btn btn-mini btn-red', '拒绝');
-          no.type = 'button';
-          no.addEventListener('click', function () {
-            no.disabled = true;
-            Promise.resolve(confirmAction(cid, false, null, null, ownerSid)).then(function () {
-              bxRefresh();
-            }, function () { no.disabled = false; });
-          });
-          bar.appendChild(ok);
-          bar.appendChild(no);
-        } else {
-          /* can_verify_here：后端说这一条还能验证、并且确实需要人脸/短信这类因子。
-             那就把验证码输入框摆在这里，验完直接批准——以前只给一句
-             「去完成验证」，点了发一句没有指代的话，等于没有入口。 */
-          const canVerify = item.can_verify_here === true && !expired && factors.length > 0;
-          const btn = el('button', 'btn btn-mini' + (canVerify ? ' btn-green' : ''),
-            expired ? '已过期，需要重新发起' : (canVerify ? '就地验证并批准' : (factors.length ? '去完成验证' : '去确认')));
-          btn.type = 'button';
-          btn.disabled = expired;
-          const box = el('div', 'factor-inline');
-          if (canVerify) {
-            btn.title = '在这一页输入验证码完成核验并批准；服务端会重新校验一次。';
-            btn.addEventListener('click', function () {
-              btn.disabled = true;
-              bxInlineFactor(box, cid, ownerSid, function () { bxRefresh(); });
-            });
-          } else {
-            btn.addEventListener('click', function () { bxAsk('我有一个待确认的操作，继续处理'); });
-          }
-          bar.appendChild(btn);
-          bar.appendChild(el('span', 'card-note', expired
-            ? '这条已经过期，批准入口失效，需要重新发起一笔。'
-            : (canVerify ? '验证码由服务端签发、一次性、5 分钟有效；验过才批准，服务端仍会重新裁决。'
-              : (factors.length ? '这一步的验证已经结束或这一轮没在跑，重新发起一次才有新的验证入口。'
-                : '这一轮已经结束，批准不了。'))));
-          list.appendChild(bar);
-          if (canVerify) { list.appendChild(box); }
-          return;
-        }
-        list.appendChild(bar);
-      });
-      pendingHost.appendChild(list);
-      pendingHost.appendChild(el('div', 'card-note', textOf(pending.source)));
-    }
-  }
-
-  bxRenderHandoffs($('ov-handoffs'), data.handoffs, 'ov-handoffs-tag');
-
-  const goalHost = $('ov-goals');
-  const savings = bxIsObj(data.savings_goals) ? data.savings_goals : {};
-  const goals = bxArr(savings.items);
-  if (goalHost) {
-    if (!goals.length) {
-      bxEmpty(goalHost, '还没有储蓄目标', textOf(savings.empty_reason));
-    } else {
-      goalHost.replaceChildren();
-      goals.slice(0, 3).forEach(function (goal) {
-        const plan = bxIsObj(goal.plan) ? goal.plan : null;
-        const pct = plan ? bxNum(plan.progress_pct) : null;
-        const list = el('div', 'list');
-        list.appendChild(bxRow(
-          textOf(goal.name),
-          textOf(goal.saved_yuan) + ' / ' + textOf(goal.target_yuan) + ' 元 · 目标日 ' + textOf(goal.target_date),
-          BX_GOAL_STATUS[textOf(goal.status)] || textOf(goal.status)
-        ));
-        if (pct !== null) { list.appendChild(bxBar(pct, pct >= 100 ? 'ok' : '')); }
-        const need = plan ? bxMoney(plan, 'required_per_period') : BX_NA;
-        const unit = plan ? (BX_PERIOD_UNIT[textOf(plan.period_unit)] || textOf(plan.period_unit)) : '';
-        list.appendChild(el('div', 'card-note', '按后端计划：' + unit + '需要 ' + need +
-          (plan && plan.feasibility ? '，' + (BX_FEASIBILITY[textOf(plan.feasibility)] || textOf(plan.feasibility)) : '')));
-        goalHost.appendChild(list);
-      });
-    }
-  }
-
-  const planHost = $('ov-plans');
-  const plans = bxIsObj(data.plans_and_reminders) ? data.plans_and_reminders : {};
-  if (planHost) {
-    planHost.replaceChildren();
-    const list = el('div', 'list');
-    const scheduled = bxIsObj(plans.scheduled) ? plans.scheduled : {};
-    const tasks = bxArr(scheduled.items);
-    if (!tasks.length) {
-      list.appendChild(el('div', 'card-note', '预约任务：' + (textOf(scheduled.empty_reason) || '没有已安排的任务。')));
-    } else {
-      tasks.slice(0, 3).forEach(function (task) {
-        list.appendChild(bxRow(
-          task.payee_name ? ('转给 ' + textOf(task.payee_name)) : '预约任务',
-          textOf(task.due_text) + ' · ' + textOf(task.state_label),
-          textOf(task.amount_yuan) + ' 元'
-        ));
-      });
-    }
-    const alerts = bxIsObj(plans.alerts) ? plans.alerts : {};
-    const alertItems = bxArr(alerts.items);
-    if (!alertItems.length) {
-      list.appendChild(el('div', 'card-note', '提醒：' + (textOf(alerts.empty_reason) || '没有新的提醒。')));
-    } else {
-      alertItems.slice(0, 2).forEach(function (alert) {
-        list.appendChild(bxRow(textOf(alert.reason_text), textOf(alert.goal_name), ''));
-      });
-    }
-    planHost.appendChild(list);
-    const scheduler = bxIsObj(plans.scheduler) ? plans.scheduler : null;
-    if (scheduler) {
-      const on = scheduler.enabled === true && scheduler.running === true;
-      const everySec = bxNum(scheduler.interval_ms) !== null ? Math.round(bxNum(scheduler.interval_ms) / 1000) : null;
-      planHost.appendChild(el('div', 'card-note',
-        '预约任务调度：' + (on
-          ? '应用内定时器在跑，每 ' + bxCount(everySec, ' 秒') + '检查一次到期任务'
-          : '没有在跑，只有点「立即执行到期任务」才会执行')));
-      if (scheduler.monitoring_scope) {
-        planHost.appendChild(el('div', 'card-note', '持续监测：' + textOf(scheduler.monitoring_scope)));
-      }
-    }
-  }
+  bxRenderInbox(data);
+  bxRenderProgress(data);
 
   const actionHost = $('ov-actions');
   const actions = bxArr(data.quick_actions);
@@ -397,48 +405,18 @@ function bxRenderBill(data) {
       anomalyHost.appendChild(el('div', 'field-label', '判定规则（全部是启发式线索）'));
       anomalyHost.appendChild(bxTable(
         ['规则', '内容', '置信度'],
-        rules.map(function (rule) { return [textOf(rule.rule_id), textOf(rule.rule_text), textOf(rule.confidence)]; })
+        rules.map(function (rule) {
+          return [textOf(rule.rule_id), textOf(rule.rule_text), textOf(rule.confidence_label) || textOf(rule.confidence)];
+        })
       ));
     }
   }
 
-  const txHost = $('bill-tx');
-  const seen = {};
-  const txs = [];
-  items.forEach(function (item) {
-    const evidence = bxIsObj(item.evidence) ? item.evidence : {};
-    bxArr(evidence.transactions).forEach(function (tx) {
-      const key = textOf(tx.transaction_id) || (textOf(tx.ts_ms) + ':' + textOf(tx.counterparty));
-      if (seen[key]) { return; }
-      seen[key] = true;
-      txs.push(tx);
-    });
-  });
-  if (txHost) {
-    if (!txs.length) {
-      bxEmpty(txHost, '没有相关流水', '本区间没有命中的异常，或者后端没有回传流水明细。');
-    } else {
-      txs.sort(function (a, b) { return (bxNum(b.ts_ms) || 0) - (bxNum(a.ts_ms) || 0); });
-      txHost.replaceChildren();
-      txHost.appendChild(bxTable(
-        ['时间', '对手方', '分类', '备注', '方向', '金额'],
-        txs.map(function (tx) {
-          return [
-            textOf(tx.ts_text),
-            textOf(tx.counterparty),
-            textOf(tx.category),
-            textOf(tx.note),
-            textOf(tx.direction) === 'in' ? '收入' : '支出',
-            textOf(tx.amount_yuan) + ' 元'
-          ];
-        }),
-        [5]
-      ));
-    }
-  }
   const note = $('bill-note');
   if (note) {
-    note.textContent = '这里只列规则命中的流水，不是完整对账单；要看这张卡的全部流水，翻下面「流水明细」。' +
+    /* 异常证据流水不再单开一张卡：命中规则的笔在下面「流水明细」里标红、点开就是规则，
+       这里只交代口径，不重复列同一批流水。 */
+    note.textContent = '规则命中只说明值得核实，不是欺诈认定；命中规则的流水在下面「流水明细」里标红，点开能看是哪条规则、凭什么命中。' +
       (data.summary ? ' ' + textOf(data.summary) : '');
   }
   /* 流水明细跟当前卡与时间段走：账单重渲染（切卡、换月）时一起重新取。 */

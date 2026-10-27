@@ -147,6 +147,7 @@ def list_transactions(
     direction: str | None = Query(None, max_length=4),
     category: str | None = Query(None, max_length=12),
     q: str = Query("", max_length=40),
+    flagged: bool = Query(False),
     limit: int = Query(30, ge=1, le=100),
     offset: int = Query(0, ge=0, le=10000),
 ) -> dict[str, Any]:
@@ -158,7 +159,8 @@ def list_transactions(
     with db.open_conn() as conn:
         return transactions_view(
             conn, account_id=account_id, period=period, year=year, month=month,
-            direction=direction, category=category, q=q, limit=limit, offset=offset,
+            direction=direction, category=category, q=q, flagged=flagged,
+            limit=limit, offset=offset,
         )
 
 

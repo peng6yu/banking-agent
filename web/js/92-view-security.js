@@ -17,8 +17,6 @@ function bxRenderSecurity(data) {
       '共 ' + bxCount(audit.count, ' 条') + (audit.head ? ' · 链头 ' + shortHash(audit.head) : '')));
   }
 
-  bxRenderHandoffs($('sec-handoffs'), data.handoffs, 'sec-handoffs-tag');
-
   setText($('sec-session-tag'), bxCount(sessions.length, ' 个'));
 
   const sessionHost = $('sec-sessions');
