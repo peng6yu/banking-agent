@@ -1,13 +1,13 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-10-27T08:34:20+08:00",
+  "generated_at": "2026-10-27T08:49:25+08:00",
   "git": {
-    "head": "4d23f472d8a23bb5c68218a7a1f9b49af14ad2b8",
-    "head_short": "4d23f47",
-    "subject": "feat(bill): 账单页加「流水明细」，按卡/方向/分类/关键词翻全量流水",
+    "head": "782a67386925480ce7f090e8a5eeb74042238902",
+    "head_short": "782a673",
+    "subject": "feat(bill): 流水明细标红命中的笔，点开看是哪条规则",
     "branch": "main",
-    "dirty": false,
-    "changed_paths": 0
+    "dirty": true,
+    "changed_paths": 1
   },
   "code": {
     "tools": {
@@ -108,10 +108,10 @@
   },
   "tests": {
     "command": ".venv/bin/python -m pytest -q",
-    "passed": 1807,
+    "passed": 1809,
     "failed": 0,
     "skipped": 4,
-    "duration_s": 21.36,
+    "duration_s": 20.98,
     "log": "tmp/pytest_final.log",
     "parsed": true
   },
