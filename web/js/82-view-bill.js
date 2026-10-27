@@ -164,12 +164,11 @@ function bxRenderScheduler(host, scheduler, extra) {
   if (!host) { return; }
   host.replaceChildren();
   const on = bxIsObj(scheduler) && scheduler.enabled === true && scheduler.running === true;
-  const card = el('div', 'card tight');
-  const head = el('div', 'card-head');
-  head.appendChild(el('h3', '', '调度状态'));
-  head.appendChild(el('span', 'spacer'));
+  const block = el('div', 'pf-block');
+  const head = el('div', 'pf-title');
+  head.appendChild(el('span', '', '调度状态'));
   head.appendChild(el('span', 'tag ' + (on ? 'ok' : 'warn'), on ? '后台调度在跑' : '没有后台调度'));
-  card.appendChild(head);
+  block.appendChild(head);
   const body = el('div', 'list');
   if (bxIsObj(scheduler)) {
     const kindText = BX_SCHED_KIND[textOf(scheduler.kind)] || textOf(scheduler.kind);
@@ -187,15 +186,14 @@ function bxRenderScheduler(host, scheduler, extra) {
         ''));
     }
   }
-  card.appendChild(body);
-  if (bxIsObj(scheduler) && scheduler.note) { card.appendChild(el('div', 'card-note', textOf(scheduler.note))); }
+  block.appendChild(body);
+  if (bxIsObj(scheduler) && scheduler.note) { block.appendChild(el('div', 'card-note', textOf(scheduler.note))); }
   if (bxIsObj(scheduler) && scheduler.manual_endpoint) {
-    card.appendChild(el('div', 'card-note',
-      '技术细节（普通使用不需要关心）：手动触发接口 ' + textOf(scheduler.manual_endpoint) +
-      '，也可以直接点下面的「立即执行到期任务」。'));
+    block.appendChild(el('div', 'card-note',
+      '手动触发接口 ' + textOf(scheduler.manual_endpoint) + '，也可以直接点下面的「立即执行到期任务」。'));
   }
-  if (extra) { card.appendChild(el('div', 'card-note', extra)); }
-  host.appendChild(card);
+  if (extra) { block.appendChild(el('div', 'card-note', extra)); }
+  host.appendChild(block);
 }
 
 function bxRunScheduledNow() {

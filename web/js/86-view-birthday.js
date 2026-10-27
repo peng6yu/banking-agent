@@ -26,8 +26,10 @@ function bxSubmitReminder() {
   const text = textOf($('plan-reminder-text').value).trim();
   const btn = $('plan-reminder-submit');
   if (!btn) { return; }
+  /* 反馈必须留在用户当下看的容器里：这个表单在计划页，写到聊天页等于没提示。 */
+  pfHint('plan-reminder-hint', '', '');
   if (!text) {
-    appendBubble('system', '先写一句「提醒我什么」，例如「提醒我明天上午 9 点开会」。');
+    pfHint('plan-reminder-hint', '先写一句「提醒我什么」，例如「提醒我明天上午 9 点开会」。', 'bad');
     $('plan-reminder-text').focus();
     return;
   }
@@ -46,8 +48,8 @@ function bxSubmitReminder() {
   btn.disabled = true;
   bxSend('/api/reminders', 'POST', body).then(function (res) {
     const data = bxIsObj(res) ? res : {};
-    appendBubble('system', '提醒已建：' + textOf(data.repeat_label) + ' · 下次 ' + textOf(data.due_text) +
-      '（不动钱，到点只提醒你回来确认）。', 'plan');
+    pfHint('plan-reminder-hint', '已建：' + textOf(data.repeat_label) + ' · 下次 ' + textOf(data.due_text) +
+      '（不动钱，到点只提醒你回来确认）', 'good');
     $('plan-reminder-text').value = '';
     $('plan-reminder-due').value = '';
     btn.disabled = false;
@@ -56,7 +58,7 @@ function bxSubmitReminder() {
     bxRefresh();
   }).catch(function (err) {
     btn.disabled = false;
-    appendBubble('system', '建提醒失败：' + errorText(err));
+    pfHint('plan-reminder-hint', '没建成：' + errorText(err), 'bad');
   });
 }
 

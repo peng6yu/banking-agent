@@ -226,84 +226,71 @@
     <div class="view-inner">
       <div class="view-head">
         <div class="view-title">计划与提醒</div>
-        <div class="view-sub">「计划已保存」「任务已安排」「任务正在执行」「任务已完成」是四个不同状态，只有后端真的持久化并且有调度器在跑，才会显示成已安排。</div>
+        <div class="view-sub">这页只看现状：你定下的计划、到点会提醒你的事、助手想跟你说的。新建入口都收在下面的折叠里，第一屏不摆表单。</div>
       </div>
 
-      <div id="plan-banner"></div>
-
-      <div class="grid grid-2">
-        <div class="card">
-          <div class="card-head"><h3>储蓄目标</h3><span class="spacer"></span><span class="tag" id="plan-goal-tag">—</span></div>
+      <div class="card">
+        <div class="card-head"><h3>你的计划</h3><span class="spacer"></span><span class="tag" id="plan-goal-tag">—</span></div>
+        <div class="pf-block">
+          <div class="pf-title">储蓄目标 <span class="pf-sub">后端持久化，可跨天推进</span></div>
           <div id="plan-goals"></div>
         </div>
-        <div class="card">
-          <div class="card-head"><h3>预约与已保存的计划</h3></div>
+        <div class="pf-block">
+          <div class="pf-title">跨场景计划 <span class="pf-sub">多步骤的事；纯提醒在下面「提醒」里，这里不重复列</span><span class="spacer"></span><span class="tag" id="plan-persist-tag">—</span></div>
+          <div id="plan-persist"></div>
+          <div class="card-note" id="plan-persist-note"></div>
+        </div>
+        <div class="pf-block">
+          <div class="pf-title">预约转账 <span class="pf-sub">到点自动执行，被判红时在这里补验证</span></div>
           <div id="plan-tasks"></div>
+        </div>
+        <div class="pf-block">
+          <div class="pf-title">接下来 7 天要扣的钱 <span class="spacer"></span><span class="tag" id="plan-upcoming-tag">—</span></div>
+          <div id="plan-upcoming"></div>
+          <div class="card-note">按账单记录里的下次扣费日期推算，只算已持久化的订阅；打开开关才会自动跑。</div>
         </div>
       </div>
 
-      <div class="grid grid-2">
-        <div class="card"><div class="card-head"><h3>近期可能发生的支出</h3><span class="spacer"></span><span class="tag" id="plan-upcoming-tag">—</span></div><div id="plan-upcoming"></div></div>
-        <div class="card"><div class="card-head"><h3>最近的监测</h3><span class="spacer"></span><span class="tag" id="plan-run-tag">—</span></div><div id="plan-runs"></div><div class="card-note" id="plan-run-note"></div></div>
-      </div>
-
-      <div class="card"><div class="card-head"><h3>新建生日计划（预算 + 鲜花蛋糕）</h3><span class="spacer"></span><span class="tag info">预算会占额度</span></div>
-        <form id="plan-birthday-form" class="pf-form" autocomplete="off">
-          <div class="pf-row">
-            <label class="pf-field"><span class="field-label">计划名称</span>
-              <input id="plan-birthday-title" class="pf-in" type="text" maxlength="60" placeholder="不填就用「X 月 X 日生日计划」" />
-            </label>
-            <label class="pf-field"><span class="field-label">生日</span>
-              <input id="plan-birthday-date" class="pf-in" type="date" />
-            </label>
+      <div class="card">
+        <div class="card-head"><h3>提醒</h3><span class="spacer"></span><span class="tag" id="plan-alert-tag">—</span></div>
+        <div class="pf-block">
+          <div class="pf-title">到点会提醒你的事</div>
+          <div id="plan-reminders"></div>
+        </div>
+        <div class="pf-block">
+          <div class="pf-title">监测发现要你处理的</div>
+          <div id="plan-alerts"></div>
+        </div>
+        <details class="panel" id="panel-new-reminder">
+          <summary class="panel-head"><h2>＋ 新建提醒</h2><span class="spacer"></span>
+            <span class="panel-badge">只提醒，不动钱</span>
+          </summary>
+          <div class="panel-body">
+            <form id="plan-reminder-form" class="pf-form" autocomplete="off">
+              <label class="pf-field"><span class="field-label">提醒我</span>
+                <input id="plan-reminder-text" class="pf-in" type="text" maxlength="40" placeholder="例如：每月 25 号会员续费" />
+              </label>
+              <div class="pf-row">
+                <label class="pf-field"><span class="field-label">时间</span>
+                  <input id="plan-reminder-due" class="pf-in" type="datetime-local" />
+                </label>
+                <label class="pf-field"><span class="field-label">重复</span>
+                  <select id="plan-reminder-repeat" class="pf-in">
+                    <option value="none">一次性</option>
+                    <option value="daily">每天</option>
+                    <option value="weekly">每周</option>
+                    <option value="monthly">每月</option>
+                  </select>
+                </label>
+              </div>
+              <div class="pf-row">
+                <button id="plan-reminder-submit" class="btn btn-green" type="submit">建这条提醒</button>
+              </div>
+              <div class="pf-hint" id="plan-reminder-hint"></div>
+              <div class="card-note">只记和钱有关的时间点：还款日、会员扣费、预约转账、预算、储蓄目标、额度。建好后在上面的列表里点「结束」。时间按本机时区解释，不填按明天 09:00 算。</div>
+            </form>
           </div>
-          <div class="pf-row">
-            <label class="pf-field"><span class="field-label">预算（元）</span>
-              <input id="plan-birthday-budget" class="pf-in" type="number" min="1" step="1" value="1000" />
-            </label>
-            <label class="pf-field"><span class="field-label">鲜花（元）</span>
-              <input id="plan-birthday-flowers" class="pf-in" type="number" min="0" step="1" value="400" />
-            </label>
-            <label class="pf-field"><span class="field-label">蛋糕（元）</span>
-              <input id="plan-birthday-cake" class="pf-in" type="number" min="0" step="1" value="600" />
-            </label>
-          </div>
-          <label class="pf-check"><input id="plan-birthday-auth" type="checkbox" /> 到点按这份清单自动付款（不勾就只提醒，付款要你再确认）</label>
-          <div class="pf-row">
-            <button id="plan-birthday-submit" class="btn btn-green" type="submit">建这份计划</button>
-          </div>
-          <div class="card-note">预算会真实占用所选账户的可支配金额（余额不动），取消/拒绝/失败后释放；商户只有鲜花店与蛋糕店两家。付款永远走确认 + 多因子同一条路径。某一项填 0 表示这份计划里不要它。</div>
-        </form>
-        <div id="plan-birthday-result"></div>
-      </div>
-
-      <div class="card"><div class="card-head"><h3>跨场景计划（落库，可跨天推进）</h3><span class="spacer"></span><span class="tag" id="plan-persist-tag">—</span></div><div id="plan-persist"></div><div class="card-note" id="plan-persist-note"></div></div>
-
-      <div class="card"><div class="card-head"><h3>提醒</h3><span class="spacer"></span><span class="tag" id="plan-alert-tag">—</span></div>
-        <form id="plan-reminder-form" class="pf-form" autocomplete="off">
-          <label class="pf-field"><span class="field-label">提醒我</span>
-            <input id="plan-reminder-text" class="pf-in" type="text" maxlength="40" placeholder="例如：每月 25 号会员续费" />
-          </label>
-          <div class="pf-row">
-            <label class="pf-field"><span class="field-label">时间</span>
-              <input id="plan-reminder-due" class="pf-in" type="datetime-local" />
-            </label>
-            <label class="pf-field"><span class="field-label">重复</span>
-              <select id="plan-reminder-repeat" class="pf-in">
-                <option value="none">一次性</option>
-                <option value="daily">每天</option>
-                <option value="weekly">每周</option>
-                <option value="monthly">每月</option>
-              </select>
-            </label>
-          </div>
-          <div class="pf-row">
-            <button id="plan-reminder-submit" class="btn btn-green" type="submit">建这条提醒</button>
-          </div>
-          <div class="card-note">提醒只记和钱有关的时间点：还款日、会员扣费、预约转账、预算、储蓄目标、额度。只提醒不动钱；建好以后在下面的列表里可以点「结束」。时间按本机时区解释，不填按明天 09:00 算。</div>
-        </form>
-        <div id="plan-reminders"></div>
-        <div id="plan-alerts"></div>
+        </details>
       </div>
 
       <div class="card">
@@ -312,8 +299,57 @@
           <button class="btn btn-mini" type="button" id="plan-messages-refresh">现在想一想</button>
         </div>
         <div id="plan-messages"></div>
-        <div class="card-note">每条提醒都写明依据的那个数字，数字只来自你自己的流水；同一类事 7 天内不重复，连续三次点「这类别再提醒」就不再出现。它只是把值得看一眼的地方指出来，判断仍然是你的。</div>
+        <div class="card-note">每条都写明依据的那个数字，数字只来自你自己的流水；同一类事 7 天内不重复，连续三次点「这类别再提醒」就不再出现。</div>
       </div>
+
+      <details class="panel" id="panel-new-birthday">
+        <summary class="panel-head"><h2>＋ 新建生日计划（预算 + 鲜花蛋糕）</h2><span class="spacer"></span>
+          <span class="panel-badge">预算会占额度</span>
+        </summary>
+        <div class="panel-body">
+          <form id="plan-birthday-form" class="pf-form" autocomplete="off">
+            <div class="pf-row">
+              <label class="pf-field"><span class="field-label">计划名称</span>
+                <input id="plan-birthday-title" class="pf-in" type="text" maxlength="60" placeholder="不填就用「X 月 X 日生日计划」" />
+              </label>
+              <label class="pf-field"><span class="field-label">生日</span>
+                <input id="plan-birthday-date" class="pf-in" type="date" />
+              </label>
+            </div>
+            <div class="pf-row">
+              <label class="pf-field"><span class="field-label">预算（元）</span>
+                <input id="plan-birthday-budget" class="pf-in" type="number" min="1" step="1" value="1000" />
+              </label>
+              <label class="pf-field"><span class="field-label">鲜花（元）</span>
+                <input id="plan-birthday-flowers" class="pf-in" type="number" min="0" step="1" value="400" />
+              </label>
+              <label class="pf-field"><span class="field-label">蛋糕（元）</span>
+                <input id="plan-birthday-cake" class="pf-in" type="number" min="0" step="1" value="600" />
+              </label>
+            </div>
+            <label class="pf-check"><input id="plan-birthday-auth" type="checkbox" /> 到点按这份清单自动付款（不勾就只提醒，付款要你再确认）</label>
+            <div class="pf-row">
+              <button id="plan-birthday-submit" class="btn btn-green" type="submit">建这份计划</button>
+            </div>
+            <div class="card-note">预算会真实占用所选账户的可支配金额（余额不动），取消/拒绝/失败后释放；商户只有鲜花店与蛋糕店两家。付款永远走确认 + 多因子同一条路径。某一项填 0 表示这份计划里不要它。</div>
+          </form>
+          <div id="plan-birthday-result"></div>
+        </div>
+      </details>
+
+      <details class="panel" id="panel-scheduler">
+        <summary class="panel-head"><h2>调度与监测（技术细节）</h2><span class="spacer"></span>
+          <span class="panel-badge" id="plan-run-tag">—</span>
+        </summary>
+        <div class="panel-body">
+          <div id="plan-banner"></div>
+          <div class="pf-block">
+            <div class="pf-title">最近的监测</div>
+            <div id="plan-runs"></div>
+            <div class="card-note" id="plan-run-note"></div>
+          </div>
+        </div>
+      </details>
 
       <!-- 演练台默认折叠：它是演示与排障用的，不该和「你的计划」抢同一屏。 -->
       <details class="panel lv-unknown" id="panel-proactive">

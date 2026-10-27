@@ -38,7 +38,13 @@ def plans_view(conn: sqlite3.Connection) -> dict[str, Any]:
     reminders = assist.active_reminders(conn, user_id)
     runs = _monitor_runs(conn)
     charges = subscriptions.upcoming(conn, str(account["id"]))
-    persisted = plans.list_plans(conn, user_id=user_id, limit=10)
+    # 纯提醒类计划（meta.reminder=true）和下面 reminders 是同一批行：
+    # 提醒列表就是从 plans/plan_steps 派生的，两个列表都列会在页面上出现两遍。
+    persisted = [
+        item
+        for item in plans.list_plans(conn, user_id=user_id, limit=10)
+        if not (isinstance(item.get("meta"), dict) and item["meta"].get("reminder") is True)
+    ]
     return {
         "ok": True,
         "generated_text": timefmt.maybe_minute_text(stamp),

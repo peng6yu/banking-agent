@@ -155,7 +155,8 @@ function bxRenderMonitorRuns(payload) {
   const host = $('plan-runs');
   const data = bxIsObj(payload) ? payload : {};
   const items = bxArr(data.items);
-  setText($('plan-run-tag'), bxCount(data.count, ' 次'));
+  /* 这个徽标挂在「调度与监测」的折叠标题上，只写「0 次」看不出是什么的次数。 */
+  setText($('plan-run-tag'), bxCount(data.count, ' 次监测'));
   if (host) {
     if (!items.length) {
       bxEmpty(host, '还没有监测记录', '打开目标的后台监测，或手动点一次「立即运行监测」。');

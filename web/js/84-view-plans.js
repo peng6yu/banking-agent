@@ -14,15 +14,8 @@ function bxRenderPlans(data) {
     btn.id = 'plan-run-now';
     btn.addEventListener('click', bxRunScheduledNow);
     banner.appendChild(btn);
-  }
-
-  const legend = bxArr(data.state_legend);
-  const goalHost = $('plan-goals');
-  const savings = bxIsObj(data.saved_plans) ? data.saved_plans : {};
-  const goals = bxArr(savings.items);
-  setText($('plan-goal-tag'), bxCount(savings.count, ' 个'));
-  if (goalHost) {
-    goalHost.replaceChildren();
+    /* 五个状态标签是「调度怎么认这些状态」的说明，归技术细节，不占储蓄目标卡的位置。 */
+    const legend = bxArr(data.state_legend);
     if (legend.length) {
       const row = el('div', 'cap-chips');
       legend.forEach(function (item) {
@@ -30,8 +23,17 @@ function bxRenderPlans(data) {
         tag.title = textOf(item.meaning);
         row.appendChild(tag);
       });
-      goalHost.appendChild(row);
+      banner.appendChild(row);
+      banner.appendChild(el('div', 'card-note', '任务状态就这么几种，图标颜色跟右上角的红黄绿灯是两套东西。'));
     }
+  }
+
+  const goalHost = $('plan-goals');
+  const savings = bxIsObj(data.saved_plans) ? data.saved_plans : {};
+  const goals = bxArr(savings.items);
+  setText($('plan-goal-tag'), bxCount(savings.count, ' 个'));
+  if (goalHost) {
+    goalHost.replaceChildren();
     if (!goals.length) {
       bxEmpty(goalHost, '还没有保存的计划', textOf(savings.empty_reason));
     } else {
@@ -52,13 +54,16 @@ function bxRenderPlans(data) {
           box.appendChild(kvRow('缺口', bxMoney(plan, 'total_gap')));
           box.appendChild(kvRow('可行性', BX_FEASIBILITY[textOf(plan.feasibility)] || textOf(plan.feasibility)));
           /* assumptions 是后端给的字符串数组，原来整段 JSON 直接糊在页面上，
-             用户看到的是一堆方括号和引号；这里拆成列表逐条渲染。 */
+             用户看到的是一堆方括号和引号；这里拆成列表逐条渲染，并默认收起——
+             它回答「这个数是怎么算的」，不是第一眼要看的结论。 */
           const assumptions = bxArr(plan.assumptions);
           if (assumptions.length) {
-            box.appendChild(el('div', 'card-note', '计算依据（后端给出的假设）：'));
+            const fold = el('details', 'goal-why');
+            fold.appendChild(el('summary', 'caps-title', '这个数是怎么算的（' + assumptions.length + ' 条假设）'));
             const ul = el('ul', 'assumptions');
             assumptions.forEach(function (line) { ul.appendChild(el('li', '', textOf(line))); });
-            box.appendChild(ul);
+            fold.appendChild(ul);
+            box.appendChild(fold);
           }
           bxArr(plan.warnings).forEach(function (warn) {
             box.appendChild(el('div', 'notice warn', textOf(warn)));

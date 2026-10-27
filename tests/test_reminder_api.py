@@ -95,6 +95,19 @@ def test_reminder_list_is_empty_but_not_unavailable(bank: Path) -> None:
     assert block["empty_reason"]
 
 
+def test_a_reminder_is_not_also_listed_as_a_cross_scenario_plan(bank: Path) -> None:
+    """提醒本身就是 plans 表里的一行，页面两个列表都列就会同一件事出现两遍。"""
+    created = post(
+        "/api/reminders",
+        {"text": "提醒我明天上午 9 点会员续费", "repeat": "none", "hour": 9, "minute": 0},
+    ).json()
+    data = get("/api/business/plans").json()
+    assert data["reminders"]["count"] == 1
+    items = data["plans"]["items"]
+    assert all(item["plan_id"] != created["plan"]["plan_id"] for item in items)
+    assert data["plans"]["count"] == len(items)
+
+
 def test_repeating_reminder_from_the_form_gets_a_label(bank: Path) -> None:
     res = post("/api/reminders", {"text": "提醒我每天盯会员续费", "repeat": "daily", "hour": 8, "minute": 30})
     assert res.status_code == 200, res.text
