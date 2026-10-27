@@ -1,13 +1,13 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-10-27T08:32:44+08:00",
+  "generated_at": "2026-10-27T08:34:20+08:00",
   "git": {
-    "head": "39b5dc94a15daad0d74ffd935387c94be92b9215",
-    "head_short": "39b5dc9",
-    "subject": "docs(audit): 演示库首屏截图（浏览器打开）",
+    "head": "4d23f472d8a23bb5c68218a7a1f9b49af14ad2b8",
+    "head_short": "4d23f47",
+    "subject": "feat(bill): 账单页加「流水明细」，按卡/方向/分类/关键词翻全量流水",
     "branch": "main",
-    "dirty": true,
-    "changed_paths": 25
+    "dirty": false,
+    "changed_paths": 0
   },
   "code": {
     "tools": {
@@ -111,7 +111,7 @@
     "passed": 1807,
     "failed": 0,
     "skipped": 4,
-    "duration_s": 20.37,
+    "duration_s": 21.36,
     "log": "tmp/pytest_final.log",
     "parsed": true
   },
