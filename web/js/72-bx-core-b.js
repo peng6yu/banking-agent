@@ -369,6 +369,7 @@ function bxSubscriptionVerdict(merchant, verdict) {
         ? '它已经从「疑似订阅」待办里拿掉了。这条只是留个定性，不会替你去商户退订，也不会变成银行侧代扣。'
         : '它已经从「疑似订阅」待办里拿掉了，以后不再拿这条来问你。';
       appendBubble('sys', '已记下：' + name + ' —— ' + label + '。' + tail + '点错了可以在管理页「已定性的商户」里点「重新当成疑似」。', 'money');
+      bxToast('已记下：' + name + ' —— ' + label, 'ok');
       bxCacheDrop();
       return bxRefresh();
     });
@@ -383,6 +384,7 @@ function bxSubscriptionVerdictClear(merchant) {
       appendBubble('sys', back
         ? '已撤回对「' + name + '」的定性。它重新回到「疑似订阅」待办里，你也可以再说一句「不是订阅」。'
         : '「' + name + '」本来就没有定性记录，现在仍是它原本的样子。', 'money');
+      bxToast(back ? '已撤回对「' + name + '」的定性' : '「' + name + '」本来就没有定性记录', back ? 'ok' : 'bad');
       bxCacheDrop();
       return bxRefresh();
     });
