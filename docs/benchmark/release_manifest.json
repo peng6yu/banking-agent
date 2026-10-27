@@ -1,13 +1,13 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-10-27T11:15:11+08:00",
+  "generated_at": "2026-10-27T11:15:16+08:00",
   "git": {
-    "head": "295419561800884554a41871cb98114e6b488ff9",
-    "head_short": "2954195",
-    "subject": "docs(benchmark): 终验与优先级两处 pytest 数同步到 1826",
+    "head": "639b6d86daeb39ea0c7f023fa5226935c8b16466",
+    "head_short": "639b6d8",
+    "subject": "docs(benchmark): 清单重取（head 2954195、dirty false）",
     "branch": "main",
-    "dirty": true,
-    "changed_paths": 1
+    "dirty": false,
+    "changed_paths": 0
   },
   "code": {
     "tools": {
