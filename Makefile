@@ -7,7 +7,7 @@ PY ?= $(shell if [ -x .venv/bin/python ]; then echo .venv/bin/python; else echo 
 PIP_INDEX ?= https://pypi.tuna.tsinghua.edu.cn/simple
 VENV_PY ?= .venv/bin/python
 
-.PHONY: help setup install venv run seed reseed demo-db demo-run test cov docs-check redteam smoke browser-smoke latency fresh clean reset check-env
+.PHONY: help setup install venv run seed reseed demo-db demo-run test cov docs-check redteam smoke browser-smoke journeys latency fresh clean reset check-env
 
 # make setup 的透传参数，例如 make setup ARGS="--dry-run" 或 ARGS="--ollama"
 ARGS ?=
@@ -88,6 +88,12 @@ smoke:
 
 browser-smoke:
 	$(PY) scripts/browser_smoke.py
+
+# 七条高风险浏览器旅程：真浏览器 + 真后端，同时断言页面文案与服务端状态。
+# playwright 装在系统 python3.12 里（.venv 没装），所以这里用 JOURNEY_PY 而不是 $(PY)。
+JOURNEY_PY ?= $(shell if [ -x /home/peng/.local/bin/python3.12 ]; then echo /home/peng/.local/bin/python3.12; else echo python3; fi)
+journeys:
+	$(JOURNEY_PY) scripts/ui_journeys.py $(ARGS)
 
 fresh: clean seed test
 	@echo ✓ 从零到可演示完成（fresh 已含 clean，重建的是干净库），执行 make run 启动

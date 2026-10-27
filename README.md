@@ -337,18 +337,33 @@ curl -s http://127.0.0.1:8000/api/audit/verify
 ### 单元与集成测试（实测全绿，用例数持续增补）
 
 ```bash
-python3.12 -m pytest -q tests/            # 1710 passed, 4 skipped（2026-10-26 W5 前端拆分轮复跑；历史基线为 1336 passed / 4 skipped）
+make test                                 # 1857 passed, 4 skipped（2026-10-27 复跑；等价于 .venv/bin/python -m pytest -q tests/）
 ```
 
 > **数字口径**：本 README 里的工具数、表数、审计事件数、测试通过数与 A/B 轮次，
 > 一律以 [`docs/benchmark/release_manifest.json`](docs/benchmark/release_manifest.json) 为准（2026-10-24 生成）。
 > 该文件由 `scripts/release_manifest.py` 从代码与运行日志里读出来，不手抄。
 
-### 前端合规自检（实测 91 项全过）
+### 前端合规自检（实测 95 项全过）
 
 ```bash
 python3.12 scripts/check_frontend.py      # 实测「前端检查通过：95/95 项全部达标」
 ```
+
+### 七条浏览器旅程（真 Chromium + 真后端，实测 7/7 PASS）
+
+比冒烟更硬的一层：每条旅程同时断言「页面上的文案」和「服务端的钱与状态」，只满足一半就算失败。
+七条覆盖：小额转账黄灯、高额红灯多因子、同名候选拦截（真模型）、生日计划建立/刷新/恢复、
+储蓄提醒处理、候选点击改参数、明确拒绝记 `confirm.rejected`。
+
+```bash
+make journeys                      # = /home/peng/.local/bin/python3.12 scripts/ui_journeys.py
+make journeys ARGS="--only j1,j2"  # 只跑指定几条；ARGS="--headed" 可以看着它点
+```
+
+> playwright 装在系统 python3.12（`/home/peng/.local/bin/python3.12`），**不在 `.venv` 里**，所以这个目标单列了一个解释器探测；
+> 报告与截图：`docs/交付/browser_journeys.json`、`docs/交付/截图/信息架构/journey_0*.png`。
+> j3 走真模型，其余六条用 `MOCK_MODE=script` 桩；没有模型 key 时只能跑六条。
 
 ### 浏览器级冒烟（真 Chromium，实测 PASS + 3 张截图）
 
