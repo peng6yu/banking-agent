@@ -131,14 +131,16 @@ function bxSubmitManualTransaction() {
       } else if (res && res.hits_note) {
         result.appendChild(el('div', 'card-note', textOf(res.hits_note)));
       }
-      /* 补录之后去助手看：提醒是读时按最新账本算的，先刷新再切页，切过去不是旧数据。 */
-      const go = el('button', 'btn btn-mini', '让助手也看一眼');
-      go.type = 'button';
-      go.addEventListener('click', function () {
-        if (typeof bxMessagesRefresh === 'function') { bxMessagesRefresh(); }
-        bxSetView('overview');
-      });
-      result.appendChild(go);
+      /* 补录完助手已经当场复核过（服务端 review），不用再点一次按钮。
+         把新提醒说出来并对齐徽标，切到总览/计划页时数字已经是对的。 */
+      const review = bxIsObj(res && res.review) ? res.review : {};
+      const fresh = bxNum(review.created) || 0;
+      result.appendChild(el('div', 'card-note', fresh > 0
+        ? ('另外助手当场看过这笔账：' + bxCount(fresh, ' 条新提醒') +
+           (bxArr(review.titles).length ? '（' + bxArr(review.titles).join('、') + '）' : '') +
+           '，已经放进「需要你过目」。')
+        : '助手当场看过这笔账：没有新的要提醒你的事。'));
+      if (typeof bxReviewAfterWrite === 'function') { bxReviewAfterWrite(res); }
     }
     ['bill-manual-merchant', 'bill-manual-amount', 'bill-manual-note', 'bill-manual-ts'].forEach(function (id) {
       const node = $(id);

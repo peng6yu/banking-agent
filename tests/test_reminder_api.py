@@ -74,6 +74,9 @@ def test_post_creates_a_reminder_the_plans_page_can_see(bank: Path) -> None:
     assert created["ok"] is True
     assert created["due_ms"] > now_ms()
     assert created["due_text"].endswith("09:00")
+    # 新建提醒也算「服务新增」：写路径自己复核一遍洞察，响应里带着这一轮的结果。
+    assert created["review"]["cap"] == 3
+    assert isinstance(created["review"]["created"], int)
 
     block = _reminders()
     assert block["count"] == 1

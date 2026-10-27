@@ -11,6 +11,7 @@ from typing import Any
 
 import app.birthday as birthday
 import app.db as db
+import app.messages as messages
 import app.plans as plans
 import app.proactive as proactive
 from app.clock import BankError, NotFound
@@ -33,7 +34,9 @@ def plan_create(
             title=title,
             steps=steps,
             meta=meta or {},
-        )
+        ),
+        # 新计划是新的资金时间点：当场复核一遍洞察，别等用户去点「现在想一想」。
+        "review": messages.review(conn),
     }
 
 

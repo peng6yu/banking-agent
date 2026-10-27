@@ -388,13 +388,13 @@ ALLOWED: dict[str, frozenset[str]] = {
     "app.use_cases.memory": _deps("app.memory app.proactive app.use_cases.base"),
     "app.use_cases.messages": _deps("app.db app.messages app.use_cases.base app.views.messages"),
         # 手动推进到点计划：run_due 自己开连接（生日付款经线程池另开连接，外层事务会锁库）
-    "app.use_cases.plans": _deps("app.birthday app.clock app.db app.plans app.proactive app.use_cases.base"),
+    "app.use_cases.plans": _deps("app.birthday app.clock app.db app.messages app.plans app.proactive app.use_cases.base"),
     "app.use_cases.proactive": _deps("app.clock app.proactive app.use_cases.base"),
-    "app.use_cases.reminders": _deps("app.planner app.planner.assist app.proactive app.use_cases.base"),
-    "app.use_cases.savings": _deps("app.clock app.proactive app.use_cases.base"),
+    "app.use_cases.reminders": _deps("app.messages app.planner app.planner.assist app.proactive app.use_cases.base"),
+    "app.use_cases.savings": _deps("app.clock app.messages app.proactive app.use_cases.base"),
     "app.use_cases.scheduled": _deps("app.tools.scheduled app.use_cases.base"),
     "app.use_cases.subscriptions": _deps("app.proactive app.subscriptions app.use_cases.base"),
-    "app.use_cases.transactions": _deps("app.audit app.clock app.ids app.money app.proactive app.tools app.tools.bill app.use_cases.base"),
+    "app.use_cases.transactions": _deps("app.audit app.clock app.ids app.messages app.money app.proactive app.tools app.tools.bill app.use_cases.base"),
     "app.api.http": _deps("app.use_cases.base"),
 }
 

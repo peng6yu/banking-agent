@@ -166,6 +166,25 @@ def generate(conn: sqlite3.Connection, user_id: str | None = None, now: int | No
     }
 
 
+def review(conn: sqlite3.Connection, user_id: str | None = None, now: int | None = None) -> dict[str, Any]:
+    """写完一笔账、新建一条计划或目标之后，当场复核一遍助手提醒。
+
+    为什么需要它：账单那三条规则（拆单、凌晨境外、订阅涨价）是读时算的，加了流水
+    打开页面就能看见；但「主动推给你」的提醒以前只有用户点「现在想一想」才生成，
+    新账要等到那时才被看见。用户加完一笔就以为系统已经看过了，这是谎报。
+
+    频控一道不少：每天最多三条、同类 7 天不重复、点过「这类别再提醒」的继续静默，
+    所以每笔写操作都调一次也不会刷屏。返回的是给调用方的摘要，不是全部消息。
+    """
+    result = generate(conn, user_id, now)
+    return {
+        "created": len(result["created"]),
+        "titles": [str(item["title"]) for item in result["created"]],
+        "used": result["used"],
+        "cap": result["cap"],
+    }
+
+
 # ---------------------------------------------------------------- 读与反馈
 
 
@@ -263,6 +282,7 @@ __all__ = [
     "first_user_id",
     "detect_insights",
     "generate",
+    "review",
     "list_messages",
     "get_message",
     "counts",

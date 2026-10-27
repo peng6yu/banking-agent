@@ -8,6 +8,7 @@
 - 信用卡的 balance_fen 是「这张卡还能用多少额度」（种子按额度起算逐笔扣减），
   所以刷卡减、还款加，且不碰储蓄卡余额；储蓄卡才是扣账面余额；
 - 补录完立刻按这笔发生的那一个月跑一遍账单三条规则，把与这笔有关的命中带回去；
+  同时跑一遍助手洞察（review），有新提醒就当场写进收件箱，不用等用户点「现在想一想」；
 - 都落一条审计（transaction.manual / proactive.simulated_expense）。
 
 为什么放在用例层而不是领域层：这是「演示库没有真实渠道」时的替代写口，没有
@@ -19,6 +20,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Final
 
+import app.messages as messages
 import app.proactive as proactive
 from app import audit, clock
 from app.clock import InsufficientFunds, ValidationError
@@ -240,7 +242,7 @@ def _flow_result(
         "hit_count": len(hits),
         "hits_note": (
             "这笔命中了上面列出的账单规则，可以去账单分析里看依据；"
-            "助手提醒也会在下次生成时把它算进去。"
+            "助手已经当场复核过，有新提醒会写进「需要你过目」。"
             if hits
             else "这笔没有命中拆单、凌晨境外、订阅涨价三条规则。"
         ),
@@ -382,6 +384,12 @@ def _record_fresh(
     )
 
 
+def _with_review(conn: Any, result: dict[str, Any]) -> dict[str, Any]:
+    """记完立刻复核一遍助手提醒：新流水可能正好是新的洞察，不该等到用户点按钮。"""
+    result["review"] = messages.review(conn)
+    return result
+
+
 def _record(
     conn: Any,
     entry: _Entry,
@@ -421,13 +429,19 @@ def _record(
                     field="client_nonce",
                     reason="NONCE_CONFLICT",
                 )
-            return _record_existing(conn, entry, existing, account, happened)
+            return _with_review(
+                conn, _record_existing(conn, entry, existing, account, happened)
+            )
     if reuse_same_day:
         existing = _find_same_day(conn, entry, str(account["id"]), happened)
         if existing is not None:
-            return _record_existing(conn, entry, existing, account, int(existing["ts_ms"]))
-    return _record_fresh(
-        conn, entry, account=account, happened=happened, client_nonce=nonce
+            return _with_review(
+                conn,
+                _record_existing(conn, entry, existing, account, int(existing["ts_ms"])),
+            )
+    return _with_review(
+        conn,
+        _record_fresh(conn, entry, account=account, happened=happened, client_nonce=nonce),
     )
 
 

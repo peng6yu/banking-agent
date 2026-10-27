@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
+import app.messages as messages
 import app.proactive as proactive
 from app.clock import NotFound
 from app.use_cases.base import write_case
@@ -37,6 +38,8 @@ def goal_create(
         "goal": created["goal"],
         "rule_ids": created["rule_ids"],
         "audit_seq": created["audit_seq"],
+        # 新建目标会改变「预算/进度」口径，当场复核一遍洞察（频控照旧）。
+        "review": messages.review(conn),
     }
 
 

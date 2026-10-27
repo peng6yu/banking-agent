@@ -51,6 +51,8 @@ function bxSubmitReminder() {
     $('plan-reminder-text').value = '';
     $('plan-reminder-due').value = '';
     btn.disabled = false;
+    /* 新建提醒后助手已经当场复核过（服务端 review）：有新提醒就顺手说一声。 */
+    if (typeof bxReviewAfterWrite === 'function') { bxReviewAfterWrite(data); }
     bxRefresh();
   }).catch(function (err) {
     btn.disabled = false;

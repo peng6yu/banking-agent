@@ -1,13 +1,13 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-10-27T10:32:15+08:00",
+  "generated_at": "2026-10-27T10:47:48+08:00",
   "git": {
-    "head": "a62bf8e3646e8e390ae517769641d4fa6db0a09c",
-    "head_short": "a62bf8e",
-    "subject": "fix(web): 给疑似订阅定性后，在业务管理页当场说一句",
+    "head": "c83a47b40fd7d6b21f8401171d6fc5f15f6856cf",
+    "head_short": "c83a47b",
+    "subject": "docs(benchmark): 清单按 a62bf8e 重生成（1811/4、20.83s）",
     "branch": "main",
-    "dirty": false,
-    "changed_paths": 0
+    "dirty": true,
+    "changed_paths": 24
   },
   "code": {
     "tools": {
@@ -108,10 +108,10 @@
   },
   "tests": {
     "command": ".venv/bin/python -m pytest -q",
-    "passed": 1811,
+    "passed": 1813,
     "failed": 0,
     "skipped": 4,
-    "duration_s": 20.83,
+    "duration_s": 19.78,
     "log": "tmp/pytest_final.log",
     "parsed": true
   },

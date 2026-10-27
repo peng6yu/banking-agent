@@ -100,6 +100,8 @@ async function pfSubmitGoal(ev) {
       '（audit_seq=' + textOf(json && json.audit_seq) + '）', 'good');
     appendBubble('sys', (editing ? '已更新储蓄目标 ' : '已创建储蓄目标 ') + textOf(goal && goal.name) +
       '，audit_seq=' + textOf(json && json.audit_seq) + '。');
+    /* 新建目标后助手已经当场复核过（服务端 review），有新提醒就当场说，别等用户去点按钮。 */
+    if (!editing && typeof bxReviewAfterWrite === 'function') { bxReviewAfterWrite(json); }
     await loadProactive();
   } catch (err) {
     pfHint('pf-goal-hint', pfFail(err, editing ? '保存目标失败' : '创建目标失败'), 'bad');

@@ -137,6 +137,18 @@ function bxMessagesSummary(cb) {
   });
 }
 
+/* 写完一笔账、新建一个目标或提醒之后，服务端会顺手复核一遍洞察（响应里的 review）。
+   这一步只负责把结果说出来、把顶部徽标对齐——不需要用户再点一次「现在想一想」。 */
+function bxReviewAfterWrite(res) {
+  const review = bxIsObj(res && res.review) ? res.review : {};
+  const fresh = bxNum(review.created) || 0;
+  if (typeof bxMessagesSummary === 'function') { bxMessagesSummary(null); }
+  if (fresh > 0) {
+    bxToast('助手顺手看了一眼：' + bxCount(fresh, ' 条新提醒') + '，已放进「需要你过目」', 'ok');
+  }
+  return fresh;
+}
+
 function bxMessagesRefresh(btn) {
   if (!btn) { return; }
   if (btn.disabled) { return; }

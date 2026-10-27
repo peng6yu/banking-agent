@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from pathlib import Path
 
 import httpx
@@ -31,6 +32,15 @@ def bank(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     seed(conn)
     conn.close()
     yield tmp_path / "bank.db"
+
+
+def _request(method: str, url: str, body: dict | None = None) -> httpx.Response:
+    async def run() -> httpx.Response:
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url=BASE_URL) as http:
+            return await http.request(method, url, json=body)
+
+    return asyncio.run(run())
 
 
 def get(url: str) -> httpx.Response:
@@ -129,6 +139,62 @@ def test_a_plain_row_carries_no_flag(bank: Path) -> None:
     plain = [item for item in data["items"] if item["anomaly"] is None]
     assert plain, "正常流水不应该被标红"
     assert data["anomaly_count"] < data["count"]
+
+
+def _today_at_0300_ms() -> int:
+    """今天凌晨 3 点（本地时区，毫秒）：凌晨规则的窗口内、又不会是未来。"""
+    now = time.time()
+    parts = time.localtime(now)
+    midnight = time.mktime((parts.tm_year, parts.tm_mon, parts.tm_mday, 0, 0, 0, 0, 0, -1))
+    return int((midnight + 3 * 3600) * 1000)
+
+
+def test_recording_a_bill_reviews_insights_right_away(bank: Path) -> None:
+    """补一笔账之后助手就该看过了，不该等用户去点「现在想一想」。
+
+    以前只有 POST /api/messages/refresh 会生成提醒，用户加完一笔却看不到任何反应，
+    等于系统假装看过了。现在写路径自己调 messages.review，页面上不需要再点一次。
+    """
+    assert get("/api/messages").json()["items"] == []
+    res = _request(
+        "POST",
+        "/api/transactions/manual",
+        {
+            "merchant": "Apple Store 香港",
+            "amount_fen": 288_000,
+            "direction": "out",
+            "category": "购物",
+            "account_id": DEBIT_ACCOUNT_ID,
+            "ts_ms": _today_at_0300_ms(),
+            "client_nonce": "review-1",
+        },
+    )
+    assert res.status_code == 200, res.text
+    review = res.json()["review"]
+    assert review["cap"] == 3 and review["created"] >= 1
+    assert review["titles"], "复核了几条就要能说出是哪几条"
+    after = get("/api/messages").json()
+    assert after["counts"]["new"] >= 1, "提醒必须在补录那一刻就生成"
+    assert "I3_night_large" in {item["insight_id"] for item in after["items"]}
+
+
+def test_the_same_bill_twice_does_not_duplicate_the_insight(bank: Path) -> None:
+    """同一次提交重试（同一个 client_nonce）复核也是幂等的：提醒不能重复堆。"""
+    body = {
+        "merchant": "Apple Store 香港",
+        "amount_fen": 288_000,
+        "direction": "out",
+        "category": "购物",
+        "account_id": DEBIT_ACCOUNT_ID,
+        "ts_ms": _today_at_0300_ms(),
+        "client_nonce": "review-2",
+    }
+    assert _request("POST", "/api/transactions/manual", body).status_code == 200
+    first = get("/api/messages").json()
+    retry = _request("POST", "/api/transactions/manual", body).json()
+    assert retry["idempotent"] is True
+    assert retry["review"]["created"] == 0
+    assert get("/api/messages").json()["counts"]["total"] == first["counts"]["total"]
 
 
 def test_flagged_only_shows_the_rows_with_a_rule(bank: Path) -> None:

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
+import app.messages as messages
 import app.proactive as proactive
 from app.planner import assist
 from app.use_cases.base import write_case
@@ -39,6 +40,8 @@ def reminder_create(
         "due_text": created["due_text"],
         "repeat": created["repeat"],
         "repeat_label": created["repeat_label"],
+        # 新提醒是新的资金时间点：当场复核一遍洞察（频控照旧，不会因此多刷屏）。
+        "review": messages.review(conn),
     }
 
 
