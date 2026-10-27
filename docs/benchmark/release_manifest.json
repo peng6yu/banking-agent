@@ -1,13 +1,13 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-10-27T10:47:48+08:00",
+  "generated_at": "2026-10-27T10:49:27+08:00",
   "git": {
-    "head": "c83a47b40fd7d6b21f8401171d6fc5f15f6856cf",
-    "head_short": "c83a47b",
-    "subject": "docs(benchmark): 清单按 a62bf8e 重生成（1811/4、20.83s）",
+    "head": "165e27c26270280152feafaabfac52505920a01a",
+    "head_short": "165e27c",
+    "subject": "feat(messages): 写完一笔账/目标/提醒，助手当场复核一遍洞察",
     "branch": "main",
-    "dirty": true,
-    "changed_paths": 24
+    "dirty": false,
+    "changed_paths": 0
   },
   "code": {
     "tools": {
@@ -112,7 +112,7 @@
     "failed": 0,
     "skipped": 4,
     "duration_s": 19.78,
-    "log": "tmp/pytest_final.log",
+    "log": "tmp/pytest_review_full.log",
     "parsed": true
   },
   "redteam": {
