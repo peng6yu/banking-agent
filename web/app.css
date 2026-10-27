@@ -106,10 +106,8 @@ a { color: var(--brand); }
 }
 .brand { display: flex; align-items: center; gap: 10px; }
 .brand-mark {
-  width: 30px; height: 30px; border-radius: 9px;
-  background: linear-gradient(160deg, var(--brand), #4b8ee6);
-  color: #fff; font-size: 15px; font-weight: var(--fw-bold);
-  display: grid; place-items: center;
+  width: 30px; height: 30px; border-radius: 9px; background: linear-gradient(160deg, var(--brand), #4b8ee6);
+  color: #fff; font-size: 15px; font-weight: var(--fw-bold); display: grid; place-items: center;
 }
 .brand-text { display: flex; flex-direction: column; line-height: 1.2; }
 .brand-name { font-size: var(--fs-md); font-weight: var(--fw-semi); }
@@ -548,6 +546,8 @@ ul.assumptions li { margin: 2px 0; }
 .table th, .table td { text-align: left; padding: 6px var(--s-2); border-bottom: 1px solid var(--line); }
 .table th { font-size: var(--fs-xs); color: var(--muted); font-weight: var(--fw-med); }
 .table td.num { text-align: right; font-variant-numeric: tabular-nums; }
+.table tr.tx-row.is-flagged { cursor: pointer; } .table tr.tx-row.is-flagged:focus-visible { outline: 2px solid var(--brand); outline-offset: -2px; }
+.table tr.tx-row.is-flagged td { background: var(--red-soft); box-shadow: inset 3px 0 0 var(--red); }
 
 /* ---------------------------------------------------------- 响应式 */
 @media (max-width: 1080px) {

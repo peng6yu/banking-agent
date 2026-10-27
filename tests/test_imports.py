@@ -268,7 +268,10 @@ ALLOWED: dict[str, frozenset[str]] = {
     "app.views.plans": _deps("app.clock app.planner app.planner.assist app.plans app.subscriptions app.timefmt app.tools.base app.views.labels app.views.queue"),
     "app.views.executions": _deps("app.audit app.clock app.money app.models app.planner app.planner.events app.timefmt app.views.labels app.views.queue"),
     # 流水明细：查库 + 与账单页共用「看哪张卡」的解析，不写库、不裁决
-    "app.views.transactions": _deps("app.clock app.money app.timefmt app.tools app.tools.queries app.views.bill app.views.money"),
+    "app.views.transactions": _deps(
+        "app.clock app.money app.subscriptions app.timefmt app.tools app.tools.bill "
+        "app.tools.queries app.views.bill app.views.labels app.views.money"
+    ),
     # 只回原始行，不拼文案（怎么排成「张三（招商 尾号 4417）」由接口层决定）
     "app.views.chat_choices": _deps(""),
     # 入参模型里 FactorProof 复用公共契约（多因子凭证与 /api/confirm 同构）

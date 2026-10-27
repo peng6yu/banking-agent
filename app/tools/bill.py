@@ -251,6 +251,20 @@ def _detect_anomalies(
     )
 
 
+def anomalies_for_month(
+    conn: sqlite3.Connection, account_id: str, year: int, month: int
+) -> list[dict[str, Any]]:
+    """某一张卡在某个自然月命中的全部异常（原始结构，带 tx_ids）。
+
+    检测是读时算的：账单页、流水明细、补录完的回执都用这一处，避免三处各算一遍
+    出现「同一笔在账单页是异常、在明细里不是」。只读，不写库。
+    """
+    start_ms, end_ms = _period_range("month", int(year), int(month))
+    rows = fetch_transactions(conn, account_id, start_ms, end_ms, None, None, None)
+    baseline = _hike_baseline(conn, account_id, "month", int(year), int(month))
+    return _detect_anomalies(rows, baseline)
+
+
 def explain_transaction(
     conn: sqlite3.Connection,
     *,
@@ -260,16 +274,13 @@ def explain_transaction(
 ) -> list[dict[str, Any]]:
     """这笔新流水命中了哪几条账单规则（补录完立刻告诉用户，不用等下次刷新）。
 
-    检测本身是读时算的：按这笔发生的那一个月重新跑三条规则，再把证据里
-    含这笔 id 的那几条挑出来。只挑「与这笔有关」的，不把同月别的异常也算进来。
+    只看这笔发生的那一个月，再把证据里含这笔 id 的那几条挑出来；
+    不把同月别的异常也算进来。
     """
     parts = _local(ts_ms)
-    year, month = int(parts.tm_year), int(parts.tm_mon)
-    start_ms, end_ms = _period_range("month", year, month)
-    rows = fetch_transactions(conn, account_id, start_ms, end_ms, None, None, None)
-    baseline = _hike_baseline(conn, account_id, "month", year, month)
+    found = anomalies_for_month(conn, account_id, int(parts.tm_year), int(parts.tm_mon))
     hits: list[dict[str, Any]] = []
-    for item in _detect_anomalies(rows, baseline):
+    for item in found:
         if str(transaction_id) not in [str(tx_id) for tx_id in item.get("tx_ids") or []]:
             continue
         hits.append(

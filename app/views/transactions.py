@@ -14,8 +14,11 @@ from typing import Any
 from app import timefmt
 from app.clock import ValidationError, now_ms
 from app.money import INTERNAL_CATEGORIES, fen_to_yuan_str
+from app.subscriptions import CONFIDENCE_LABELS
 from app.tools import queries
+from app.tools.bill import anomalies_for_month
 from app.views.bill import resolve_account
+from app.views.labels import ANOMALY_RULES
 from app.views.money import _accounts
 
 DEFAULT_LIMIT: int = 30
@@ -25,6 +28,10 @@ DIRECTIONS: tuple[str, ...] = ("in", "out")
 NOTE: str = (
     "只列这张卡在这个时间段里的流水；账户互转与理财也在里面，"
     "它们只是不算收支（账单页的合计与这里的方向合计口径一致）。"
+)
+ANOMALY_NOTE: str = (
+    "标红的是命中账单规则的流水，点一下能看是哪条规则、凭什么命中；"
+    "规则命中只说明值得核实，不是欺诈认定。"
 )
 
 
@@ -98,6 +105,74 @@ def _scope(conn: sqlite3.Connection, period: str, year: int | None,
     return period, year, month, start_ms, end_ms, label
 
 
+def _flag_brief(item: dict[str, Any], index: int) -> dict[str, Any]:
+    """把工具层一条命中压成「这一笔属于哪条异常」的小卡片，逐笔挂在流水上。"""
+    kind = str(item.get("kind") or "")
+    rule = ANOMALY_RULES.get(kind, {})
+    confidence = str(rule.get("confidence", "low"))
+    amount_fen = int(item.get("amount_fen") or 0)
+    return {
+        "id": f"{kind or 'anomaly'}-{index}",
+        "kind": kind,
+        "title": str(item.get("title") or ""),
+        "detail": str(item.get("detail") or ""),
+        "amount_fen": amount_fen,
+        "amount_yuan": fen_to_yuan_str(amount_fen),
+        "tx_count": len(item.get("tx_ids") or []),
+        "rule_id": str(rule.get("rule_id", "")),
+        "rule_text": str(rule.get("rule_text", "")),
+        "confidence": confidence,
+        "confidence_label": CONFIDENCE_LABELS.get(confidence, "低"),
+        "possible_false_positive": str(rule.get("possible_false_positive", "")),
+    }
+
+
+def _anomaly_marks(
+    conn: sqlite3.Connection, account_id: str, rows: list[sqlite3.Row]
+) -> dict[str, dict[str, Any]]:
+    """这一页流水里，哪些笔命中了异常：按笔所在月份现算一次，逐笔挂标记。
+
+    月份只取这一页出现过的，最多两三个月；检测逻辑与账单页共用
+    bill.anomalies_for_month，避免「账单页说异常、明细里不标红」。
+    """
+    months: set[tuple[int, int]] = set()
+    for row in rows:
+        tm = datetime.fromtimestamp(int(row["ts_ms"]) / 1000)
+        months.add((tm.year, tm.month))
+    marks: dict[str, dict[str, Any]] = {}
+    for year, month in sorted(months):
+        found = anomalies_for_month(conn, account_id, year, month)
+        for index, item in enumerate(found):
+            brief = _flag_brief(item, index)
+            for tx_id in item.get("tx_ids") or []:
+                marks.setdefault(str(tx_id), brief)
+    return marks
+
+
+def _page_data(
+    conn: sqlite3.Connection,
+    account_id: str,
+    where: str,
+    args: list[Any],
+    limit: int,
+    offset: int,
+) -> tuple[int, dict[str, int], list[dict[str, Any]]]:
+    """取这一页要用到的三样：总数、合计、逐笔（带「属于哪条异常」的标记）。"""
+    total = int(conn.execute(
+        "SELECT COUNT(*) AS n FROM transactions" + where, args
+    ).fetchone()["n"])
+    sums = _totals(conn, where, args)
+    rows = conn.execute(
+        "SELECT * FROM transactions" + where + " ORDER BY ts_ms DESC, id DESC LIMIT ? OFFSET ?",
+        [*args, limit, offset],
+    ).fetchall()
+    items = [queries.tx_view(row) for row in rows]
+    marks = _anomaly_marks(conn, account_id, rows)
+    for item in items:
+        item["anomaly"] = marks.get(str(item["transaction_id"]))
+    return total, sums, items
+
+
 def transactions_view(
     conn: sqlite3.Connection,
     *,
@@ -125,15 +200,7 @@ def transactions_view(
     account_id, account = resolve_account(conn, account_id)
     where, args = _where(account_id, start_ms, end_ms,
                          direction=direction, category=category, q=q)
-    total = int(conn.execute(
-        "SELECT COUNT(*) AS n FROM transactions" + where, args
-    ).fetchone()["n"])
-    sums = _totals(conn, where, args)
-    rows = conn.execute(
-        "SELECT * FROM transactions" + where + " ORDER BY ts_ms DESC, id DESC LIMIT ? OFFSET ?",
-        [*args, limit, offset],
-    ).fetchall()
-
+    total, sums, items = _page_data(conn, account_id, where, args, limit, offset)
     in_fen = int(sums["in"]) - int(sums["internal_in"])
     out_fen = int(sums["out"]) - int(sums["internal_out"])
     net_fen = in_fen - out_fen
@@ -161,10 +228,12 @@ def transactions_view(
             "limit": limit,
             "offset": offset,
         },
-        "items": [queries.tx_view(row) for row in rows],
-        "count": len(rows),
+        "items": items,
+        "count": len(items),
+        "anomaly_count": sum(1 for item in items if item.get("anomaly")),
+        "anomaly_note": ANOMALY_NOTE,
         "total": total,
-        "has_more": offset + len(rows) < total,
+        "has_more": offset + len(items) < total,
         "out_fen": out_fen,
         "out_yuan": fen_to_yuan_str(out_fen),
         "in_fen": in_fen,

@@ -411,7 +411,7 @@ python3.12 -m app.smoke                    # 实测 4/4 PASS，主脑延迟约 1
 | `web/index.html` | 前端壳：只放 DOM（原生 JS，无框架、无 CDN、零外链） |
 | `web/app.css` | 全站唯一样式表（设计系统变量层在 `:root`） |
 | `web/js/*.js` | 18 个模块脚本，按 10→95 的文件名序加载，共享全局作用域（83-view-ledger.js 是流水明细） |
-| `tests/` | pytest 用例集（**1807 passed / 4 skipped**，2026-10-27 流水明细轮复跑；历史基线 1336）+ 43 条红队 YAML + `tests/eval/` 80 例 A/B 评估集（10-24 共 8 轮真实结果已入库，统计见 `docs/benchmark/ab_paired_stats.md`） |
+| `tests/` | pytest 用例集（**1809 passed / 4 skipped**，2026-10-27 流水明细轮复跑；历史基线 1336）+ 43 条红队 YAML + `tests/eval/` 80 例 A/B 评估集（10-24 共 8 轮真实结果已入库，统计见 `docs/benchmark/ab_paired_stats.md`） |
 | `scripts/` | 种子脚本、前端合规检查器、真实 Chromium 冒烟(`browser_smoke.py`)、六区+主线截图(`ui_screenshots.py`) |
 | `docs/` | 交接规格书 00—10（改造前基线，写代码前必读）+ 11—15 改造设计与验收 + 答辩与演示交付件 |
 | `规划/` | 前期选型与模型实测记录 |

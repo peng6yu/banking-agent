@@ -102,6 +102,30 @@ def test_another_card_has_its_own_ledger(bank: Path) -> None:
     assert credit["account"]["account_id"] != debit["account"]["account_id"]
 
 
+def test_a_flagged_row_says_which_rule_it_hit(bank: Path) -> None:
+    """命中规则的笔要能在明细里就地解释，且与账单页是同一条规则。"""
+    data = get("/api/transactions?limit=100").json()
+    assert data["anomaly_count"] >= 1
+    flagged = [item for item in data["items"] if item["anomaly"]]
+    assert flagged, "种子里爱奇艺涨价应该命中订阅规则"
+    hit = flagged[0]["anomaly"]
+    assert hit["rule_id"].startswith("R-BILL-")
+    assert hit["title"] and hit["detail"] and hit["confidence_label"]
+    assert hit["tx_count"] >= 1 and hit["amount_yuan"]
+    bill = get("/api/business/bill").json()
+    rules = {item["rule"]["id"] for item in bill["anomalies"]["items"]}
+    assert hit["rule_id"] in rules, "明细里的规则必须与账单页同源"
+    assert "不是欺诈认定" in data["anomaly_note"]
+
+
+def test_a_plain_row_carries_no_flag(bank: Path) -> None:
+    """没有命中的笔不能跟着标红，否则整张表天天飘红。"""
+    data = get("/api/transactions?limit=100").json()
+    plain = [item for item in data["items"] if item["anomaly"] is None]
+    assert plain, "正常流水不应该被标红"
+    assert data["anomaly_count"] < data["count"]
+
+
 def test_unknown_account_is_a_400_with_a_human_sentence(bank: Path) -> None:
     res = get("/api/transactions?account_id=a_nope")
     assert res.status_code == 400
