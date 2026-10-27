@@ -1,13 +1,13 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-10-27T07:52:38+08:00",
+  "generated_at": "2026-10-27T08:32:44+08:00",
   "git": {
-    "head": "20ba11629c48fff087487ea1d11337f70af5618b",
-    "head_short": "20ba116",
-    "subject": "docs: 复跑耗时同步到 20.01s",
+    "head": "39b5dc94a15daad0d74ffd935387c94be92b9215",
+    "head_short": "39b5dc9",
+    "subject": "docs(audit): 演示库首屏截图（浏览器打开）",
     "branch": "main",
-    "dirty": false,
-    "changed_paths": 0
+    "dirty": true,
+    "changed_paths": 25
   },
   "code": {
     "tools": {
@@ -91,10 +91,10 @@
       "message_insight_state"
     ],
     "audit_event_types": 68,
-    "api_paths": 50,
+    "api_paths": 51,
     "policy_rules": 13,
     "intent_templates": 9,
-    "test_files": 107,
+    "test_files": 108,
     "knowledge": {
       "version": "2c4fbe8d4be2906c",
       "terms": 40,
@@ -108,10 +108,10 @@
   },
   "tests": {
     "command": ".venv/bin/python -m pytest -q",
-    "passed": 1796,
+    "passed": 1807,
     "failed": 0,
     "skipped": 4,
-    "duration_s": 20.01,
+    "duration_s": 20.37,
     "log": "tmp/pytest_final.log",
     "parsed": true
   },

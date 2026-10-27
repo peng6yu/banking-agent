@@ -183,7 +183,32 @@
 
       <div class="card"><div class="card-head"><h3>异常与依据</h3><span class="spacer"></span><span class="tag warn">发现异常 / 建议核实</span></div><div id="bill-anomalies"></div></div>
 
-      <div class="card"><div class="card-head"><h3>相关流水</h3></div><div id="bill-tx"></div><div class="card-note" id="bill-note"></div></div>
+      <div class="card"><div class="card-head"><h3>异常相关流水</h3><span class="spacer"></span><span class="tag warn">只列命中规则的</span></div><div id="bill-tx"></div><div class="card-note" id="bill-note"></div></div>
+
+      <div class="card"><div class="card-head"><h3>流水明细</h3><span class="spacer"></span><span class="tag">这张卡的全部流水</span></div>
+        <div class="pf-row">
+          <label class="pf-field"><span class="field-label">方向</span>
+            <select id="ledger-direction" class="pf-in">
+              <option value="">全部</option>
+              <option value="out">只看支出</option>
+              <option value="in">只看收入</option>
+            </select>
+          </label>
+          <label class="pf-field"><span class="field-label">分类</span>
+            <input id="ledger-category" class="pf-in" type="text" maxlength="12" placeholder="留空=全部，例如：餐饮" />
+          </label>
+          <label class="pf-field"><span class="field-label">关键词</span>
+            <input id="ledger-q" class="pf-in" type="text" maxlength="40" placeholder="对手方或备注，例如：爱奇艺" />
+          </label>
+        </div>
+        <div class="card-note" id="ledger-meta">正在按这张卡取流水…</div>
+        <div id="ledger-tx"></div>
+        <div class="pf-row">
+          <button class="btn btn-mini" type="button" id="ledger-more">加载更多</button>
+          <button class="btn btn-mini" type="button" id="ledger-reset">清空筛选</button>
+        </div>
+        <div class="card-note" id="ledger-note"></div>
+      </div>
 
       <div class="card"><div class="card-head"><h3>手动记一笔</h3><span class="spacer"></span><span class="tag info">只进本行流水</span></div>
         <form id="bill-manual-form" class="pf-form" autocomplete="off">
@@ -489,6 +514,7 @@
   <script src="/static/js/74-view-messages.js"></script>
   <script src="/static/js/80-view-overview.js"></script>
   <script src="/static/js/82-view-bill.js"></script>
+  <script src="/static/js/83-view-ledger.js"></script>
   <script src="/static/js/84-view-plans.js"></script>
   <script src="/static/js/86-view-birthday.js"></script>
   <script src="/static/js/88-view-monitor.js"></script>

@@ -19,7 +19,7 @@ from app.views.money import _accounts, _ctx, _enrich_anomalies, _trend
 from app.views.labels import ANOMALY_RULES, DEFAULT_TREND_MONTHS
 
 
-def _bill_account(conn: sqlite3.Connection, account_id: str | None) -> tuple[str, dict[str, Any]]:
+def resolve_account(conn: sqlite3.Connection, account_id: str | None) -> tuple[str, dict[str, Any]]:
     """账单看哪张卡：没指定就看主储蓄卡，指定了就必须真实存在。
 
     账单是「某一张卡」的流水视图，不是全账户聚合：储蓄卡看花了多少，信用卡看
@@ -60,7 +60,7 @@ def bill_view(
 ) -> dict[str, Any]:
     """账单分析：统计 + 分类 + 趋势 + 异常（每条带依据、证据与后续动作）。"""
     stamp = now_ms()
-    account_id, account = _bill_account(conn, account_id)
+    account_id, account = resolve_account(conn, account_id)
     today = proactive.local_date()
     period = (period or "month").strip().lower()
     if period not in ("month", "year"):

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Query
 
 from typing import Any, Final
 
@@ -32,6 +32,7 @@ from app import audit, clock, db
 from app.api.http import payload
 import app.proactive as proactive
 import app.use_cases as use_cases
+from app.views.transactions import transactions_view
 
 from app.api.chat_state import (
     _history,
@@ -135,6 +136,30 @@ async def resolve_proactive_alert(
 ) -> dict[str, Any]:
     """处理提醒：ignore=先放着，resolve=已解决；重复处理幂等，写审计。"""
     return payload(use_cases.proactive.alert_resolve(alert_id, action=request.action))
+
+
+@router.get("/api/transactions")
+def list_transactions(
+    account_id: str | None = Query(None, max_length=40),
+    period: str = Query("month", pattern="^(month|year)$"),
+    year: int | None = Query(None, ge=2000, le=2100),
+    month: int | None = Query(None, ge=1, le=12),
+    direction: str | None = Query(None, max_length=4),
+    category: str | None = Query(None, max_length=12),
+    q: str = Query("", max_length=40),
+    limit: int = Query(30, ge=1, le=100),
+    offset: int = Query(0, ge=0, le=10000),
+) -> dict[str, Any]:
+    """流水明细：这张卡在这个时间段里的全量流水（分页）+ 收支合计。
+
+    账单页的「相关流水」只列命中规则的证据，不是对账单；想翻自己的账就用这里。
+    账户互转与理财也在结果里，它们只是不算收支（与账单页同一口径）。
+    """
+    with db.open_conn() as conn:
+        return transactions_view(
+            conn, account_id=account_id, period=period, year=year, month=month,
+            direction=direction, category=category, q=q, limit=limit, offset=offset,
+        )
 
 
 @router.post("/api/transactions/manual")

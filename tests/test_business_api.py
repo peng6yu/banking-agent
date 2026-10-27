@@ -397,6 +397,7 @@ _READ_ENDPOINTS = (
     "/api/business/management",
     "/api/business/plans",
     "/api/business/executions",
+    "/api/transactions",
 )
 
 #: JSON schema 里的参数边界不是金额字段，只是名字像。

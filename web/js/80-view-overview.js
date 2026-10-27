@@ -438,7 +438,9 @@ function bxRenderBill(data) {
   }
   const note = $('bill-note');
   if (note) {
-    note.textContent = '这里只列规则命中的流水，不是完整对账单；导出完整流水不在本轮范围内。' +
+    note.textContent = '这里只列规则命中的流水，不是完整对账单；要看这张卡的全部流水，翻下面「流水明细」。' +
       (data.summary ? ' ' + textOf(data.summary) : '');
   }
+  /* 流水明细跟当前卡与时间段走：账单重渲染（切卡、换月）时一起重新取。 */
+  if (typeof bxLoadLedger === 'function') { bxLoadLedger(true); }
 }

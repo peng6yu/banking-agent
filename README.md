@@ -55,7 +55,7 @@ make run     # 启动日志会打印一条带 #token= 的地址，打开那一�
 |---|---|---|---|
 | 财务总览 | 我现在有多少钱？这个月钱往哪走？有什么等我处理？ | GET /api/business/overview | ✅ 余额、收支、支出类别、待核实异常、待处理授权、储蓄目标、提醒、AI 快捷入口都来自后端 |
 | AI 助手 | 用一句话办事：补参数、选收款人、看计划、确认、看真实执行结果 | /api/chat(SSE) + /api/confirm + /api/session/{id} | ✅ 同名收款人选择器、交易确认卡、九态任务状态、断流后可恢复 |
-| 账单分析 | 钱花在哪？哪几笔值得核实？依据是什么？ | GET /api/business/bill | ✅ 三类异常都带规则编号、命中流水、误报可能、可执行动作 |
+| 账单分析 | 钱花在哪？哪几笔值得核实？依据是什么？ | GET /api/business/bill + GET /api/transactions | ✅ 三类异常都带规则编号、命中流水、误报可能、可执行动作；另有「流水明细」按卡/方向/分类/关键词/时间段翻全量流水，与上方合计同一口径 |
 | 计划与提醒 | 哪些是计划、哪些真的会到点执行？ | GET /api/business/plans + /api/savings/goals + /api/proactive/* + /api/plans | ✅ 区分「计划已保存 / 任务已安排 / 任务正在执行 / 任务已完成」；预约转账、开启监测的目标、到点的计划步骤都由后台节拍推进；**默认只提醒 + 待确认，只有用户显式给出与计划版本/项目/金额绑定的一次性授权、且到点重判仍为合法黄色时才自动执行，风险升级为红色必须重新强验证** |
 | 业务管理 | 卡、订阅、理财、转账各自能做到什么？不能做到什么？ | GET /api/business/management | ✅ 每个能力都写明边界（例如只能停银行侧代扣、不能注销商户会员） |
 | 执行记录与安全 | 这一轮到底发生了什么？谁授权的？ | GET /api/business/executions + /api/audit | ✅ 默认只给业务状态与风险说明，意图/DAG/令牌/审计按需展开 |
@@ -343,7 +343,7 @@ python3.12 -m pytest -q tests/            # 1710 passed, 4 skipped（2026-10-26 
 ### 前端合规自检（实测 91 项全过）
 
 ```bash
-python3.12 scripts/check_frontend.py      # 实测「前端检查通过：92/92 项全部达标」
+python3.12 scripts/check_frontend.py      # 实测「前端检查通过：93/93 项全部达标」
 ```
 
 ### 浏览器级冒烟（真 Chromium，实测 PASS + 3 张截图）
@@ -407,11 +407,11 @@ python3.12 -m app.smoke                    # 实测 4/4 PASS，主脑延迟约 1
 | `app/policy/` | 裁决引擎与 13 条规则 R01–R13（纯函数，无网络无模型；R13 为可选的绝对日上限，默认不启用） |
 | `app/security/` | 入口访问令牌、能力令牌、签名信封、注入扫描、熔断器 |
 | `app/tools/` | 35 个工具：查人、查余额、账单、卡片、订阅、转账、资金冻结 + 7 个主动财务（只读/需确认，无动钱语义） |
-| `app/api/` | 会话/确认/审计等 50 条 API 路径（49 条 `/api/*` + 根路径 `/`），含人工接管队列 `handoffs_api.py`；另有只读业务视图 `business.py`（overview / bill / management / plans / executions 五个 GET，六个区域的唯一数据来源） |
+| `app/api/` | 会话/确认/审计等 51 条 API 路径（50 条 `/api/*` + 根路径 `/`），含人工接管队列 `handoffs_api.py`；另有只读业务视图 `business.py`（overview / bill / management / plans / executions 五个 GET，六个区域的唯一数据来源） |
 | `web/index.html` | 前端壳：只放 DOM（原生 JS，无框架、无 CDN、零外链） |
 | `web/app.css` | 全站唯一样式表（设计系统变量层在 `:root`） |
-| `web/js/*.js` | 17 个模块脚本，按 10→95 的文件名序加载，共享全局作用域 |
-| `tests/` | pytest 用例集（**1710 passed / 4 skipped**，2026-10-26 W5 前端拆分轮复跑；历史基线 1336）+ 43 条红队 YAML + `tests/eval/` 80 例 A/B 评估集（10-24 共 8 轮真实结果已入库，统计见 `docs/benchmark/ab_paired_stats.md`） |
+| `web/js/*.js` | 18 个模块脚本，按 10→95 的文件名序加载，共享全局作用域（83-view-ledger.js 是流水明细） |
+| `tests/` | pytest 用例集（**1807 passed / 4 skipped**，2026-10-27 流水明细轮复跑；历史基线 1336）+ 43 条红队 YAML + `tests/eval/` 80 例 A/B 评估集（10-24 共 8 轮真实结果已入库，统计见 `docs/benchmark/ab_paired_stats.md`） |
 | `scripts/` | 种子脚本、前端合规检查器、真实 Chromium 冒烟(`browser_smoke.py`)、六区+主线截图(`ui_screenshots.py`) |
 | `docs/` | 交接规格书 00—10（改造前基线，写代码前必读）+ 11—15 改造设计与验收 + 答辩与演示交付件 |
 | `规划/` | 前期选型与模型实测记录 |

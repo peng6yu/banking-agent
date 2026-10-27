@@ -145,6 +145,8 @@ LAYERS: dict[str, int] = {
     "app.views.management": 5,
     "app.views.plans": 5,
     "app.views.executions": 5,
+    # 流水明细（2026-10-27 补）：账单页只有「异常相关流水」，这里是全量对账单
+    "app.views.transactions": 5,
     # 反问候选的只读取数（从 app/api/chat_hints 收回）：同层，只查库不塑形
     "app.views.chat_choices": 5,
     # 人工接管单的仓储与状态机（W4 拆出）：只读写 handoffs 表与快照，不认识执行器
@@ -249,7 +251,7 @@ ALLOWED: dict[str, frozenset[str]] = {
     # 计划端点：计划/生日/预约/提醒，写操作只经用例层
     "app.api.plans_api": _deps("app.api.http app.api.schemas app.audit app.birthday app.clock app.db app.planner app.planner.assist app.planner.executor app.planner.intent app.planner.payment_guard app.planner.recover app.planner.ticker app.plans app.proactive app.use_cases"),
     # 钱端点：储蓄/订阅/理财/预警/手动记账/重置，写操作只经用例层
-    "app.api.money_api": _deps("app.api.chat_state app.api.http app.api.schemas app.audit app.clock app.db app.proactive app.use_cases"),
+    "app.api.money_api": _deps("app.api.chat_state app.api.http app.api.schemas app.audit app.clock app.db app.proactive app.use_cases app.views.transactions"),
     # W4 之后 business.py 只剩路由：鉴权 + 开只读连接 + 调 app.views
     "app.api.business": _deps("app.api.routes app.db app.proactive app.views app.views.labels"),
     # 视图包本身只有再导出，不认识业务
@@ -265,6 +267,8 @@ ALLOWED: dict[str, frozenset[str]] = {
     "app.views.management": _deps("app.clock app.memory app.money app.proactive app.subscriptions app.suitability app.timefmt app.tools.base app.views.money app.views.queue"),
     "app.views.plans": _deps("app.clock app.planner app.planner.assist app.plans app.subscriptions app.timefmt app.tools.base app.views.labels app.views.queue"),
     "app.views.executions": _deps("app.audit app.clock app.money app.models app.planner app.planner.events app.timefmt app.views.labels app.views.queue"),
+    # 流水明细：查库 + 与账单页共用「看哪张卡」的解析，不写库、不裁决
+    "app.views.transactions": _deps("app.clock app.money app.timefmt app.tools app.tools.queries app.views.bill app.views.money"),
     # 只回原始行，不拼文案（怎么排成「张三（招商 尾号 4417）」由接口层决定）
     "app.views.chat_choices": _deps(""),
     # 入参模型里 FactorProof 复用公共契约（多因子凭证与 /api/confirm 同构）
