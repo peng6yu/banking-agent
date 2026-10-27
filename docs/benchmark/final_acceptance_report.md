@@ -47,7 +47,7 @@
 
 | # | 命令 | 结果 |
 |---|---|---|
-| 1 | `.venv/bin/python -m pytest -q tests/` | **1857 passed, 4 skipped, 1 warning**（20.24s，2026-10-27 收口轮复跑，`tmp/pytest_final.log`）；4 个 skip 是浏览器冒烟默认关闭 |
+| 1 | `.venv/bin/python -m pytest -q tests/` | **1857 passed, 4 skipped, 1 warning**（19.48s，2026-10-27 收口轮复跑，`tmp/pytest_final.log`）；4 个 skip 是浏览器冒烟默认关闭 |
 | 2 | `RUN_BROWSER_SMOKE=1 .venv/bin/python -m pytest tests/test_browser_smoke.py -q` | **4 passed**（固定模型） |
 | 3 | `.venv/bin/python scripts/check_frontend.py` | **前端检查通过：94/94** |
 | 4 | `.venv/bin/python -m scripts.redteam` | **43 条：PASS 43 / FAIL 0** |
