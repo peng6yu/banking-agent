@@ -1,10 +1,10 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-10-27T10:49:27+08:00",
+  "generated_at": "2026-10-27T11:07:09+08:00",
   "git": {
-    "head": "165e27c26270280152feafaabfac52505920a01a",
-    "head_short": "165e27c",
-    "subject": "feat(messages): 写完一笔账/目标/提醒，助手当场复核一遍洞察",
+    "head": "ab3d39d5725d8b85ad7a7bcb88aead8046e17d15",
+    "head_short": "ab3d39d",
+    "subject": "feat(planner): 账单异常核实有了自己的答复路径，按钮发出的那句话不再被订阅抢走",
     "branch": "main",
     "dirty": false,
     "changed_paths": 0
@@ -108,11 +108,11 @@
   },
   "tests": {
     "command": ".venv/bin/python -m pytest -q",
-    "passed": 1813,
+    "passed": 1823,
     "failed": 0,
     "skipped": 4,
-    "duration_s": 19.78,
-    "log": "tmp/pytest_review_full.log",
+    "duration_s": 20.16,
+    "log": "tmp/pytest_final.log",
     "parsed": true
   },
   "redteam": {
