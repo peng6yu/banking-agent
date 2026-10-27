@@ -1,7 +1,8 @@
 # 银行 AI 智能体 · 常用命令
-# 默认用系统 python3.12（本机已装好全部依赖）；也可以 make venv 建一个隔离环境。
+# 默认用 .venv 里的解释器（没有 .venv 就退回系统 python3）；make venv 可新建隔离环境。
 
-PY ?= python3.12
+#: 解释器：优先用仓库自带的 .venv，其次退回系统 python3（本机没有 python3.12 这个名字）
+PY ?= $(shell if [ -x .venv/bin/python ]; then echo .venv/bin/python; else echo python3; fi)
 #: 建 venv 时用的索引；本机 pip.conf 里有个解析不了的 extra-index-url，必须绕开
 PIP_INDEX ?= https://pypi.tuna.tsinghua.edu.cn/simple
 VENV_PY ?= .venv/bin/python

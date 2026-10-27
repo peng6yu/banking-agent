@@ -36,6 +36,10 @@ def demo_rewind(conn: Any) -> tuple[str | None, int | None]:
     conn.execute("DELETE FROM daily_limits")
     conn.execute("DELETE FROM daily_user_limits")
     conn.execute("DELETE FROM confirmations")
+    # 对话历史也算演示状态：留上一轮调试时刷进去的几十条重复气泡，答辩第一屏
+    # 就是「这句话里有不止一个收款人」连排两屏，像坏了。chat_turns 不是审计表
+    # （审计在 audit_log，触发器禁改禁删），清它不动证据链。
+    conn.execute("DELETE FROM chat_turns")
     account = conn.execute(
         "SELECT id, balance_fen FROM accounts ORDER BY CASE type WHEN 'debit' THEN 0 ELSE 1 END, id LIMIT 1"
     ).fetchone()
