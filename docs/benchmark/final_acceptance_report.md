@@ -6,7 +6,7 @@
 > **报告生成时（2026-10-24 20:10）尚未 push 远程**；后续文档/PPT 与清单收口提交已推送至公开 GitHub（`origin/main`）。发布清单在干净工作区上生成。
 > 本报告里的每个数字都来自本次实际执行，命令见 §3；与 `release_manifest.json` 冲突时以清单为准。
 > 2026-10-24 晚间的文档/PPT 收口提交（`6124667` / `df8c2d0` 等）只改文档与 PPT，未重跑全量测试。
-> **2026-10-25 至 10-26 九轮复跑**（每一轮都是全量 `pytest -q` 实测，旧的靠前的轮次保留作历史）：19:46「快路口语轮」新增 45 条用例（assist 快路 26 / reminder_time 8 / reminder_api 11）后 **1464 passed / 4 skipped，37.50s**（`tmp/pytest_final.log`）；21:51「功能体检轮」再补 4 条（生日付款补验证 2 / 同名消歧 2）后 **1468 / 4，61.53s**（`tmp/pytest_round6.log`）；22:21「订阅定性口径修正」补 8 条后 **1476 / 4，48.76s**（`tmp/pytest_r7.log`）；23:00「逐笔核实与会话记忆轮」补三组（逐笔核实 13 / 会话记忆 13 / 手动补录 18）后 **1521 / 4，55.62s**（`tmp/pytest_r9.log`）；10-26「W1 立规矩 + 资金不变量」**1618 / 4**（`1575a18`）；「W2 统一底座」**1632 / 4**（`c9bb4d5`）；「W3 用例层」补 `tests/test_use_cases.py` 7 条并收口全表后 **1669 / 4，19.73s**（`tmp/pytest_w3d.log`）；「W4 分层收口」跨层违规清零、路由拆 9 块、视图搬 `app/views/` 后 **1709 / 4，19.02s**（`tmp/pytest_w4d.log`）；「W5 前端拆分」把 5954 行单文件拆成壳（477 行）+ 样式（586 行）+ 17 个模块脚本（4943 行）后 **1710 / 4，19.54s**（`tmp/pytest_w5b.log`）。红队 43/43、e2e 13/13、前端 94/94 在 W3 / W4 两轮各自串行复跑（前端 94/94 是 W5 重写门禁后的数），全部 exit 0。本报告 §3 的数字即最新一次复跑结果，2026-10-24 的 1415 与 10-25 早间的 1464 / 1468 / 1476 口径一律降为历史基线。
+> **2026-10-25 至 10-26 九轮复跑**（每一轮都是全量 `pytest -q` 实测，旧的靠前的轮次保留作历史）：19:46「快路口语轮」新增 45 条用例（assist 快路 26 / reminder_time 8 / reminder_api 11）后 **1464 passed / 4 skipped，37.50s**（`tmp/pytest_final.log`）；21:51「功能体检轮」再补 4 条（生日付款补验证 2 / 同名消歧 2）后 **1468 / 4，61.53s**（`tmp/pytest_round6.log`）；22:21「订阅定性口径修正」补 8 条后 **1476 / 4，48.76s**（`tmp/pytest_r7.log`）；23:00「逐笔核实与会话记忆轮」补三组（逐笔核实 13 / 会话记忆 13 / 手动补录 18）后 **1521 / 4，55.62s**（`tmp/pytest_r9.log`）；10-26「W1 立规矩 + 资金不变量」**1618 / 4**（`1575a18`）；「W2 统一底座」**1632 / 4**（`c9bb4d5`）；「W3 用例层」补 `tests/test_use_cases.py` 7 条并收口全表后 **1669 / 4，19.73s**（`tmp/pytest_w3d.log`）；「W4 分层收口」跨层违规清零、路由拆 9 块、视图搬 `app/views/` 后 **1709 / 4，19.02s**（`tmp/pytest_w4d.log`）；「W5 前端拆分」把 5954 行单文件拆成壳（477 行）+ 样式（586 行）+ 17 个模块脚本（4943 行）后 **1710 / 4，19.54s**（`tmp/pytest_w5b.log`）。红队 43/43、e2e 13/13、前端 95/95 在 W3 / W4 两轮各自串行复跑（前端 95/95 是 W5 重写门禁后的数），全部 exit 0。本报告 §3 的数字即最新一次复跑结果，2026-10-24 的 1415 与 10-25 早间的 1464 / 1468 / 1476 口径一律降为历史基线。
 > 历史轮次数字（1336 passed / 33 工具 / 22 表 / 29 事件 / 62 测试文件）保留在 §11，标注为**历史基线**。
 
 ---
@@ -49,7 +49,7 @@
 |---|---|---|
 | 1 | `.venv/bin/python -m pytest -q tests/` | **1857 passed, 4 skipped, 1 warning**（19.48s，2026-10-27 收口轮复跑，`tmp/pytest_final.log`）；4 个 skip 是浏览器冒烟默认关闭 |
 | 2 | `RUN_BROWSER_SMOKE=1 .venv/bin/python -m pytest tests/test_browser_smoke.py -q` | **4 passed**（固定模型） |
-| 3 | `.venv/bin/python scripts/check_frontend.py` | **前端检查通过：94/94** |
+| 3 | `.venv/bin/python scripts/check_frontend.py` | **前端检查通过：95/95** |
 | 4 | `.venv/bin/python -m scripts.redteam` | **43 条：PASS 43 / FAIL 0** |
 | 5 | `.venv/bin/python -m scripts.e2e --offline` | **13 步：PASS 13 / FAIL 0** |
 | 6 | `.venv/bin/python -m scripts.seed --force` | `tables=30`，320 笔流水，自检全 passed；知识库 version=`2c4fbe8d4be2906c` |
@@ -264,7 +264,7 @@ python3.12 -m uvicorn app.main:app --port 8000
 
 ```bash
 make test                                    # 通过/失败/跳过数见 release_manifest.json
-python3.12 scripts/check_frontend.py         # 94/94
+python3.12 scripts/check_frontend.py         # 95/95
 python3.12 -m scripts.redteam                # 43/43
 python3.12 -m scripts.e2e                    # 13/13（会删库重建，跑完 make reseed）
 python3.12 scripts/ui_journeys.py            # 7/7（真浏览器；需已起服务）
