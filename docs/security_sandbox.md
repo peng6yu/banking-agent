@@ -68,7 +68,7 @@ scripts/prove_no_exec_surface.py 因此对 app/ 下每个 .py 做 AST 遍历，�
 - getattr 动态属性 5 处，第二参全是字面量、只取数据字段，不取可调用对象：app/llm.py:155 fallback_targets、app/llm.py:220 retryable、app/planner/executor.py:411 patterns、app/security/injection.py:243 content、app/security/breaker.py:76 hasattr(model_dump)。
 - 已知误报（保留说明，避免后人重蹈）：app/planner/kb_bridge.py:472 的 code.group(0) 里 code 是局部 re.Match 变量，不是内置 compile。前缀匹配会把这类名字误判，精确点分名才是对的。
 
-### 4.2 动态 SQL：16 处，全部是内部常量或占位符生成，无用户文本进语法位
+### 4.2 动态 SQL：17 处，全部是内部常量或占位符生成，无用户文本进语法位
 
 扫描口径：conn.execute / executemany / executescript 的首参是 f-string 或 + 拼接。数量与行号会随代码演进漂移（测试只冻结「必须被报告 + 必须被文档复核」，不冻结数字）。
 
@@ -89,6 +89,7 @@ scripts/prove_no_exec_surface.py 因此对 app/ 下每个 .py 做 AST 遍历，�
 | 13 | app/handoff_store.py:418 | 逗号连 N 个占位符（expect）+ 条件 UPDATE 的 sets 常量片段 | 同上；sets 只追加常量片段，值全部占位符（W4 从 app/handoffs.py 搬来，逻辑未变） |
 | 14 | app/insights.py:_spend_since | 逗号连 N 个占位符（INTERNAL_CATEGORIES） | 只拼占位符个数，分类常量来自 app/money.py，金额与时间走参数绑定（原 app/messages.py 的同一段搬来） |
 | 15 | app/insights.py:_payday_candidate | 逗号连 N 个占位符（INTERNAL_CATEGORIES） | 同上；只有一个 IN 子句，其它条件全是字面量与占位符 |
+| 17 | app/tools/bill.py:373（ack_anomaly 里查「这几笔是不是这张卡的」） | 逗号连 N 个占位符（tx_ids） | 只拼占位符个数；账户与流水号全部参数绑定，一笔都没传时在校验阶段就 400，不会拼出空 IN |
 | 16 | app/views/transactions.py:128（另有 :71 _totals、:181 _page_data、:170 _flag_where） | where 由 _where 拼出：账户/方向/分类三个等值占位符 + 时间区间两个占位符 + LIKE 两个占位符 + 需要时 1 个 IN 子句（INTERNAL_CATEGORIES 逗号占位符）；勾「只看命中规则」时 _flag_where 再追加一个 id IN 子句（占位符个数随命中笔数，一笔都没有时写常量 1 = 0） | 只拼常量条件名与占位符个数；账户/方向/分类/时间/关键词全部走参数绑定，q 的通配符已在 _like 里转义并配 ESCAPE，用户文本永远不碰语法位；_flag_where 的 id 也是参数绑定 |
 
 规则：新增动态 SQL 会让 tests/test_no_exec_surface.py 的 test_dynamic_sql_is_reported_and_documented 变红，直到本文补上对应文件的复核结论。这是有意为之——拼接是「未来可能把用户文本送进语法位」的唯一入口。
@@ -145,6 +146,6 @@ tests/test_no_exec_surface.py 的真实 pytest 输出见给 Lead 的交付消息
 1. 「没有执行面」不等于「没有风险」。模型仍可通过参数与工具顺序造成业务影响（转错人、超额、重复支付）。那一层由 policy 裁决、确认卡片、能力令牌、幂等键兜底，属于业务风控，不是代码执行安全；两条线不能互相替代。
 2. 评委可能期待「演示沙箱」。如果答辩要求现场跑一段模型生成的代码，本仓库没有这个能力，也不应临时加 eval 去迎合。正确回应是解释架构选择并出示本证明；把「没有执行面」当成缺陷去补齐，反而会引入真实风险。
 3. 未来接入代码执行时的必做项（不在当前范围）：独立进程或容器 + 非 root + 只读根文件系统 + 默认断网 + CPU/内存/文件大小 rlimit + 墙钟超时 + 每次执行落审计 + 结果只回传 stdout 文本；绝不能在 app/ 主进程里 exec，也不能把沙箱放在与业务库同权限的账户下。
-4. 动态 SQL 的长期维护：目前 16 处都是内部常量或占位符，但拼接写法本身是风险面。测试已把「新增未复核的拼接」变成红灯，但复核结论仍需人工更新，不能自动推断。
+4. 动态 SQL 的长期维护：目前 17 处都是内部常量或占位符，但拼接写法本身是风险面。测试已把「新增未复核的拼接」变成红灯，但复核结论仍需人工更新，不能自动推断。
 5. 前端转义依赖手写 escapeHtml：单点 innerHTML 已转义，但没有 CSP。若后续加 innerHTML，需同时加 CSP 或改用模板 + textContent。
 6. 离线脚本用 subprocess 起服务、写演示库，只适合开发机；交付环境不应暴露这些脚本的 HTTP 端口（ui_journeys 起的 uvicorn 监听 127.0.0.1）。

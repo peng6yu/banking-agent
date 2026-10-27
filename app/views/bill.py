@@ -73,7 +73,7 @@ def bill_view(
         _ctx(conn, account_id),
         {"period": period, "year": int(year), **({"month": month} if period == "month" else {})},
     ).data
-    anomalies = _enrich_anomalies(conn, list(data.get("anomalies") or []))
+    anomalies = _enrich_anomalies(conn, list(data.get("anomalies") or []), account_id)
     return {
         "ok": True,
         "generated_text": timefmt.maybe_minute_text(stamp),

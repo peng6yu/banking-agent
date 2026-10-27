@@ -10,6 +10,7 @@
 
 from app.use_cases import (
     base,
+    bill,
     confirmations,
     demo,
     handoffs,
@@ -26,6 +27,7 @@ from app.use_cases import (
 
 __all__ = [
     "base",
+    "bill",
     "confirmations",
     "demo",
     "handoffs",

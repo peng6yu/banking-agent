@@ -18,7 +18,7 @@ from app.subscriptions import CONFIDENCE_LABELS
 from app.tools import bill
 from app.tools import queries
 from app.money import fen_to_yuan_str
-from app.tools.base import ToolContext
+from app.tools.base import ToolContext, primary_account
 
 from app.views.labels import ANOMALY_RULES, DEFAULT_TREND_MONTHS, MAX_TREND_MONTHS
 
@@ -139,8 +139,12 @@ def _anomaly_prompt(view: dict[str, Any]) -> str:
     )
 
 
-def _anomaly_actions(view: dict[str, Any]) -> list[dict[str, Any]]:
-    """规则自带动作照发；只有「交给助手」那类，把口吻换成这一笔的具体事实。"""
+def _anomaly_actions(view: dict[str, Any], account_id: str) -> list[dict[str, Any]]:
+    """规则自带动作照发；只有「交给助手」那类，把口吻换成这一笔的具体事实。
+
+    末尾再补一条「我已核实」：规则命中只是线索，用户看过之后必须能把它从
+    待办里拿掉，否则同一条会永远挂在首页。
+    """
     rule = ANOMALY_RULES.get(str(view.get("kind") or ""), {})
     actions: list[dict[str, Any]] = []
     for raw in rule.get("actions", []):
@@ -148,11 +152,25 @@ def _anomaly_actions(view: dict[str, Any]) -> list[dict[str, Any]]:
         if str(action.get("kind")) == "prompt":
             action["prompt"] = _anomaly_prompt(view)
         actions.append(action)
+    actions.append(
+        {
+            "id": "ack_anomaly",
+            "label": "我已核实，没问题",
+            "kind": "ack_anomaly",
+            "note": "核实完就从首页收件箱、账单页和明细标红里消失；流水本身不动。",
+            "rule_kind": str(view.get("kind") or ""),
+            "account_id": account_id,
+            "tx_ids": list((view.get("evidence") or {}).get("tx_ids") or []),
+        }
+    )
     return actions
 
 
 def _anomaly_view(
-    item: dict[str, Any], index: int, tx_map: dict[str, dict[str, Any]]
+    item: dict[str, Any],
+    index: int,
+    tx_map: dict[str, dict[str, Any]],
+    account_id: str = "",
 ) -> dict[str, Any]:
     """把工具层的一条命中，补成前端能直接渲染、且用户能自己复核的卡片。"""
     kind = str(item.get("kind", ""))
@@ -204,18 +222,23 @@ def _anomaly_view(
             view["amount_fen"] = comparison["current_fen"]
             view["amount_yuan"] = comparison["current_yuan"]
             view["amount_note"] = f"上月 {comparison.get('previous_yuan')} 元"
-    view["actions"] = _anomaly_actions(view)
+    view["actions"] = _anomaly_actions(view, account_id)
     return view
 
 
 def _enrich_anomalies(
-    conn: sqlite3.Connection, items: list[dict[str, Any]]
+    conn: sqlite3.Connection,
+    items: list[dict[str, Any]],
+    account_id: str = "",
 ) -> list[dict[str, Any]]:
     ids: list[str] = []
     for item in items:
         ids.extend(str(i) for i in (item.get("tx_ids") or []))
     tx_map = _tx_map(conn, ids)
-    return [_anomaly_view(item, index, tx_map) for index, item in enumerate(items)]
+    return [
+        _anomaly_view(item, index, tx_map, account_id)
+        for index, item in enumerate(items)
+    ]
 
 
 def _trend(
@@ -291,7 +314,8 @@ def _bill_block(
     ctx = _ctx(conn, account_id)
     result = bill.analyze_bill(ctx, {"period": "month", "year": int(year), "month": int(month)})
     data = dict(result.data or {})
-    anomalies = _enrich_anomalies(conn, list(data.get("anomalies") or []))
+    effective = str(account_id or primary_account(conn)["id"])
+    anomalies = _enrich_anomalies(conn, list(data.get("anomalies") or []), effective)
     data["anomalies"] = anomalies
     data["anomaly_count"] = len(anomalies)
     return data

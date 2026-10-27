@@ -393,6 +393,29 @@ function bxSubscriptionVerdictClear(merchant) {
     });
 }
 
+// 「我已核实，没问题」：只让这组流水以后不再打扰，不动钱、不改流水。
+// 成功后连卡带首页收件箱一起重取，让它在同一秒里从两处消失。
+function bxAckAnomaly(act) {
+  const body = {
+    kind: textOf(act.rule_kind),
+    account_id: textOf(act.account_id),
+    tx_ids: bxArr(act.tx_ids).map(textOf),
+  };
+  if (!body.kind || !body.tx_ids.length) {
+    return Promise.reject(new Error('这条异常缺少规则或流水号，页面可能过期了，刷新一次再试。'));
+  }
+  return bxSend('/api/bill/anomalies/ack', 'POST', body).then(function () {
+    bxToast('已核实，这条不会再出现在首页和账单页。', 'ok');
+    bxCacheDrop();
+    return bxRefresh().then(function () { return true; });
+  }).catch(function (err) {
+    /* 失败也要在现场说清楚：这组异常还挂在待办里，别让人以为已经处理完了。 */
+    bxToast('没记下来：' + errorText(err), 'bad');
+    return false;
+  });
+}
+
+
 function bxRunAction(act) {
   if (!bxIsObj(act)) { return; }
   const kind = textOf(act.kind);
@@ -406,6 +429,10 @@ function bxRunAction(act) {
     bxSubscriptionVerdictClear(act.merchant).catch(function (err) {
       appendBubble('sys', '这条结论没能撤回：' + errorText(err), 'error');
     });
+    return;
+  }
+  if (kind === 'ack_anomaly') {
+    bxAckAnomaly(act);
     return;
   }
   if (kind === 'subscription_check') {

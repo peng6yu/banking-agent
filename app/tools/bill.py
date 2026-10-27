@@ -13,8 +13,8 @@ import sqlite3
 import time
 from typing import Any, Final
 
-from app import timefmt
-from app.clock import ValidationError
+from app import audit, timefmt
+from app.clock import ValidationError, now_ms
 from app.models import ToolResult
 from app.money import INTERNAL_CATEGORIES, fen_to_yuan_str
 from app.tools.base import ToolContext, ok_result, primary_account
@@ -61,7 +61,9 @@ def analyze_bill(ctx: ToolContext, params: dict[str, Any], token: str | None = N
     rows = fetch_transactions(ctx.conn, account["id"], start_ms, end_ms, None, None, None)
     baseline = _hike_baseline(ctx.conn, str(account["id"]), period, year, month)
     data = _bill_summary(rows, period, year, month, start_ms, end_ms, str(account["tail"]))
-    data["anomalies"] = _detect_anomalies(rows, baseline)
+    data["anomalies"] = drop_acked(
+        ctx.conn, str(account["id"]), _detect_anomalies(rows, baseline)
+    )
     data["summary"] = _summary_text(data)
     return ok_result(data)
 def _local(ts_ms: int) -> time.struct_time:
@@ -273,7 +275,9 @@ def anomalies_for_month(
     start_ms, end_ms = _period_range("month", int(year), int(month))
     rows = fetch_transactions(conn, account_id, start_ms, end_ms, None, None, None)
     baseline = _hike_baseline(conn, account_id, "month", int(year), int(month))
-    return _detect_anomalies(rows, baseline)
+    # 用户已经核实过的那几组不再出现在账单页/明细标红里；只要组里添了新的一笔，
+    # 就不是「整组都核实过」，它会自己重新出现。
+    return drop_acked(conn, account_id, _detect_anomalies(rows, baseline))
 
 
 def explain_transaction(
@@ -305,6 +309,108 @@ def explain_transaction(
             }
         )
     return hits
+
+
+
+# ---------------------------------------------------------------- 核实过的异常
+
+
+def acked_pairs(conn: sqlite3.Connection, account_id: str) -> dict[str, set[str]]:
+    """这张卡上已经核实过的流水：按规则分组，值是被核实过的流水号。
+
+    为什么按「单笔」存而不是按「异常组」存：同一组以后可能又添了新的一笔，
+    那一笔用户没看过，整组就不该算已核实——按笔存，这个判断自然成立。
+    """
+    rows = conn.execute(
+        "SELECT kind, tx_id FROM anomaly_acks WHERE account_id = ?", (str(account_id),)
+    ).fetchall()
+    out: dict[str, set[str]] = {}
+    for row in rows:
+        out.setdefault(str(row["kind"]), set()).add(str(row["tx_id"]))
+    return out
+
+
+def drop_acked(
+    conn: sqlite3.Connection, account_id: str, items: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """整组证据都核实过的异常不再算待核实；有一笔没核实过就保留整组。"""
+    acked = acked_pairs(conn, account_id)
+    kept: list[dict[str, Any]] = []
+    for item in items:
+        known = acked.get(str(item.get("kind") or ""), set())
+        ids = {str(tx_id) for tx_id in item.get("tx_ids") or []}
+        if ids and ids <= known:
+            continue
+        kept.append(item)
+    return kept
+
+
+def ack_anomaly(
+    conn: sqlite3.Connection,
+    *,
+    account_id: str,
+    kind: str,
+    tx_ids: list[str],
+    note: str = "",
+) -> dict[str, Any]:
+    """把用户「我已核实」的意思落到流水上：只免打扰，不动钱、不改流水。"""
+    kind = str(kind or "").strip()
+    if kind not in ANOMALY_KINDS:
+        raise ValidationError("不认识的异常类型，刷新页面再来一次。", reason="ANOMALY_KIND_UNKNOWN", field="kind")
+    account = conn.execute(
+        "SELECT id, user_id FROM accounts WHERE id = ?", (str(account_id),)
+    ).fetchone()
+    if account is None:
+        raise ValidationError(
+            "找不到这个账户，可能已经被销户或者编号不对。",
+            reason="ACCOUNT_NOT_FOUND",
+            field="account_id",
+        )
+    wanted = [str(tx).strip() for tx in tx_ids or [] if str(tx).strip()]
+    if not wanted:
+        raise ValidationError("没有告诉我要核实哪几笔流水。", reason="ANOMALY_TX_EMPTY", field="tx_ids")
+    marks = ",".join("?" for _ in wanted)
+    known = {
+        str(row["id"])
+        for row in conn.execute(
+            f"SELECT id FROM transactions WHERE account_id = ? AND id IN ({marks})",
+            [str(account["id"]), *wanted],
+        ).fetchall()
+    }
+    missing = [tx for tx in wanted if tx not in known]
+    if missing:
+        raise ValidationError(
+            "这几笔流水不在这张卡上，刷新后重新点一次。",
+            reason="ANOMALY_TX_NOT_FOUND",
+            field="tx_ids",
+        )
+    created = 0
+    stamp = now_ms()
+    for tx_id in wanted:
+        cursor = conn.execute(
+            "INSERT OR IGNORE INTO anomaly_acks (user_id, account_id, kind, tx_id, note, created_ms)"
+            " VALUES (?, ?, ?, ?, ?, ?)",
+            (str(account["user_id"]), str(account["id"]), kind, tx_id, str(note or "")[:200], stamp),
+        )
+        created += 1 if cursor.rowcount else 0
+    audit.append(
+        conn,
+        "bill.anomaly_acked",
+        {
+            "kind": kind,
+            "account_id": str(account["id"]),
+            "tx_ids": wanted,
+            "created": created,
+            "note": str(note or "")[:200],
+        },
+    )
+    return {
+        "kind": kind,
+        "account_id": str(account["id"]),
+        "tx_ids": wanted,
+        "acked_count": len(wanted),
+        "created": created,
+    }
 
 
 def _split_order_anomalies(rows: list[sqlite3.Row]) -> list[dict[str, Any]]:

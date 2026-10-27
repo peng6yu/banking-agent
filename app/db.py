@@ -72,6 +72,7 @@ TABLE_NAMES: Final[tuple[str, ...]] = (
     "agent_memory",
     "messages",
     "message_insight_state",
+    "anomaly_acks",
 )
 
 SCHEMA_SQL: Final[str] = """
@@ -577,6 +578,19 @@ CREATE TABLE IF NOT EXISTS message_insight_state (
   last_ms      INTEGER NOT NULL,
   PRIMARY KEY (user_id, insight_id)
 );
+
+-- 异常核实：用户看过这一组流水、确认没问题之后，按「账户 + 规则 + 单笔流水」记一条。
+-- 不按异常组存：同一组以后又添了新的一笔，那笔没被核实过，这条异常就该重新出现。
+CREATE TABLE IF NOT EXISTS anomaly_acks (
+  user_id    TEXT NOT NULL,
+  account_id TEXT NOT NULL,
+  kind       TEXT NOT NULL,
+  tx_id      TEXT NOT NULL,
+  note       TEXT NOT NULL DEFAULT '',
+  created_ms INTEGER NOT NULL,
+  PRIMARY KEY (user_id, account_id, kind, tx_id)
+);
+CREATE INDEX IF NOT EXISTS idx_anomaly_acks_lookup ON anomaly_acks(account_id, kind);
 
 -- 审计只增不改：UPDATE/DELETE 一律由 SQLite 层拦掉（docs/03 3.2 第 7 张表）
 CREATE TRIGGER IF NOT EXISTS audit_no_update BEFORE UPDATE ON audit_log

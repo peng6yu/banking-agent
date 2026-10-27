@@ -84,6 +84,18 @@ function bxInboxAnomaly(list, item) {
     bxSetView('bill');
     bxFlashCard('bill-anomalies');
   }));
+  /* 核实完就该能在这里收尾，不用为了点一下再跳去账单页。 */
+  const ack = bxArr(item.actions).filter(function (a) {
+    return textOf(a.kind) === 'ack_anomaly';
+  })[0];
+  if (ack) {
+    bar.appendChild(bxInboxBtn('我已核实，没问题', '', function (btn) {
+      btn.disabled = true;
+      bxAckAnomaly(ack).then(function (ok) {
+        if (!ok) { btn.disabled = false; }
+      });
+    }));
+  }
   list.appendChild(bar);
 }
 

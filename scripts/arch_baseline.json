@@ -91,7 +91,7 @@
     "app/chat_history.py": 151,
     "app/clock.py": 188,
     "app/config.py": 270,
-    "app/db.py": 870,
+    "app/db.py": 884,
     "app/funds.py": 791,
     "app/handoff_store.py": 600,
     "app/handoffs.py": 566,

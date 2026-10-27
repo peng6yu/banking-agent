@@ -282,6 +282,22 @@ class ManualTransactionRequest(BaseModel):
     client_nonce: str | None = Field(default=None, max_length=64)
 
 
+class AnomalyAckRequest(BaseModel):
+    """POST /api/bill/anomalies/ack 的入参：用户看过这一组流水，确认没问题。
+
+    只做「以后别再提醒我这一组」这一件事：不写钱、不改流水、不认欺诈。
+    tx_ids 是卡片上看得到的证据流水号；服务端会校验它们确实属于这张卡。
+    """
+
+    model_config = ConfigDict(extra="forbid", title="核实一组账单异常")
+
+    kind: str = Field(min_length=1, max_length=40)
+    #: 哪张卡上的异常；不传就是主储蓄卡（演示环境的主账户）。
+    account_id: str | None = Field(default=None, max_length=40)
+    tx_ids: list[str] = Field(min_length=1, max_length=20)
+    note: str = Field(default="", max_length=200)
+
+
 class SubscriptionVerdictClearRequest(BaseModel):
     """POST /api/subscriptions/verdict/clear 的入参：撤掉之前的定性。
 
@@ -310,6 +326,7 @@ class SubscriptionVerdictRequest(BaseModel):
 
 __all__ = [
     "AlertResolveRequest",
+    "AnomalyAckRequest",
     "BirthdayItemIn",
     "BirthdayPayRequest",
     "BirthdayPlanCreate",
