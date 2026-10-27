@@ -136,7 +136,7 @@ def _goto(label: str, view: str) -> dict[str, str]:
 def _night_candidate(conn: sqlite3.Connection, user_id: str, now: int) -> dict[str, Any] | None:
     """凌晨大额：0-5 点、单笔 500 元以上。只提醒核实，不判定盗刷。"""
     rows = conn.execute(
-        "SELECT t.id, t.counterparty, t.amount_fen, t.ts_ms FROM transactions t"
+        "SELECT t.id, t.counterparty, t.amount_fen, t.ts_ms, a.tail FROM transactions t"
         " JOIN accounts a ON a.id = t.account_id"
         " WHERE a.user_id = ? AND t.direction = 'out' AND t.ts_ms >= ? AND t.ts_ms < ?"
         " AND t.amount_fen >= ?"
@@ -151,6 +151,8 @@ def _night_candidate(conn: sqlite3.Connection, user_id: str, now: int) -> dict[s
         "count": str(len(rows)),
         "total_yuan": fen_to_yuan_str(total),
         "largest_yuan": fen_to_yuan_str(largest),
+        # 卡尾号：按钮要能指名「哪张卡」，不能让助手在两张卡里猜。
+        "tail": str(rows[0]["tail"] or ""),
         # 门槛也是「依据」的一部分：正文里出现的每个数字都要能在 facts 里查到，
         # 否则语言层白名单形同虚设（用户没法复核 500 是从哪来的）。
         "min_yuan": fen_to_yuan_str(NIGHT_MIN_FEN),
@@ -168,7 +170,10 @@ def _night_candidate(conn: sqlite3.Connection, user_id: str, now: int) -> dict[s
         "facts": facts,
         "actions": [
             _goto("去账单里核对", "bill"),
-            _ask("让助手帮我冻结卡", "帮我先把这张卡临时冻结，我要核对几笔凌晨的消费"),
+            _ask(
+                "让助手帮我冻结卡",
+                f"帮我把尾号 {facts['tail']} 的卡临时冻结，我要核对 {facts['count']} 笔凌晨的消费",
+            ),
         ],
     }
 
@@ -207,7 +212,10 @@ def _payee_candidate(conn: sqlite3.Connection, user_id: str, now: int) -> dict[s
         ),
         "facts": facts,
         "actions": [
-            _ask("让助手帮我区分开", f"帮我把两个叫{name}的收款人加上备注，别转错"),
+            _ask(
+                "让助手帮我区分开",
+                f"帮我把两个叫{name}的收款人加上备注：尾号 {facts['tail_a']} 和 {facts['tail_b']}，别转错",
+            ),
             _goto("去 AI 助手说清楚", "assistant"),
         ],
     }
@@ -263,7 +271,10 @@ def _cash_gap_candidate(conn: sqlite3.Connection, user_id: str, now: int) -> dic
         "facts": facts,
         "actions": [
             _goto("去计划里看一眼", "plans"),
-            _ask("让助手帮我重排预约", "帮我把这个月的预约转账重新排一下，别让余额不够"),
+            _ask(
+                "让助手帮我重排预约",
+                f"帮我把接下来的预约转账重排一下，别让余额不够（未来 {facts['days']} 天还差 {facts['short_yuan']} 元）",
+            ),
         ],
     }
 
@@ -492,7 +503,10 @@ def _goal_candidate(conn: sqlite3.Connection, user_id: str, now: int) -> dict[st
         "facts": facts,
         "actions": [
             _goto("去计划里看一眼", "plans"),
-            _ask("让助手帮我补上", f"帮我把「{facts['name']}」这个月的储蓄补上"),
+            _ask(
+                "让助手帮我补上",
+                f"帮我把「{facts['name']}」这个月的储蓄补上（还差 {facts['gap_yuan']} 元）",
+            ),
         ],
     }
 
@@ -529,7 +543,10 @@ def _payday_candidate(conn: sqlite3.Connection, user_id: str, now: int) -> dict[
         "facts": facts,
         "actions": [
             _goto("去计划里设目标", "plans"),
-            _ask("让助手帮我存一笔", "帮我把这个月工资的一成存进储蓄目标"),
+            _ask(
+                "让助手帮我存一笔",
+                f"帮我把这个月 {facts['income_yuan']} 元收入的一成（{facts['suggest_yuan']} 元）存进储蓄目标",
+            ),
         ],
     }
 

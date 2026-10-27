@@ -130,6 +130,10 @@ def test_verdict_moves_from_pending_to_settled_in_management_view(subs) -> None:
     assert pending[target]["actions"][1]["label"] == "确实是我订的"
     assert pending[target]["actions"][2]["kind"] == "subscription_check"
     assert pending[target]["actions"][2]["label"] == "逐笔核对这几笔"
+    # 这句话会被直接填进输入框：必须指名哪一家、几笔、多少钱，不能只说「这几笔」。
+    prompt = pending[target]["actions"][2]["prompt"]
+    assert target in prompt and str(pending[target]["occurrences"]) in prompt
+    assert str(pending[target]["last_amount_yuan"]) in prompt
 
     subscriptions.record_verdict(
         subs, user_id=uid, merchant=target, verdict=subscriptions.VERDICT_CONFIRMED

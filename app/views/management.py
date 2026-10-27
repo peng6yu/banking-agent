@@ -149,7 +149,10 @@ def _inferred_view(
                 "kind": "subscription_check",
                 "merchant": merchant,
                 "label": "逐笔核对这几笔",
-                "prompt": f"帮我核实一下「{merchant}」这几笔是不是订阅",
+                "prompt": (
+                    f"帮我核实一下「{merchant}」这几笔是不是订阅"
+                    f"（共 {item.get('occurrences')} 笔，最近一次 {item.get('last_amount_yuan')} 元）"
+                ),
             },
         ]
     inferred["verdicts"] = list(verdict_map.values())

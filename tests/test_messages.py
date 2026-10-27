@@ -326,3 +326,27 @@ def test_every_number_in_a_message_comes_from_its_facts(bank) -> None:
         for text in (item["title"], item["body"]):
             for token in NUMBER.findall(text):
                 assert token.replace(",", "") in allowed, f"{item['insight_id']} 的文案里出现了 facts 之外的数字 {token}"
+
+
+#: 这四类问的是「我该怎么办」，本来就不指向某一笔，允许文案里没有实例。
+GENERIC_ADVICE = {"I2_spending_pace", "I8_budget_pace", "I9_idle_balance"}
+
+
+def test_every_action_prompt_names_the_thing_it_is_about(bank) -> None:
+    """按钮发出的那句话必须能指名道姓。
+
+    账单页那条「帮我核实一下凌晨那笔境外消费」就是反例：卡片上明明有商户、金额、
+    流水号，句子一个都没带，服务端只能猜。这一条盯住同类问题：凡是替某一笔/某个目标
+    发言的按钮，话里必须出现那一笔的事实（商户、尾号、金额、笔数、目标名之一）。
+    """
+    for item in messages.detect_insights(bank, USER_ID, NOW):
+        if item["insight_id"] in GENERIC_ADVICE:
+            continue
+        facts = [str(value) for value in item["facts"].values() if str(value)]
+        asks = [a for a in item["actions"] if a.get("kind") == "ask"]
+        for action in asks:
+            prompt = str(action.get("prompt") or "")
+            assert prompt, f"{item['insight_id']} 的按钮没带 prompt"
+            assert any(fact in prompt for fact in facts), (
+                f"{item['insight_id']} 的按钮话里没有这一笔的事实：{prompt}"
+            )
