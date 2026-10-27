@@ -6,7 +6,7 @@
 
 ![决策剧场：左栏说话，右栏是它凭什么](docs/交付/截图/信息架构/main_02_confirm_card.png)
 
-> **评委 3 分钟路径**：看上面这张图 → `make setup && make run` → 输入「给张三转 500 元」，看它停下来让你选尾号 → 打开 `/api/audit/verify` 看哈希链。完整材料：[答辩 PPT（12 页 / 8:55）](docs/交付/答辩PPT.pptx) · [技术文档](docs/技术文档.md) · [安全自评报告](docs/安全自评报告.md) · [提交物对照表](docs/提交物对照表.md) · [演示脚本](docs/交付/比赛演示方案.md)。
+> **评委 3 分钟路径**：看上面这张图 → `make setup && make run` → 输入「给张三转 500 元」，看它停下来让你选尾号 → 打开 `/api/audit/verify` 看哈希链。完整材料：[答辩 PPT（14 页，主线 9:20 + 附录）](docs/交付/答辩PPT.pptx) · [答辩脚本](docs/交付/答辩脚本.md) · [技术文档](docs/技术文档.md) · [安全自评报告](docs/安全自评报告.md) · [红队对照表](docs/交付/红队与赛题对照表.md) · [提交物对照表](docs/提交物对照表.md)。
 
 ## 30 秒看懂
 
@@ -15,7 +15,7 @@
 ```bash
 git clone https://github.com/peng6yu/banking-agent.git && cd banking-agent
 make setup   # 没装 make 就 bash scripts/setup.sh
-make run     # 启动日志会打印一条带 #token= 的地址，打开那一条
+make run     # 启动日志会打印一条带 #token= 的地址，打开那一条（端口被占就 make run PORT=8010）
 ```
 
 `make setup` 依次做：找解释器（3.12 优先）→ 建 `.venv` → 装依赖（自动绕开本机 pip.conf 里解析不了的索引）→ 生成 `.env`（权限 600，不入库）→ 定模型来源 → 建库 + 种子 → 真模型时再跑一遍协议自检。模型来源它自己判断：环境或 `.env` 里已有 key 就用云端，本机 Ollama 在跑就用 Ollama，都没有才退回离线协作桩（`MOCK_MODE=script`，零网络也能演查余额与转账）。可以点名：`make setup ARGS="--ollama"` / `ARGS="--mock"` / `ARGS="--dry-run"`（只打印计划不动文件）。**仓库里没有任何人的 API key**，换厂商只改 `.env` 三行，见下面「模型配置」。

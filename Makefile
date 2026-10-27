@@ -51,8 +51,8 @@ venv:
 	@echo ✓ 已装好；用 $(VENV_PY) -m pytest -q tests/ 验证
 
 run:
-	@test -f data/api_token && printf '浏览器地址（带访问令牌）：http://127.0.0.1:8000/#token=%s\n' "$$(cat data/api_token)" || true
-	$(PY) -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
+	@test -f data/api_token && printf '浏览器地址（带访问令牌）：http://%s:%s/#token=%s\n' "$${HOST:-127.0.0.1}" "$${PORT:-8000}"  "$$(cat data/api_token)" || true
+	$(PY) -m uvicorn app.main:app --reload --host $(or $(HOST),127.0.0.1) --port $(or $(PORT),8000)
 
 seed:
 	$(PY) -m scripts.seed
