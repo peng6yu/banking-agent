@@ -1,13 +1,13 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-10-27T09:27:41+08:00",
+  "generated_at": "2026-10-27T09:28:11+08:00",
   "git": {
-    "head": "22e2fbb2304d6f4750ed5fd603bedb7e8b0143c8",
-    "head_short": "22e2fbb",
-    "subject": "refactor(web): 首页只留「需要你过目」，动作各回各的栏目",
+    "head": "7a5b30a0d2ea4125dbb21c33d23fc2dd1891f75f",
+    "head_short": "7a5b30a",
+    "subject": "docs: 数据字典按新参数重生成，全仓测试数同步到 1811",
     "branch": "main",
-    "dirty": true,
-    "changed_paths": 1
+    "dirty": false,
+    "changed_paths": 0
   },
   "code": {
     "tools": {
