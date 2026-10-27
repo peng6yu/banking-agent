@@ -1,13 +1,13 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-10-27T11:14:25+08:00",
+  "generated_at": "2026-10-27T11:14:48+08:00",
   "git": {
-    "head": "310cff3e0b10e5a195c6813d140ebdb4a359ee60",
-    "head_short": "310cff3",
-    "subject": "fix(bill): 按钮发出去的那句话，带上这一笔的时间、商户、金额、流水号",
+    "head": "4b345f0e1a5c6402a694992a71e74289de7516fe",
+    "head_short": "4b345f0",
+    "subject": "docs(benchmark): 清单按 310cff3 重生成（1826/4、20.98s、51 路径）",
     "branch": "main",
-    "dirty": true,
-    "changed_paths": 1
+    "dirty": false,
+    "changed_paths": 0
   },
   "code": {
     "tools": {
