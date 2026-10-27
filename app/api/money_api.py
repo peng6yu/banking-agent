@@ -9,6 +9,7 @@ from typing import Any, Final
 from app.api.schemas import (
     AlertResolveRequest,
     AnomalyAckRequest,
+    AnomalyUnackRequest,
     BirthdayPayRequest,
     BirthdayPlanCreate,
     CancelRequest,
@@ -167,10 +168,10 @@ def list_transactions(
 
 @router.post("/api/bill/anomalies/ack")
 async def ack_bill_anomaly(request: AnomalyAckRequest) -> dict[str, Any]:
-    """「我已核实，没问题」：只让这组流水以后不再打扰，不动钱、不改流水。
+    """「这笔是我刷的 / 不是我刷的」：只让这组流水以后不再打扰，不动钱、不改流水。
 
     为什么不做成自动消失：规则命中只是线索，要不要核实、核实结论如何由用户定；
-    服务端只记住「这一组他看过了」，下次同组有新的一笔，异常会自己回来。
+    服务端只记住「这一组他看过了、结论是什么」，下次同组有新的一笔，异常会自己回来。
     """
     return payload(
         use_cases.bill.anomaly_ack(
@@ -178,6 +179,19 @@ async def ack_bill_anomaly(request: AnomalyAckRequest) -> dict[str, Any]:
             kind=request.kind,
             tx_ids=request.tx_ids,
             note=request.note,
+            verdict=request.verdict,
+        )
+    )
+
+
+@router.post("/api/bill/anomalies/unack")
+async def unack_bill_anomaly(request: AnomalyUnackRequest) -> dict[str, Any]:
+    """撤销核实：这一组重新挂回待核实（首页、账单页、明细标红三处一起回来）。"""
+    return payload(
+        use_cases.bill.anomaly_unack(
+            account_id=request.account_id or "",
+            kind=request.kind,
+            tx_ids=request.tx_ids,
         )
     )
 

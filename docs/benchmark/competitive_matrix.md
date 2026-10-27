@@ -267,7 +267,7 @@
 - `app/planner/intent.py:261-345` — 意图解析、拒答前置、兜底
 - `app/llm.py` — 多厂商降级适配器
 - `app/planner/dag.py:39` — 9 个意图模板
-- `app/audit.py:24` — 69 类审计事件
+- `app/audit.py:24` — 70 类审计事件
 - `app/proactive.py` — 主动财务（手动触发）
 - `docs/benchmark/revolut_air_research.md` — 既有的 Revolut 证据台账（A1–A17 / B1–B15）
 

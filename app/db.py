@@ -587,6 +587,8 @@ CREATE TABLE IF NOT EXISTS anomaly_acks (
   kind       TEXT NOT NULL,
   tx_id      TEXT NOT NULL,
   note       TEXT NOT NULL DEFAULT '',
+  -- 用户看过的结论：自己刷的 / 不是我刷的。后者是冻结卡、找银行争议的起点。
+  verdict    TEXT NOT NULL DEFAULT 'mine' CHECK (verdict IN ('mine', 'not_mine')),
   created_ms INTEGER NOT NULL,
   PRIMARY KEY (user_id, account_id, kind, tx_id)
 );
@@ -709,6 +711,8 @@ _ADDED_COLUMNS: Final[tuple[tuple[str, str, str], ...]] = (
     # 提醒的归属：储蓄目标提醒由 goal_id 推出用户；跨场景计划的提醒没有 goal_id，
     # 必须自己带 user_id，否则按用户查提醒时会整条看不见。
     ("proactive_alerts", "user_id", "TEXT NOT NULL DEFAULT ''"),
+    # 异常核实的结论（老库补列；新库在 SCHEMA_SQL 里就有，并带 CHECK）
+    ("anomaly_acks", "verdict", "TEXT NOT NULL DEFAULT 'mine'"),
 )
 
 

@@ -12,7 +12,7 @@ from app import proactive
 from app import timefmt
 from app.clock import ValidationError, now_ms
 from app.subscriptions import CONFIDENCE_LABELS
-from app.tools import bill, queries
+from app.tools import bill, bill_acks, queries
 from app.tools.base import primary_account
 from app.tools.bill import ANOMALY_KINDS
 
@@ -49,6 +49,26 @@ def _scope_note(account: dict[str, Any]) -> str:
             "刷信用卡不动储蓄卡余额，还款才动。"
         )
     return "这张储蓄卡的口径：支出/收入都是账面真实进出，不含账户互转与理财。"
+
+
+def _acked_block(conn: sqlite3.Connection, account_id: str) -> dict[str, Any]:
+    """「已核实」清单：核实过的流水不消失，只是不再算待核实；这里给一个撤销入口。
+
+    只按账户列（不按月）：核实是一个收尾动作，不是账期内的统计，跨月也要看得到。
+    """
+    items: list[dict[str, Any]] = []
+    for row in bill_acks.acked_rows(conn, account_id):
+        rule = ANOMALY_RULES.get(str(row.get("kind") or ""), {})
+        item = dict(row)
+        item["rule_id"] = rule.get("rule_id", "")
+        item["rule_text"] = rule.get("rule_text", "")
+        item["confidence_label"] = CONFIDENCE_LABELS.get(rule.get("confidence", "low"), "低")
+        items.append(item)
+    return {
+        "items": items,
+        "count": len(items),
+        "note": "核实只免打扰：流水与余额都不动。点「恢复成待核实」就重新挂回首页与账单页。",
+    }
 
 
 def bill_view(
@@ -123,6 +143,8 @@ def bill_view(
                 for kind in ANOMALY_KINDS
             ],
         },
+        # 核实过的流水：不消失，只是不算待核实；这里给撤销入口。
+        "acked": _acked_block(conn, account_id),
         "method": {"currency": "CNY"},
     }
 

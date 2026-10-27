@@ -106,8 +106,10 @@ EVENT_TYPES: Final[frozenset[str]] = frozenset(
         "subscription.verdict_cleared",
     # 用户自己补录的一笔流水（接不了银行接口时的唯一入口）；只写本行账。
     "transaction.manual",
-        # 用户核实过一组异常：按「账户 + 规则 + 单笔流水」落，不写钱、只免打扰
+        # 用户核实过一组异常：按「账户 + 规则 + 单笔流水」落，不写钱、只免打扰。
+        # 结论分两档（自己刷的 / 不是我刷的），撤销另记一类：核实记录被删也是一件事实。
         "bill.anomaly_acked",
+        "bill.anomaly_unacked",
         # 跨场景计划：计划与步骤的生命周期
         "plan.created",
         "plan.updated",

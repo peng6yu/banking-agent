@@ -152,15 +152,31 @@ def _anomaly_actions(view: dict[str, Any], account_id: str) -> list[dict[str, An
         if str(action.get("kind")) == "prompt":
             action["prompt"] = _anomaly_prompt(view)
         actions.append(action)
+    # 两档结论：自己刷的 / 不是我刷的。「不是我刷的」不是一句口头结论——它是冻结卡、
+    # 找银行争议的起点，所以必须单独落库，不能被「我已核实」一档吞掉。
+    base = {
+        "rule_kind": str(view.get("kind") or ""),
+        "account_id": account_id,
+        "tx_ids": list((view.get("evidence") or {}).get("tx_ids") or []),
+    }
     actions.append(
         {
-            "id": "ack_anomaly",
-            "label": "我已核实，没问题",
+            **base,
+            "id": "ack_mine",
+            "label": "是我自己刷的",
             "kind": "ack_anomaly",
-            "note": "核实完就从首页收件箱、账单页和明细标红里消失；流水本身不动。",
-            "rule_kind": str(view.get("kind") or ""),
-            "account_id": account_id,
-            "tx_ids": list((view.get("evidence") or {}).get("tx_ids") or []),
+            "verdict": "mine",
+            "note": "点完就从首页收件箱、账单页和明细标红里消失；流水本身不动。",
+        }
+    )
+    actions.append(
+        {
+            **base,
+            "id": "ack_not_mine",
+            "label": "不是我刷的",
+            "kind": "ack_anomaly",
+            "verdict": "not_mine",
+            "note": "记下结论后先临时冻结这张卡、保留流水去找银行；钱和流水都不会动。",
         }
     )
     return actions

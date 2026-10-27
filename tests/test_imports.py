@@ -80,6 +80,8 @@ LAYERS: dict[str, int] = {
     "app.policy.rules": 2,
     "app.tools.base": 3,
     "app.tools.bill": 3,
+    # 异常核实的记录单独一层文件：检测是读，核实是用户看后的决定，生命周期不同
+    "app.tools.bill_acks": 3,
     "app.tools.cards": 3,
     "app.tools.invest": 3,
     "app.tools.products": 3,
@@ -267,7 +269,7 @@ ALLOWED: dict[str, frozenset[str]] = {
     # 待办与队列积木：待确认卡、接管单、预约、提醒、监测。只读既有事实，不产生新裁决
     "app.views.queue": _deps("app.clock app.handoffs app.money app.planner app.planner.ticker app.proactive app.timefmt app.tools app.tools.scheduled app.views.labels"),
     "app.views.overview": _deps("app.clock app.planner app.planner.assist app.proactive app.timefmt app.tools.base app.views.labels app.views.money app.views.queue"),
-    "app.views.bill": _deps("app.clock app.proactive app.subscriptions app.timefmt app.tools app.tools.base app.tools.bill app.tools.queries app.views.labels app.views.money"),
+    "app.views.bill": _deps("app.clock app.proactive app.subscriptions app.timefmt app.tools app.tools.base app.tools.bill app.tools.bill_acks app.tools.queries app.views.labels app.views.money"),
     "app.views.management": _deps("app.clock app.memory app.money app.proactive app.subscriptions app.suitability app.timefmt app.tools.base app.views.money app.views.queue"),
     "app.views.plans": _deps("app.clock app.planner app.planner.assist app.plans app.subscriptions app.timefmt app.tools.base app.views.labels app.views.queue"),
     "app.views.executions": _deps("app.audit app.clock app.money app.models app.planner app.planner.events app.timefmt app.views.labels app.views.queue"),
@@ -369,7 +371,8 @@ ALLOWED: dict[str, frozenset[str]] = {
     "app.smoke": _deps(""),
     "app.tools": _deps("app.tools.base app.tools.registry"),
     "app.tools.base": _deps("app.clock app.funds app.models app.policy.rules app.security app.security.token"),
-    "app.tools.bill": _deps("app.audit app.clock app.models app.money app.timefmt app.tools.base app.tools.queries"),
+    "app.tools.bill": _deps("app.clock app.models app.money app.timefmt app.tools.base app.tools.bill_acks app.tools.queries"),
+    "app.tools.bill_acks": _deps("app.audit app.clock app.timefmt app.tools.queries"),
     "app.tools.cards": _deps("app.audit app.db app.ids app.models app.money app.tools.base"),
     "app.tools.invest": _deps("app.audit app.clock app.db app.funds app.log app.models app.money app.suitability app.tools.base app.tools.products"),
     "app.tools.products": _deps("app.clock app.models app.money app.tools.base"),
@@ -385,7 +388,7 @@ ALLOWED: dict[str, frozenset[str]] = {
     # 所以依赖永远单向（api -> use_cases -> 领域），领域异常统一收成 Outcome。
     "app.use_cases": _deps("app.use_cases app.use_cases.base app.use_cases.bill app.use_cases.confirmations app.use_cases.demo app.use_cases.handoffs app.use_cases.investments app.use_cases.memory app.use_cases.plans app.use_cases.proactive app.use_cases.reminders app.use_cases.savings app.use_cases.scheduled app.use_cases.subscriptions app.use_cases.transactions"),
     "app.use_cases.base": _deps("app.clock app.db"),
-    "app.use_cases.bill": _deps("app.tools app.tools.base app.tools.bill app.use_cases.base"),
+    "app.use_cases.bill": _deps("app.clock app.tools app.tools.base app.tools.bill app.tools.bill_acks app.use_cases.base"),
     # 多因子挑战的签发（写：库里签发 challenge 行）；放行依据始终在服务端
     "app.use_cases.confirmations": _deps("app.clock app.security.factors app.use_cases.base"),
     "app.use_cases.demo": _deps("app.clock app.db app.planner app.planner.executor app.use_cases.base"),

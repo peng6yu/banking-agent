@@ -296,6 +296,21 @@ class AnomalyAckRequest(BaseModel):
     account_id: str | None = Field(default=None, max_length=40)
     tx_ids: list[str] = Field(min_length=1, max_length=20)
     note: str = Field(default="", max_length=200)
+    #: mine=我自己刷的，not_mine=不是我刷的。两档都要落库：后者是冻结卡与争议的起点。
+    verdict: str = Field(default="mine", min_length=4, max_length=8)
+
+
+class AnomalyUnackRequest(BaseModel):
+    """POST /api/bill/anomalies/unack 的入参：撤销核实，让这一组重新待核实。
+
+    只删「已核实」这一条记录；流水、余额、审计都不会被改写（审计另记一条撤销）。
+    """
+
+    model_config = ConfigDict(extra="forbid", title="撤销账单异常核实")
+
+    kind: str = Field(min_length=1, max_length=40)
+    account_id: str | None = Field(default=None, max_length=40)
+    tx_ids: list[str] = Field(min_length=1, max_length=20)
 
 
 class SubscriptionVerdictClearRequest(BaseModel):
@@ -327,6 +342,7 @@ class SubscriptionVerdictRequest(BaseModel):
 __all__ = [
     "AlertResolveRequest",
     "AnomalyAckRequest",
+    "AnomalyUnackRequest",
     "BirthdayItemIn",
     "BirthdayPayRequest",
     "BirthdayPlanCreate",

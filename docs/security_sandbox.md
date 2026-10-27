@@ -89,7 +89,7 @@ scripts/prove_no_exec_surface.py 因此对 app/ 下每个 .py 做 AST 遍历，�
 | 13 | app/handoff_store.py:418 | 逗号连 N 个占位符（expect）+ 条件 UPDATE 的 sets 常量片段 | 同上；sets 只追加常量片段，值全部占位符（W4 从 app/handoffs.py 搬来，逻辑未变） |
 | 14 | app/insights.py:_spend_since | 逗号连 N 个占位符（INTERNAL_CATEGORIES） | 只拼占位符个数，分类常量来自 app/money.py，金额与时间走参数绑定（原 app/messages.py 的同一段搬来） |
 | 15 | app/insights.py:_payday_candidate | 逗号连 N 个占位符（INTERNAL_CATEGORIES） | 同上；只有一个 IN 子句，其它条件全是字面量与占位符 |
-| 17 | app/tools/bill.py:373（ack_anomaly 里查「这几笔是不是这张卡的」） | 逗号连 N 个占位符（tx_ids） | 只拼占位符个数；账户与流水号全部参数绑定，一笔都没传时在校验阶段就 400，不会拼出空 IN |
+| 17 | app/tools/bill_acks.py:75（查「这几笔是不是这张卡的」）、:116（查哪些已经核实过）、:172（撤销核实的 DELETE） | 逗号连 N 个占位符（tx_ids） | 只拼占位符个数；账户、规则名与流水号全部参数绑定，一笔都没传时在校验阶段就 400，不会拼出空 IN（核实与撤销两条路径都是先校验再拼） |
 | 16 | app/views/transactions.py:128（另有 :71 _totals、:181 _page_data、:170 _flag_where） | where 由 _where 拼出：账户/方向/分类三个等值占位符 + 时间区间两个占位符 + LIKE 两个占位符 + 需要时 1 个 IN 子句（INTERNAL_CATEGORIES 逗号占位符）；勾「只看命中规则」时 _flag_where 再追加一个 id IN 子句（占位符个数随命中笔数，一笔都没有时写常量 1 = 0） | 只拼常量条件名与占位符个数；账户/方向/分类/时间/关键词全部走参数绑定，q 的通配符已在 _like 里转义并配 ESCAPE，用户文本永远不碰语法位；_flag_where 的 id 也是参数绑定 |
 
 规则：新增动态 SQL 会让 tests/test_no_exec_surface.py 的 test_dynamic_sql_is_reported_and_documented 变红，直到本文补上对应文件的复核结论。这是有意为之——拼接是「未来可能把用户文本送进语法位」的唯一入口。

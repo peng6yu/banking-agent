@@ -191,3 +191,134 @@ def test_a_wrong_kind_or_someone_elses_row_is_refused(bank: str) -> None:
     assert "不在这张卡上" in foreign.json()["user_text"]
     # 被拒的两次都不能留下痕迹。
     assert _hike(_bill_anomalies()) is not None
+
+
+def _acked_block() -> dict[str, Any]:
+    return call("GET", "/api/business/bill").json()["acked"]
+
+
+def test_the_verdict_is_kept_and_shown_in_the_acked_list(bank: str) -> None:
+    """结论要落库也回读：说「不是我刷的」的，已核实里就得写着「不是我刷的」。
+
+    两档结论不是文案差异：「不是我刷的」是后面冻结卡、找银行争议的起点，
+    如果只存一个「看过了」，这层意思就丢了。
+    """
+    hike = _hike(_bill_anomalies())
+    assert hike is not None
+    response = call(
+        "POST",
+        "/api/bill/anomalies/ack",
+        json={
+            "kind": "subscription_hike",
+            "tx_ids": hike["evidence"]["tx_ids"],
+            "verdict": "not_mine",
+        },
+    )
+    body = response.json()
+    assert body["verdict"] == "not_mine" and body["verdict_label"] == "不是我刷的"
+
+    block = _acked_block()
+    assert block["count"] == 2
+    for item in block["items"]:
+        assert item["verdict"] == "not_mine" and item["verdict_label"] == "不是我刷的"
+        assert item["rule_id"] == "R-BILL-03"
+        assert item["tx_id"] in hike["evidence"]["tx_ids"]
+        assert item["ts_text"] and item["amount_yuan"] and item["acked_text"]
+    assert "恢复" in block["note"]
+
+
+def test_changing_the_verdict_overwrites_instead_of_piling_up(bank: str) -> None:
+    """先点「我自己刷的」，后来想起来不对改成「不是我刷的」：覆盖，不叠加。"""
+    hike = _hike(_bill_anomalies())
+    assert hike is not None
+    tx_ids = hike["evidence"]["tx_ids"]
+    first = call(
+        "POST",
+        "/api/bill/anomalies/ack",
+        json={"kind": "subscription_hike", "tx_ids": tx_ids, "verdict": "mine"},
+    ).json()
+    assert first["created"] == 2
+    second = call(
+        "POST",
+        "/api/bill/anomalies/ack",
+        json={"kind": "subscription_hike", "tx_ids": tx_ids, "verdict": "not_mine"},
+    ).json()
+    assert second["created"] == 0 and second["reacked"] == 2
+    assert {item["verdict"] for item in _acked_block()["items"]} == {"not_mine"}
+
+    conn = db.connect()
+    try:
+        assert conn.execute("SELECT COUNT(*) AS n FROM anomaly_acks").fetchone()["n"] == 2
+        events = conn.execute(
+            "SELECT COUNT(*) AS n FROM audit_log WHERE event_type = 'bill.anomaly_acked'"
+        ).fetchone()["n"]
+    finally:
+        conn.close()
+    assert events == 2  # 「改主意」也是事实，审计不合并
+
+
+def test_unacking_puts_the_group_back(bank: str) -> None:
+    """撤销：这一组重新挂回待核实，三处一起回来；流水仍然一行不少。"""
+    hike = _hike(_bill_anomalies())
+    assert hike is not None
+    tx_ids = hike["evidence"]["tx_ids"]
+    before_marks = call("GET", "/api/transactions?limit=100").json()["anomaly_count"]
+    call(
+        "POST",
+        "/api/bill/anomalies/ack",
+        json={"kind": "subscription_hike", "tx_ids": tx_ids, "verdict": "mine"},
+    )
+    assert _hike(_bill_anomalies()) is None and _acked_block()["count"] == 2
+
+    undone = call(
+        "POST",
+        "/api/bill/anomalies/unack",
+        json={"kind": "subscription_hike", "tx_ids": tx_ids},
+    )
+    assert undone.status_code == 200 and undone.json()["removed"] == 2
+    assert _hike(_bill_anomalies()) is not None
+    assert call("GET", "/api/transactions?limit=100").json()["anomaly_count"] == before_marks
+    assert _acked_block()["count"] == 0
+
+    conn = db.connect()
+    try:
+        assert conn.execute("SELECT COUNT(*) AS n FROM anomaly_acks").fetchone()["n"] == 0
+        events = conn.execute(
+            "SELECT COUNT(*) AS n FROM audit_log WHERE event_type = 'bill.anomaly_unacked'"
+        ).fetchone()["n"]
+    finally:
+        conn.close()
+    assert events == 1
+
+
+def test_unacking_something_never_acked_removes_nothing(bank: str) -> None:
+    """没核实过就撤销：不报错、不制造记录，只说「删了 0 条」。"""
+    hike = _hike(_bill_anomalies())
+    assert hike is not None
+    response = call(
+        "POST",
+        "/api/bill/anomalies/unack",
+        json={"kind": "subscription_hike", "tx_ids": hike["evidence"]["tx_ids"]},
+    )
+    assert response.status_code == 200 and response.json()["removed"] == 0
+    assert _hike(_bill_anomalies()) is not None
+
+
+def test_an_unknown_verdict_is_refused_in_chinese(bank: str) -> None:
+    """结论只有两档；乱写要 400 并说清可选什么，不能默默当成「我刷的」。"""
+    hike = _hike(_bill_anomalies())
+    assert hike is not None
+    response = call(
+        "POST",
+        "/api/bill/anomalies/ack",
+        json={
+            "kind": "subscription_hike",
+            "tx_ids": hike["evidence"]["tx_ids"],
+            "verdict": "maybe",
+        },
+    )
+    assert response.status_code == 400
+    body = response.json()
+    assert body["code"] == "VALIDATION"
+    assert "我自己刷的" in body["user_text"]
+

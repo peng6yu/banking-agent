@@ -90,9 +90,11 @@ function bxAnomalyCard(item, full) {
   }
 
   const actions = bxArr(item.actions);
-  if (actions.length) {
+  const verdicts = actions.filter(function (act) { return textOf(act.kind) === 'ack_anomaly'; });
+  const rest = actions.filter(function (act) { return textOf(act.kind) !== 'ack_anomaly'; });
+  if (rest.length) {
     const bar = el('div', 'anomaly-actions');
-    actions.forEach(function (act) {
+    rest.forEach(function (act) {
       const btn = el('button', 'btn btn-mini', textOf(act.label) || '处理');
       btn.type = 'button';
       btn.addEventListener('click', function () { bxRunAction(act); });
@@ -100,7 +102,35 @@ function bxAnomalyCard(item, full) {
     });
     box.appendChild(bar);
   }
+  if (verdicts.length) {
+    /* 结论单独一行：它不是「更多操作」里的一个，而是这张卡唯一要你回答的问题。 */
+    box.appendChild(el('div', 'field-label', '这笔是你刷的吗'));
+    box.appendChild(bxVerdictBar(verdicts));
+  }
   return box;
+}
+
+/* 两档结论：自己刷的 / 不是我刷的。后者不是一句口头结论——落库之后卡片与
+   收件箱里都能看到，用户接着去冻结卡、找银行。 */
+function bxVerdictBar(actions) {
+  const bar = el('div', 'anomaly-actions');
+  bxArr(actions).forEach(function (act) {
+    const notMine = textOf(act.verdict) === 'not_mine';
+    const btn = el('button', 'btn btn-mini' + (notMine ? '' : ' btn-green'), textOf(act.label) || '处理');
+    btn.type = 'button';
+    if (notMine) { btn.title = '记下结论后先去冻结这张卡、保留流水，再找银行争议'; }
+    btn.addEventListener('click', function () {
+      const wrap = btn.parentNode || bar;
+      bxArr(wrap.querySelectorAll('button')).forEach(function (other) { other.disabled = true; });
+      bxAckAnomaly(act).then(function (ok) {
+        if (!ok) {
+          bxArr(wrap.querySelectorAll('button')).forEach(function (other) { other.disabled = false; });
+        }
+      });
+    });
+    bar.appendChild(btn);
+  });
+  return bar;
 }
 
 /* --------------------------------------------------------- 人工接管队列 */
@@ -396,21 +426,43 @@ function bxSubscriptionVerdictClear(merchant) {
 // 「我已核实，没问题」：只让这组流水以后不再打扰，不动钱、不改流水。
 // 成功后连卡带首页收件箱一起重取，让它在同一秒里从两处消失。
 function bxAckAnomaly(act) {
+  const verdict = textOf(act.verdict) || 'mine';
   const body = {
     kind: textOf(act.rule_kind),
     account_id: textOf(act.account_id),
     tx_ids: bxArr(act.tx_ids).map(textOf),
+    verdict: verdict,
   };
   if (!body.kind || !body.tx_ids.length) {
     return Promise.reject(new Error('这条异常缺少规则或流水号，页面可能过期了，刷新一次再试。'));
   }
   return bxSend('/api/bill/anomalies/ack', 'POST', body).then(function () {
-    bxToast('已核实，这条不会再出现在首页和账单页。', 'ok');
+    /* 结论不同，下一步不同：说「不是我刷的」的人要的是冻结和争议，不是一句「已核实」。 */
+    bxToast(verdict === 'not_mine'
+      ? '已记下：不是你刷的。建议先临时冻结这张卡、保留流水，再找银行争议。'
+      : '已记下：你自己刷的。这条不会再出现在首页和账单页。', 'ok');
     bxCacheDrop();
     return bxRefresh().then(function () { return true; });
   }).catch(function (err) {
     /* 失败也要在现场说清楚：这组异常还挂在待办里，别让人以为已经处理完了。 */
     bxToast('没记下来：' + errorText(err), 'bad');
+    return false;
+  });
+}
+
+/* 撤销核实：这一组重新挂回待核实。只删核实记录，流水与余额都不动。 */
+function bxUnackAnomaly(act) {
+  const body = {
+    kind: textOf(act.kind),
+    account_id: textOf(act.account_id),
+    tx_ids: bxArr(act.tx_ids).map(textOf),
+  };
+  return bxSend('/api/bill/anomalies/unack', 'POST', body).then(function () {
+    bxToast('已恢复成待核实，这一组重新出现在首页和账单页。', 'ok');
+    bxCacheDrop();
+    return bxRefresh().then(function () { return true; });
+  }).catch(function (err) {
+    bxToast('没恢复成：' + errorText(err), 'bad');
     return false;
   });
 }

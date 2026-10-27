@@ -217,3 +217,48 @@ function bxRunScheduledNow() {
       if (btn) { btn.disabled = false; }
     });
 }
+/* 已核实：核实只免打扰，不是把流水删掉。这里把「哪一笔、什么结论、什么时候核实的」
+   摆出来，并给一个撤销入口——点错了要能改回来，否则「核实」就成了单向门。 */
+function bxRenderAcked(block, account) {
+  block = bxIsObj(block) ? block : {};
+  const host = $('bill-acked');
+  const tag = $('bill-acked-tag');
+  const note = $('bill-acked-note');
+  const items = bxArr(block.items);
+  const accountId = textOf((account || {}).account_id);
+  if (tag) { tag.textContent = bxCount(block.count, ' 笔'); }
+  if (note) { note.textContent = textOf(block.note); }
+  if (!host) { return; }
+  host.replaceChildren();
+  if (!items.length) {
+    bxEmpty(host, '还没有核实过的流水',
+      '在「异常与依据」里点「是我自己刷的」或「不是我刷的」，核实过的那几笔就记在这里，随时能恢复。');
+    return;
+  }
+  items.forEach(function (item) {
+    host.appendChild(bxRow(
+      textOf(item.counterparty) + ' ' + textOf(item.amount_yuan) + ' 元',
+      textOf(item.ts_text) + ' · ' + textOf(item.rule_id) +
+        ' · 结论：' + (textOf(item.verdict_label) || '我自己刷的') +
+        (textOf(item.acked_text) ? '（' + textOf(item.acked_text) + ' 核实）' : ''),
+      textOf(item.direction) === 'in' ? '收入' : '支出'
+    ));
+    const bar = el('div', 'anomaly-actions');
+    const btn = el('button', 'btn btn-mini', '恢复成待核实');
+    btn.type = 'button';
+    btn.addEventListener('click', function () {
+      bxArr(bar.querySelectorAll('button')).forEach(function (other) { other.disabled = true; });
+      bxUnackAnomaly({ kind: item.kind, account_id: accountId, tx_ids: [item.tx_id] }).then(function (ok) {
+        if (!ok) {
+          bxArr(bar.querySelectorAll('button')).forEach(function (other) { other.disabled = false; });
+        }
+      });
+    });
+    bar.appendChild(btn);
+    if (textOf(item.verdict) === 'not_mine') {
+      bar.appendChild(el('span', 'card-note', '你标了「不是我刷的」：先临时冻结这张卡、保留流水，再找银行争议。'));
+    }
+    host.appendChild(bar);
+  });
+}
+

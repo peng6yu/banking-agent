@@ -84,18 +84,22 @@ function bxInboxAnomaly(list, item) {
     bxSetView('bill');
     bxFlashCard('bill-anomalies');
   }));
-  /* 核实完就该能在这里收尾，不用为了点一下再跳去账单页。 */
-  const ack = bxArr(item.actions).filter(function (a) {
+  /* 核实完就该能在这里收尾，不用为了点一下再跳去账单页。
+     两档结论都摆出来：说「不是我刷的」的人，下一步是冻结卡与争议，不是「已核实」。 */
+  const verdicts = bxArr(item.actions).filter(function (a) {
     return textOf(a.kind) === 'ack_anomaly';
-  })[0];
-  if (ack) {
-    bar.appendChild(bxInboxBtn('我已核实，没问题', '', function (btn) {
-      btn.disabled = true;
-      bxAckAnomaly(ack).then(function (ok) {
-        if (!ok) { btn.disabled = false; }
+  });
+  verdicts.forEach(function (act) {
+    const notMine = textOf(act.verdict) === 'not_mine';
+    bar.appendChild(bxInboxBtn(textOf(act.label) || '已核实', notMine ? '' : 'green', function (btn) {
+      bxArr(bar.querySelectorAll('button')).forEach(function (other) { other.disabled = true; });
+      bxAckAnomaly(act).then(function (ok) {
+        if (!ok) {
+          bxArr(bar.querySelectorAll('button')).forEach(function (other) { other.disabled = false; });
+        }
       });
     }));
-  }
+  });
   list.appendChild(bar);
 }
 
@@ -432,6 +436,8 @@ function bxRenderBill(data) {
     note.textContent = '规则命中只说明值得核实，不是欺诈认定；命中规则的流水在下面「流水明细」里标红，点开能看是哪条规则、凭什么命中。' +
       (data.summary ? ' ' + textOf(data.summary) : '');
   }
+  /* 核实过的流水不消失：给一个撤销入口，别让「点错了」变成永久免打扰。 */
+  if (typeof bxRenderAcked === 'function') { bxRenderAcked(data.acked, scoped); }
   /* 流水明细跟当前卡与时间段走：账单重渲染（切卡、换月）时一起重新取。 */
   if (typeof bxLoadLedger === 'function') { bxLoadLedger(true); }
 }

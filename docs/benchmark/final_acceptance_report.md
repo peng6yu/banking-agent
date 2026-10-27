@@ -47,7 +47,7 @@
 
 | # | 命令 | 结果 |
 |---|---|---|
-| 1 | `.venv/bin/python -m pytest -q tests/` | **1833 passed, 4 skipped, 1 warning**（20.24s，2026-10-27 收口轮复跑，`tmp/pytest_final.log`）；4 个 skip 是浏览器冒烟默认关闭 |
+| 1 | `.venv/bin/python -m pytest -q tests/` | **1840 passed, 4 skipped, 1 warning**（20.24s，2026-10-27 收口轮复跑，`tmp/pytest_final.log`）；4 个 skip 是浏览器冒烟默认关闭 |
 | 2 | `RUN_BROWSER_SMOKE=1 .venv/bin/python -m pytest tests/test_browser_smoke.py -q` | **4 passed**（固定模型） |
 | 3 | `.venv/bin/python scripts/check_frontend.py` | **前端检查通过：93/93** |
 | 4 | `.venv/bin/python -m scripts.redteam` | **43 条：PASS 43 / FAIL 0** |
@@ -295,7 +295,7 @@ python3.12 scripts/ab_stats.py --results tests/eval/results --iters 10000 --seed
 
 | 指标 | 历史基线（2026-10-23 / 上一轮） | 本轮实测（2026-10-25） |
 |---|---|---|
-| pytest | 1336 passed / 4 skipped | **1833 passed / 4 skipped** |
+| pytest | 1336 passed / 4 skipped | **1840 passed / 4 skipped** |
 | 工具 | 33 | **35** |
 | 数据表 | 22 | **30** |
 | 审计事件类型 | 29 | **61** |
