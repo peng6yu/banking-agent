@@ -40,6 +40,8 @@ _BILL_RULE_WORDS: Final[tuple[tuple[tuple[str, ...], str], ...]] = (
     (("拆单", "分单", "连着", "重复扣", "多扣"), "split_orders"),
     (("涨价", "涨了", "涨到"), "subscription_hike"),
 )
+#: 原话里带了流水号（卡片上的按钮现在会带）：精确到行，不用再靠商户名猜。
+_BILL_TX_RE: Final[re.Pattern[str]] = re.compile(r"\bt_[0-9a-zA-Z]{4,}\b")
 #: 场景词的人话名字：用来诚实交代「这一类没有命中」，不拿别的异常冒充。
 _BILL_SCENES: Final[dict[str, str]] = {
     "odd_hour_overseas": "凌晨、境外",
@@ -127,6 +129,18 @@ def _bill_amount_note(item: dict[str, Any]) -> str:
 def _bill_ids(item: dict[str, Any]) -> str:
     ids = [str(tx_id) for tx_id in item.get("tx_ids") or []]
     return "、".join(ids) if ids else "（这条是两个月的汇总比对，没有单笔流水号）"
+
+
+def _bill_by_tx(hits: list[dict[str, Any]], clean: str) -> list[dict[str, Any]]:
+    """原话点了流水号：只认含这串号的那几条，比商户名更可靠。"""
+    wanted = {str(tx_id) for tx_id in _BILL_TX_RE.findall(clean)}
+    if not wanted:
+        return []
+    return [
+        item
+        for item in hits
+        if wanted & {str(tx_id) for tx_id in item.get("tx_ids") or []}
+    ]
 
 
 def _bill_scene(clean: str) -> str:
@@ -280,12 +294,13 @@ def handle_bill_check(conn, text: str, user_id: str) -> dict[str, Any]:
             ],
             "data": {"anomalies": []},
         }
+    by_tx = _bill_by_tx(hits, clean)
     named = [item for item in hits if item.get("merchant") and str(item["merchant"]) in clean]
     matched = _bill_by_rule(hits, clean)
     scene = _bill_scene(clean)
-    if scene and not named and not matched:
+    if scene and not by_tx and not named and not matched:
         return _bill_scene_miss(scene, hits, tail)
-    chosen = named or matched or hits
+    chosen = by_tx or named or matched or hits
     if _BILL_FRAUD_RE.search(clean):
         # 「不是我刷的」指的是某一笔单独消费；订阅涨价是月度比对，不能按盗刷处置。
         suspects = [

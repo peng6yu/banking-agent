@@ -184,6 +184,39 @@ def test_bill_anomaly_evidence_points_at_real_transactions(bank: Path) -> None:
         assert set(ids) == seen
 
 
+def test_bill_anomaly_hands_the_assistant_the_actual_transaction(bank: Path) -> None:
+    """点「让 AI 助手核这一笔」时，发出去的那句话必须带这一笔的身份。
+
+    以前 labels 里写死一句「帮我核实一下凌晨那笔境外消费」——卡片上明明有商户、金额、
+    流水号，服务端却只能猜；同一个月两笔凌晨境外时必然猜错。
+    """
+    data = get("/api/business/bill?period=month").json()
+    for item in data["anomalies"]["items"]:
+        asks = [a for a in item["actions"] if a["kind"] == "prompt"]
+        if not asks:
+            continue
+        prompt = asks[0]["prompt"]
+        assert item["amount_yuan"] in prompt or (
+            item["comparison"] and item["comparison"]["current_yuan"] in prompt
+        ), prompt
+        for tx_id in item["evidence"]["tx_ids"]:
+            assert tx_id in prompt, prompt
+        if item["merchant"]:
+            assert item["merchant"] in prompt, prompt
+        assert "那笔境外消费，是不是我自己刷的" not in prompt
+
+
+def test_a_hike_anomaly_shows_this_months_charge_not_the_difference(bank: Path) -> None:
+    data = get("/api/business/bill?period=month").json()
+    hikes = [i for i in data["anomalies"]["items"] if i["kind"] == "subscription_hike"]
+    assert hikes, "种子数据里应该有一条订阅涨价"
+    for item in hikes:
+        comparison = item["comparison"]
+        assert item["amount_fen"] == comparison["current_fen"]
+        assert item["amount_yuan"] == comparison["current_yuan"]
+        assert "上月" in item["amount_note"]
+
+
 def test_bill_period_year_is_supported(bank: Path) -> None:
     data = get("/api/business/bill?period=year").json()
     assert data["period"] == "year"

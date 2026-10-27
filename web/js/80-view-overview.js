@@ -75,8 +75,9 @@ function bxInboxAnomaly(list, item) {
   const tail = bxArr([textOf(rule.id), confText ? ('把握 ' + confText) : '']).filter(Boolean).join(' · ');
   list.appendChild(bxRow(
     textOf(item.title) || '有一条异常待核实',
-    textOf(item.detail) + (tail ? '（' + tail + '）' : ''),
-    (textOf(item.amount_yuan) || '') + ' 待核实'
+    textOf(item.detail) + (textOf(item.amount_note) ? '（' + textOf(item.amount_note) + '）' : '') +
+      (tail ? '（' + tail + '）' : ''),
+    (textOf(item.amount_yuan) || '') + ' 元待核实'
   ));
   const bar = el('div', 'anomaly-actions');
   bar.appendChild(bxInboxBtn('去账单分析看依据', '', function () {

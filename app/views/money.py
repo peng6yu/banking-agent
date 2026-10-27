@@ -106,6 +106,51 @@ def _comparison_view(raw: Any) -> dict[str, Any] | None:
     return out
 
 
+def _anomaly_prompt(view: dict[str, Any]) -> str:
+    """按钮发出的那句话要带这一笔的身份：时间、商户、金额、流水号。
+
+    以前是 labels 里一句固定口吻（「帮我核实一下凌晨那笔境外消费…」），卡片上明明有
+    商户和流水号，点下去却只剩一句「那笔」——服务端只能靠猜；同一个月有两笔凌晨境外时，
+    必然猜错。这里按实例拼，服务端就能精确到行。
+    """
+    kind = str(view.get("kind") or "")
+    merchant = str(view.get("merchant") or view.get("title") or "这笔消费")
+    tx_ids = [str(i) for i in (view.get("evidence") or {}).get("tx_ids") or []]
+    tail = f"，流水号 {'、'.join(tx_ids)}" if tx_ids else ""
+    when = str(view.get("window_start_text") or "")
+    if not when:
+        rows = (view.get("evidence") or {}).get("transactions") or []
+        when = str(rows[0].get("ts_text") or "") if rows else "最近"
+    if kind == "subscription_hike":
+        comparison = view.get("comparison") or {}
+        current = comparison.get("current_yuan") or view.get("amount_yuan")
+        previous = comparison.get("previous_yuan")
+        extra = f"（上月 {previous} 元）" if previous else ""
+        return f"帮我核实一下 {merchant} 这个月的扣费：{current} 元{extra}{tail}，是不是涨价了。"
+    if kind == "split_orders":
+        count = view.get("occurrence_count") or len(tx_ids)
+        return (
+            f"帮我核实一下 {merchant} {when} 这几笔是不是拆单："
+            f"共 {count} 笔、合计 {view.get('amount_yuan')} 元{tail}。"
+        )
+    return (
+        f"帮我核实一下 {when} 的这笔消费：{merchant} {view.get('amount_yuan')} 元"
+        f"{tail}，是不是我自己刷的。"
+    )
+
+
+def _anomaly_actions(view: dict[str, Any]) -> list[dict[str, Any]]:
+    """规则自带动作照发；只有「交给助手」那类，把口吻换成这一笔的具体事实。"""
+    rule = ANOMALY_RULES.get(str(view.get("kind") or ""), {})
+    actions: list[dict[str, Any]] = []
+    for raw in rule.get("actions", []):
+        action = dict(raw)
+        if str(action.get("kind")) == "prompt":
+            action["prompt"] = _anomaly_prompt(view)
+        actions.append(action)
+    return actions
+
+
 def _anomaly_view(
     item: dict[str, Any], index: int, tx_map: dict[str, dict[str, Any]]
 ) -> dict[str, Any]:
@@ -114,7 +159,7 @@ def _anomaly_view(
     rule = ANOMALY_RULES.get(kind, {})
     amount_fen = int(item.get("amount_fen") or 0)
     tx_ids = [str(i) for i in (item.get("tx_ids") or [])]
-    return {
+    view = {
         "id": f"{kind or 'anomaly'}-{index}",
         # 状态只有「发现异常」：规则命中不是欺诈认定，不能写成「已确认问题」。
         "status": "发现异常",
@@ -149,8 +194,18 @@ def _anomaly_view(
             "tx_ids": tx_ids,
             "transactions": [tx_map[i] for i in tx_ids if i in tx_map],
         },
-        "actions": list(rule.get("actions", [])),
+        "actions": [],
     }
+    if kind == "subscription_hike":
+        # 涨价异常在检测层记的是差额（10 元）；卡片上要显示的是这个月实际扣了多少，
+        # 差额写成副标——否则「10.00 待核实」会让人以为这月只扣了 10 元。
+        comparison = view.get("comparison") or {}
+        if isinstance(comparison.get("current_fen"), int):
+            view["amount_fen"] = comparison["current_fen"]
+            view["amount_yuan"] = comparison["current_yuan"]
+            view["amount_note"] = f"上月 {comparison.get('previous_yuan')} 元"
+    view["actions"] = _anomaly_actions(view)
+    return view
 
 
 def _enrich_anomalies(

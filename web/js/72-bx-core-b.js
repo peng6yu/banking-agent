@@ -46,7 +46,10 @@ function bxAnomalyCard(item, full) {
   const head = el('div', 'anomaly-head');
   head.appendChild(el('span', 'anomaly-title', textOf(item.title) || '异常'));
   head.appendChild(el('span', 'tag warn', textOf(item.status) || '发现异常'));
-  if (item.amount_yuan) { head.appendChild(el('span', 'tag', textOf(item.amount_yuan) + ' 元')); }
+  if (item.amount_yuan) {
+    head.appendChild(el('span', 'tag', textOf(item.amount_yuan) + ' 元' +
+      (textOf(item.amount_note) ? '（' + textOf(item.amount_note) + '）' : '')));
+  }
   if (bxIsObj(item.rule) && item.rule.id) { head.appendChild(el('span', 'tag info', textOf(item.rule.id))); }
   box.appendChild(head);
   if (item.detail) { box.appendChild(el('div', 'card-note', textOf(item.detail))); }

@@ -362,6 +362,37 @@ def test_bill_check_pivots_to_the_action_once_the_user_says_it_was_not_them(bank
     assert "临时冻结" in text and "争议交易" in text and "流水号 t_night" in text
     assert any("冻结" in choice["value"] for choice in out["choices"])
 
+def test_the_card_hands_the_assistant_the_exact_transaction(bank) -> None:
+    """同一晚两笔凌晨境外：卡片上那句必须点到哪一笔就是哪一笔。
+
+    以前固定模板只有「凌晨那笔」，服务端只能猜第一笔；现在按钮发出的原话带流水号。
+    """
+    import app.views.bill as bill_view_module
+
+    bank.execute("DELETE FROM transactions")
+    _night_tx(bank, "t_apple", 288_000, "Apple Store 香港", 2)
+    _night_tx(bank, "t_lv", 468_000, "Louis Vuitton 香港", 4)
+    bank.commit()
+    parts = time.localtime(clock.now_ms() / 1000)
+    data = bill_view_module.bill_view(
+        bank, period="month", year=parts.tm_year, month=parts.tm_mon
+    )
+    prompts = {
+        item["evidence"]["tx_ids"][0]: [
+            action["prompt"] for action in item["actions"] if action["kind"] == "prompt"
+        ][0]
+        for item in data["anomalies"]["items"]
+        if item["kind"] == "odd_hour_overseas"
+    }
+    assert set(prompts) == {"t_apple", "t_lv"}, data["anomalies"]["items"]
+    assert "t_apple" in prompts["t_apple"] and "t_apple" not in prompts["t_lv"]
+
+    out = assist.handle(bank, prompts["t_lv"])
+    text = out["summary"]
+    assert "t_lv" in text and "t_apple" not in text
+    assert "Louis Vuitton 香港" in text and "4,680.00" in text
+
+
 def _hike_txs(bank) -> None:
     """上月 25.00 + 本月 35.00 的同一家订阅：命中 R-BILL-03（涨价 40%）。"""
     parts = time.localtime(clock.now_ms() / 1000)

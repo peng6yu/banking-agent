@@ -74,7 +74,9 @@ ANOMALY_RULES: Final[dict[str, dict[str, Any]]] = {
         "actions": [
             {"id": "freeze_card", "label": "临时冻结这张卡", "kind": "tool", "tool": "freeze_card"},
             {"id": "ask_assistant", "label": "让 AI 助手核这一笔", "kind": "prompt",
-             "prompt": "帮我核实一下凌晨那笔境外消费，是不是我自己刷的。"},
+             # 下面这句只是兜底：账单页渲染异常卡时，_anomaly_prompt 会按这一笔的
+            # 时间/商户/金额/流水号重写一遍，服务端才能精确到行。
+            "prompt": "帮我核实一下凌晨那笔境外消费，是不是我自己刷的。"},
         ],
     },
     "subscription_hike": {
