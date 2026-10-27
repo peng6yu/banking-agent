@@ -1,10 +1,10 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-10-27T11:22:21+08:00",
+  "generated_at": "2026-10-27T11:45:22+08:00",
   "git": {
-    "head": "ab0c6090951212c4cc22170731c8a28484f64a89",
-    "head_short": "ab0c609",
-    "subject": "fix(insights): 助手提醒的按钮也指名道姓，别让助手自己猜",
+    "head": "76fc7b3add59bd27700a3dbd2be83d43b9e977a9",
+    "head_short": "76fc7b3",
+    "subject": "docs(15): 数据表 36 / 审计事件 69",
     "branch": "main",
     "dirty": false,
     "changed_paths": 0
@@ -52,7 +52,7 @@
         "assess_suitability"
       ]
     },
-    "db_tables": 35,
+    "db_tables": 36,
     "db_table_names": [
       "users",
       "accounts",
@@ -88,13 +88,14 @@
       "chat_turns",
       "agent_memory",
       "messages",
-      "message_insight_state"
+      "message_insight_state",
+      "anomaly_acks"
     ],
-    "audit_event_types": 68,
-    "api_paths": 51,
+    "audit_event_types": 69,
+    "api_paths": 52,
     "policy_rules": 13,
     "intent_templates": 9,
-    "test_files": 108,
+    "test_files": 109,
     "knowledge": {
       "version": "2c4fbe8d4be2906c",
       "terms": 40,
@@ -108,11 +109,11 @@
   },
   "tests": {
     "command": ".venv/bin/python -m pytest -q",
-    "passed": 1827,
+    "passed": 1833,
     "failed": 0,
     "skipped": 4,
-    "duration_s": 20.47,
-    "log": "tmp/pytest_prompt.log",
+    "duration_s": 18.68,
+    "log": "tmp/pytest_final.log",
     "parsed": true
   },
   "redteam": {
