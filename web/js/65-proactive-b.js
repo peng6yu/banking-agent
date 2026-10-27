@@ -508,6 +508,39 @@ function pfBind() {
   pfRenderRun(null);
 }
 
+/* 空态三句话：一绿一黄一红，点一下就把三色权限各演一遍。
+   以前第一屏只有一个空输入框，评委不知道该说什么，只能自己乱试。 */
+function appendExamples() {
+  const log = $('chat-log');
+  if (!log) { return; }
+  const rows = [
+    ['绿', '查一下我这个月花了多少', '直接答，不动钱'],
+    ['黄', '帮我给张三转 800 元', '要你点头才办'],
+    ['红', '帮我把工资卡挂失', '要验明是你']
+  ];
+  const box = el('div', 'examples');
+  box.appendChild(el('div', 'examples-hint', '不知道说什么？点一句试试（绿黄红各一条）：'));
+  const chips = el('div', 'examples-chips');
+  rows.forEach(function (row) {
+    const chip = el('button', 'example-chip lv-' + ({
+      '绿': 'green', '黄': 'yellow', '红': 'red'
+    })[row[0]] || 'unknown', row[1]);
+    chip.type = 'button';
+    chip.title = row[2];
+    chip.addEventListener('click', function () {
+      const input = $('chat-input');
+      if (!input) { return; }
+      input.value = row[1];
+      box.remove();
+      sendMessage();
+    });
+    chip.appendChild(el('span', 'example-tag', row[0] + '·' + row[2]));
+    chips.appendChild(chip);
+  });
+  box.appendChild(chips);
+  log.appendChild(box);
+}
+
 /* ------------------------------------------------------------------ 启动 */
 function boot() {
   const form = $('chat-form');
@@ -530,6 +563,7 @@ function boot() {
     verify.addEventListener('click', function () { verifyAudit(); });
   }
   appendBubble('sys', '我在。说一句人话就行，比如「帮我给张三转 800 元」，右栏会同步亮灯。');
+  appendExamples();
   loadTools();
   pfBind();
   loadProactive();

@@ -100,6 +100,7 @@ async function bxLoadChatHistory() {
     sessionId = resumed;
     bxRememberSession(resumed);
   }
+  bxHistoryOnScreen = true;
   appendBubble('sys', '这是上次的对话（' + (textOf(data.title) || resumed) + '，最近 ' + turns.length +
     ' 轮，服务端存着）。接着说就行。', 'history');
   turns.forEach(function (turn) {
@@ -108,9 +109,14 @@ async function bxLoadChatHistory() {
   return data;
 }
 
+/* 历史已经摆到屏幕上了就别再喊「找不到了」：那时候用户看到的是接着的对话，
+   再补一句「这一轮没了，重说吧」只会让人以为坏了。只有历史也读不到时才提示。 */
+let bxHistoryOnScreen = false;
+
 async function bxRestoreSession() {
   const sid = bxStoredSession();
   if (!sid) { return null; }
+  if (bxHistoryOnScreen) { return null; }
   let data = null;
   try {
     data = await bxFetch('/api/session/' + encodeURIComponent(sid));
@@ -119,7 +125,15 @@ async function bxRestoreSession() {
     return null;
   }
   if (!bxIsObj(data) || data.found === false) {
-    appendBubble('sys', '上次的会话 ' + sid + ' 在服务端找不到了：执行状态在进程内存里，服务重启就会丢。重新说一句话就会开一轮新的。', 'restore');
+    /* 「找不到了」不等于「救不回来」：服务端有 POST /api/session/{id}/recover，
+       库里还有记录就能把这一轮续上。先给一个可点的出口，再谈重说一句。 */
+    appendBubble('sys', '上次的会话 ' + sid + ' 在服务端找不到了：执行状态在进程内存里，服务重启就会丢。可以先试试点下面把它接回来；接不回来再重说一句，会开一轮新的。', 'restore');
+    const chips = el('div', 'cap-chips');
+    const btn = el('button', 'cap-chip action', '试着接回这一轮（服务重启后用）');
+    btn.type = 'button';
+    btn.addEventListener('click', function () { bxRecoverSession(sid, btn); });
+    chips.appendChild(btn);
+    appendNode(chips);
     return null;
   }
   sessionId = sid;
@@ -295,10 +309,13 @@ function bxConfirmRows(data) {
 
   if (data.tool_name || data.method || data.arrival) {
     const bits = [];
-    if (data.tool_name) { bits.push(textOf(data.tool_name)); }
+    const human = CONFIRM_TOOL_LABEL[textOf(data.tool) || ''] || (typeof CONFIRM_TOOL_LABEL === 'object' ? '' : '');
+    if (data.tool_name) { bits.push(human || textOf(data.tool_name)); }
     if (data.method) { bits.push(textOf(data.method)); }
     if (data.arrival) { bits.push(textOf(data.arrival)); }
-    rows.push(['转账方式', bits.join(' · '), 'confirm-method']);
+    /* 没有「方式/到账时间」说明它不是资金动作，标签再写「转账方式」就驴唇不对马嘴。 */
+    const moneyTool = CONFIRM_MONEY_TOOLS[textOf(data.tool) || ''] === 1;
+    rows.push([(moneyTool || data.arrival) ? '转账方式' : '操作类型', bits.join(' · '), 'confirm-method']);
   }
 
   if (data.scheduled_for) {
@@ -376,4 +393,25 @@ if (document.readyState === 'loading') {
   document.addEventListener('DOMContentLoaded', bootAll);
 } else {
   bootAll();
+}
+
+/* 服务重启后的接续：POST /api/session/{id}/recover。
+   能接回来就把节点与待确认卡重画一遍；接不回来要说清「记录不完整」，不能假装成功。 */
+async function bxRecoverSession(sid, btn) {
+  if (!sid) { return null; }
+  if (btn) { btn.disabled = true; }
+  try {
+    const res = await bxSend('/api/session/' + encodeURIComponent(sid) + '/recover', 'POST', {});
+    if (res && res.ok === false) {
+      appendBubble('sys', '接不回来：' + (textOf(res.user_text) || '服务端没有这条会话的完整记录') + '。重说一句会开一轮新的，前面的对话还在上面。', 'recover');
+      if (btn) { btn.disabled = false; }
+      return null;
+    }
+    appendBubble('sys', '已经把它接回来了（服务端按库里的记录把这一轮续上）。继续就行。', 'recover');
+    return await bxRestoreSession();
+  } catch (err) {
+    appendBubble('sys', '接回失败：' + errorText(err) + '。重说一句会开一轮新的。', 'recover');
+    if (btn) { btn.disabled = false; }
+    return null;
+  }
 }

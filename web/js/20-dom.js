@@ -146,13 +146,25 @@ function appendNode(node) {
 
 function resetTheater() {
   planNodes = [];
-  ['panel-intent', 'panel-plan', 'panel-policy', 'panel-factor'].forEach(function (id) {
+  ['panel-intent', 'panel-plan', 'panel-policy', 'panel-factor', 'panel-audit'].forEach(function (id) {
     setPanelLevel(id, '');
     const body = panelBody(id);
     if (body) { body.replaceChildren(); }
     panelBadge(id, '等待');
   });
   panelBadge('panel-plan', '0 个节点');
+  const tag = $('theater-idle-tag');
+  if (tag) { tag.textContent = '还没有操作'; }
+  const last = $('theater-idle-last');
+  if (last) { last.textContent = ''; }
+}
+
+/* 每轮结束把「这一轮到底怎么判的」写一句到常驻说明条上，切页回来也还看得见。 */
+function noteTheater(text) {
+  const last = $('theater-idle-last');
+  if (last && text) { last.textContent = text; }
+  const tag = $('theater-idle-tag');
+  if (tag && text) { tag.textContent = '已更新'; }
 }
 
 function setBusy(busy) {

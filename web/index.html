@@ -22,12 +22,10 @@
   </div>
 
   <nav class="nav" id="nav" role="tablist" aria-label="主导航">
-    <button class="nav-tab" type="button" role="tab" data-view="overview" aria-selected="true">财务总览<span class="nav-badge" id="nav-messages-badge" hidden></span></button>
-    <button class="nav-tab" type="button" role="tab" data-view="assistant" aria-selected="false">AI 助手</button>
-    <button class="nav-tab" type="button" role="tab" data-view="bill" aria-selected="false">账单分析</button>
-    <button class="nav-tab" type="button" role="tab" data-view="plans" aria-selected="false">计划与提醒</button>
-    <button class="nav-tab" type="button" role="tab" data-view="manage" aria-selected="false">业务管理</button>
-    <button class="nav-tab" type="button" role="tab" data-view="security" aria-selected="false">执行记录与安全</button>
+    <button class="nav-tab" type="button" role="tab" data-view="assistant" data-group="assistant" aria-selected="true">AI 助手<span class="nav-badge" id="nav-messages-badge" hidden>0</span></button>
+    <button class="nav-tab" type="button" role="tab" data-view="overview" data-group="account" aria-selected="false">账务</button>
+    <button class="nav-tab" type="button" role="tab" data-view="plans" data-group="plans" aria-selected="false">计划</button>
+    <button class="nav-tab" type="button" role="tab" data-view="security" data-group="govern" aria-selected="false">治理</button>
   </nav>
 
   <span class="spacer"></span>
@@ -38,9 +36,11 @@
   </div>
 </header>
 
+<nav class="subnav" id="subnav" role="tablist" aria-label="二级导航" hidden></nav>
+
 <main class="views">
   <!-- ============ 1. 财务总览 ============ -->
-  <section class="view active" id="view-overview" role="tabpanel" aria-label="财务总览">
+  <section class="view" id="view-overview" role="tabpanel" aria-label="财务总览">
     <div class="view-inner">
       <div class="view-head">
         <div class="view-title">财务总览</div>
@@ -75,7 +75,7 @@
   </section>
 
   <!-- ============ 2. AI 助手 ============ -->
-  <section class="view" id="view-assistant" role="tabpanel" aria-label="AI 助手">
+  <section class="view active" id="view-assistant" role="tabpanel" aria-label="AI 助手">
     <div class="stage">
       <section class="col-left">
         <div class="chat-shell">
@@ -94,28 +94,45 @@
       </section>
 
       <section class="col-right">
-        <details class="panel lv-unknown" id="panel-intent">
-          <summary class="panel-head"><h2>意图解析</h2><span class="spacer"></span><span class="panel-badge" data-role="badge">等待</span></summary>
-          <div class="panel-body" data-role="body"></div>
-        </details>
+        <div class="card tight" id="theater-idle">
+          <div class="card-head"><h3>这一轮的裁决</h3><span class="spacer"></span><span class="tag" id="theater-idle-tag">还没有操作</span></div>
+          <div class="card-note" id="theater-idle-note">说一句话，下面五块会同步亮起来：它听懂了什么、打算怎么走、谁放行、要不要验、留没留下痕迹。</div>
+          <div class="card-note" id="theater-idle-last"></div>
+        </div>
 
-        <details class="panel lv-unknown" id="panel-plan">
-          <summary class="panel-head"><h2>任务计划</h2><span class="spacer"></span><span class="panel-badge" data-role="badge">0 个节点</span></summary>
+        <section class="panel lv-unknown open-always" id="panel-intent">
+          <div class="panel-head"><h2>意图解析</h2><span class="spacer"></span><span class="panel-badge" data-role="badge">等待</span></div>
           <div class="panel-body" data-role="body"></div>
-        </details>
+        </section>
 
-        <details class="panel lv-unknown" id="panel-policy">
-          <summary class="panel-head"><h2>权限裁决</h2><span class="spacer"></span><span class="panel-badge" data-role="badge">等待</span></summary>
+        <section class="panel lv-unknown open-always" id="panel-plan">
+          <div class="panel-head"><h2>任务计划</h2><span class="spacer"></span><span class="panel-badge" data-role="badge">0 个节点</span></div>
           <div class="panel-body" data-role="body"></div>
-        </details>
+        </section>
 
-        <details class="panel lv-unknown" id="panel-factor">
-          <summary class="panel-head"><h2>多因子验证</h2><span class="spacer"></span><span class="panel-badge" data-role="badge">未触发</span></summary>
+        <section class="panel lv-unknown open-always" id="panel-policy">
+          <div class="panel-head"><h2>权限裁决</h2><span class="spacer"></span><span class="panel-badge" data-role="badge">等待</span></div>
           <div class="panel-body" data-role="body"></div>
-        </details>
+        </section>
+
+        <section class="panel lv-unknown open-always" id="panel-factor">
+          <div class="panel-head"><h2>多因子验证</h2><span class="spacer"></span><span class="panel-badge" data-role="badge">未触发</span></div>
+          <div class="panel-body" data-role="body"></div>
+        </section>
+
+        <section class="panel lv-unknown open-always" id="panel-audit">
+          <div class="panel-head"><h2>审计链（哈希链，可校验）</h2><span class="spacer"></span>
+            <span class="side-actions">
+              <button id="btn-audit-pull" class="btn btn-mini" type="button">拉取审计链</button>
+              <button id="btn-audit-verify" class="btn btn-mini" type="button">校验</button>
+            </span>
+            <span class="panel-badge" data-role="badge">0 条</span>
+          </div>
+          <div class="panel-body" data-role="body"></div>
+        </section>
 
         <div class="card tight">
-          <div class="card-note">右侧四块是技术透明度，默认折叠。审计链在「执行记录与安全」。确认卡片只会出现在对话里；点了确认也要等后端返回最终结果，才可能显示成功。</div>
+          <div class="card-note">这五块是<b>常驻</b>的，不是折叠的技术细节：赛题把「安全机制可见」算进 30%，看不见就等于没做。确认卡片只出现在对话里；点了确认也要等后端返回最终结果，才可能显示成功。</div>
         </div>
       </section>
     </div>
@@ -534,16 +551,16 @@
 
       <div class="card"><div class="card-head"><h3>被拒绝的操作</h3><span class="spacer"></span><span class="tag bad" id="sec-denial-tag">—</span></div><div id="sec-denials"></div></div>
 
-      <details class="panel lv-unknown" id="panel-audit">
-        <summary class="panel-head"><h2>审计链（哈希链，可校验）</h2><span class="spacer"></span>
-          <span class="side-actions">
-            <button id="btn-audit-pull" class="btn btn-mini" type="button">拉取审计链</button>
-            <button id="btn-audit-verify" class="btn btn-mini" type="button">校验</button>
-          </span>
-          <span class="panel-badge" data-role="badge">0 条</span>
-        </summary>
-        <div class="panel-body" data-role="body"></div>
-      </details>
+      <div class="card">
+        <div class="card-head"><h3>审计链</h3><span class="spacer"></span><span class="tag">同屏版在 AI 助手右栏</span></div>
+        <div class="card-note">审计链已常驻在「AI 助手」右栏第五块：做完一笔就能当场看到条目与校验结果，不用切页。这里保留的是同一份数据的历史视图（按会话查、看全量）。</div>
+      </div>
+
+      <div class="grid grid-2">
+        <div class="card"><div class="card-head"><h3>系统自检</h3><span class="spacer"></span><span class="tag" id="sec-health-tag">—</span></div><div id="sec-health"></div><div class="card-note">答辩现场第一眼看这里：跑的是哪个模型、多少个工具可用、库连不连得上、内存里几个会话、服务端当前时间。</div></div>
+        <div class="card"><div class="card-head"><h3>演示台</h3><span class="spacer"></span><span class="tag warn" id="sec-demo-tag">答辩专用</span></div><div id="sec-demo"></div><div id="sec-demo-out"></div></div>
+      </div>
+      <div class="card"><div class="card-head"><h3>人工接管队列</h3><span class="spacer"></span><span class="tag" id="sec-handoff-tag">—</span></div><div id="sec-handoff-list"></div><div id="sec-handoff-detail"></div><div class="card-note">这是服务端工单队列的原始视图（GET /api/handoffs）；「最近的执行」里那些接管卡片是同一批数据的会话视角。点一张展开详情：原请求、DAG、失败节点、裁决与操作员备注。</div></div>
 
       <div class="card">
         <div class="card-head"><h3>安全边界说明</h3></div>
@@ -558,6 +575,7 @@
   <script src="/static/js/20-dom.js"></script>
   <script src="/static/js/30-chat.js"></script>
   <script src="/static/js/40-confirm.js"></script>
+  <script src="/static/js/45-modal.js"></script>
   <script src="/static/js/50-actions.js"></script>
   <script src="/static/js/60-proactive-a.js"></script>
   <script src="/static/js/65-proactive-b.js"></script>

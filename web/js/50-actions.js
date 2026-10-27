@@ -185,6 +185,29 @@ async function cancelSession() {
   }
 }
 
+/* 「改一下再发」用：把这一轮作废（后端释放预授权、DAG 标 cancelled），
+   然后由调用方把话头交回输入框。不改卡上的字，也不假装「已中断成功」。 */
+async function bxCancelRound(confirmationId, reason) {
+  if (!sessionId) { return; }
+  try {
+    const response = await fetch(API_CANCEL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ session_id: sessionId, reason: reason || 'user-edit' })
+    });
+    if (!response.ok) { await reportHttpError(response); }
+  } catch (err) {
+    appendBubble('sys', '作废这张卡时连不上后端：' + errorText(err) + '。请稍后重试。');
+  }
+}
+
+function focusChatInput() {
+  const input = $('chat-input');
+  if (!input) { return; }
+  input.value = '';
+  input.focus();
+}
+
 async function pullAudit() {
   if (!sessionId) {
     appendBubble('sys', '还没有会话号，先发一句话再拉审计链。');
@@ -218,21 +241,32 @@ async function pullAudit() {
   }
 }
 
+/* 审计链校验：赛题 6.6 要求「改一条历史记录 → 链校验报错」当场能演。
+   以前这里两个毛病：用裸 fetch 不带令牌（真令牌模式下直接 401）、结果只落在对话里
+   （在「治理」页点根本看不到）。现在走统一请求封装，并且把结果写回审计链面板本身。 */
 async function verifyAudit() {
-  try {
-    const response = await fetch(API_AUDIT_VERIFY);
-    if (!response.ok) {
-      await reportHttpError(response);
-      return;
+  const host = panelBody('panel-audit');
+  const say = function (cls, text) {
+    if (host) {
+      const line = el('div', 'card-note audit-verify ' + cls, text);
+      host.appendChild(line);
+      host.scrollTop = host.scrollHeight;
     }
-    const json = await response.json();
+    appendBubble('sys', text);
+  };
+  try {
+    const json = await bxFetch(API_AUDIT_VERIFY);
     const ok = json && json.ok === true;
-    appendBubble('sys',
-      (ok ? '审计链校验通过。' : '审计链校验没通过。') +
-      ' 条目数 ' + textOf(json && json.count) +
-      '，链头 ' + shortHash(json && json.head));
+    const count = textOf(json && json.count) || '未知';
+    const head = shortHash(json && json.head) || '未知';
+    if (ok) {
+      say('ok', '审计链校验通过：条目数 ' + count + '，链头 ' + head + '。改动任何一条历史，这里立刻会变。');
+    } else {
+      say('bad', '审计链校验没通过：条目数 ' + count + '，链头 ' + head +
+        '。说明有历史记录被改过——从断点往前的内容都不能再当证据，先去 git 比对发布时的链头，再查是谁动的库。');
+    }
   } catch (err) {
-    appendBubble('sys', '校验失败：' + errorText(err) + '。请重试。');
+    say('bad', '校验请求没成功：' + errorText(err) + '。请重试，或去「治理」页看系统自检。');
   }
 }
 

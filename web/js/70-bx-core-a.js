@@ -75,7 +75,7 @@ const BX_HOSTS = {
   security: ['sec-summary', 'sec-sessions', 'sec-denials', 'sec-note']
 };
 
-let bxView = 'overview';
+let bxView = 'assistant';
 let bxBillPeriod = 'month';
 /* 账单默认看主储蓄卡；用户在 chips 里切了别的卡就记在这里（空=跟随后端默认）。 */
 let bxBillAccount = '';
@@ -320,19 +320,56 @@ function bxRender(view, data) {
 }
 
 /* ----------------------------------------------------------- 导航切换 */
+/* 六个视图 → 四个入口：助手 / 账务（总览·账单）/ 计划 / 治理（执行记录·业务管理）。
+   视图 id 一个没改，改的只是「谁排在第一层」——安全与审计不该藏在第五个 tab 后面。 */
+const VIEW_GROUP = {
+  assistant: 'assistant', overview: 'account', bill: 'account', manage: 'account',
+  plans: 'plans', security: 'govern'
+};
+const GROUP_TABS = {
+  /* 账务 = 我的钱（总览）/ 钱怎么花的（账单）/ 这些业务能办到哪一步（业务管理）。
+     业务管理放在账务里而不是治理里：它回答的是"我能办什么"，不是"凭什么放行"。
+     治理只剩一页，于是答辩现场切到治理时顶部没有二级标签，第一眼就是审计链与自检。 */
+  account: [['overview', '总览'], ['bill', '账单'], ['manage', '业务管理']],
+  govern: [['security', '执行记录与安全']]
+};
+
+function bxRenderSubnav(view) {
+  const host = $('subnav');
+  if (!host) { return; }
+  const group = VIEW_GROUP[view] || view;
+  const tabs = GROUP_TABS[group] || [];
+  host.replaceChildren();
+  if (tabs.length < 2) { host.hidden = true; return; }
+  tabs.forEach(function (pair) {
+    const btn = document.createElement('button');
+    btn.className = 'subnav-tab';
+    btn.type = 'button';
+    btn.setAttribute('role', 'tab');
+    btn.setAttribute('data-view', pair[0]);
+    btn.setAttribute('aria-selected', pair[0] === view ? 'true' : 'false');
+    btn.textContent = pair[1];
+    host.appendChild(btn);
+  });
+  host.hidden = false;
+}
+
 function bxSetView(name) {
   if (!name || !BX_API[name] && name !== 'assistant') { return; }
   bxView = name;
+  const group = VIEW_GROUP[name] || name;
   const tabs = document.querySelectorAll('#nav .nav-tab');
   let i;
   for (i = 0; i < tabs.length; i += 1) {
-    const on = tabs[i].getAttribute('data-view') === name;
+    const on = tabs[i].getAttribute('data-group') === group
+      || (!tabs[i].getAttribute('data-group') && tabs[i].getAttribute('data-view') === name);
     tabs[i].setAttribute('aria-selected', on ? 'true' : 'false');
   }
   const views = document.querySelectorAll('main.views > .view');
   for (i = 0; i < views.length; i += 1) {
     views[i].classList.toggle('active', views[i].id === 'view-' + name);
   }
+  bxRenderSubnav(name);
   if (name === 'assistant') { scrollChat(); return; }
   bxLoad(name);
 }

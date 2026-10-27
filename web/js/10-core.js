@@ -52,8 +52,36 @@ const INTENT_LABEL = {
   subscription: '订阅管理',
   birthday_plan: '生日理财计划',
   assist: '助手直接回答',
+  invest: '理财',
+  card_manage: '卡片管理',
+  schedule_transfer: '预约转账',
+  split_bill: 'AA 分账',
+  reversal: '撤销/退款',
   unknown: '未识别'
 };
+
+/* 规则号是给人看的判决书编号，不是给人读的句子。这里把 R01–R13 翻成人话，
+   原文仍留在旁边（mono 小字），因为答辩时要能被审计对照。 */
+const RULE_LABEL = {
+  R01_readonly: '只读查询，直接放行',
+  R02_invalid_amount: '金额不合法，拒绝',
+  R03_unknown_tool: '没有这个工具，拒绝',
+  R04_untrusted_amount: '金额来自不可信内容，升红强验证',
+  R05_confirm_only: '这类操作只能确认后执行',
+  R06_transfer_yellow: '小额转账，需你确认',
+  R07_transfer_red_daily: '今日累计已过 1000 元，升红强验证',
+  R08_transfer_red_single: '单笔超过 1000 元，升红强验证',
+  R09_sensitive_red: '敏感操作（改密/挂失等），必须强验证',
+  R10_invest_red: '理财申购，必须强验证',
+  R11_default_deny: '没有匹配到放行规则，默认拒绝',
+  R12_other_account: '不是本人账户，拒绝',
+  R13_absolute_cap: '超过绝对上限，直接拒绝'
+};
+
+function ruleText(id) {
+  const key = textOf(id);
+  return RULE_LABEL[key] || '';
+}
 
 const AMOUNT_KEYS = ['amount_text', 'amount_yuan', 'amount', 'amount_fen'];
 const PAYEE_KEYS = ['payee_name', 'payee_text', 'payee', 'recipient_name', 'counterparty'];

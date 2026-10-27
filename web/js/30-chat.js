@@ -228,11 +228,22 @@ function renderPolicy(data) {
   host.appendChild(kvRow('节点', fieldVal(data, ['node_id', 'id']), true));
   host.appendChild(kvRow('工具', fieldVal(data, ['tool', 'tool_name']), true));
   const ruleId = fieldVal(data, ['rule_id', 'rule']);
-  if (ruleId) { host.appendChild(kvRow('规则', ruleId, true)); }
-  host.appendChild(kvRow('理由', fieldVal(data, ['reason_text', 'reason'])));
+  if (ruleId) {
+    const human = ruleText(ruleId);
+    host.appendChild(kvRow('依据', (human ? human + '（' : '') + ruleId + (human ? '）' : ''), !human));
+  }
+  const reason = fieldVal(data, ['reason_text', 'reason']);
+  if (reason) { host.appendChild(kvRow('理由', reason)); }
+  /* 后端 policy.engine.explain() 每轮都算好了一句「为什么这么判」，此前前端一个字都没用。
+     这是最硬的证据：判决不是模型说的，是策略引擎按规则算的。 */
+  const explain = fieldVal(data, ['explain']);
+  if (explain) { host.appendChild(kvRow('怎么判的', explain)); }
   panelBadge('panel-policy', LEVEL_DOT[textOf(level).toLowerCase()] || '已裁决');
   setPanelLevel('panel-policy', level);
   flash('panel-policy');
+  /* 常驻说明条同步一句：切页回来也知道上一轮是怎么判的 */
+  const humanRule = ruleId ? (ruleText(ruleId) || ruleId) : '';
+  noteTheater(levelText(level) + (humanRule ? ' · ' + humanRule : '') + (reason ? ' · ' + reason : ''));
 }
 
 function factorValue() {

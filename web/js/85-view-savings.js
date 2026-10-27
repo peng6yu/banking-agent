@@ -18,6 +18,42 @@ function bxSavingsHint(goalId, text, kind) {
   node.className = 'pf-hint' + (kind ? ' ' + kind : '');
 }
 
+/* 手动跑一次到期储蓄计划（POST /api/savings/run）。
+   后台节拍器平时自己跑；答辩现场要证明「到点真会划钱」，得有个人能按的键。 */
+function bxSavingsRunBar() {
+  const host = $('plan-goals');
+  if (!host || !host.parentNode) { return; }
+  if (host.parentNode.querySelector('[data-bar="savings-run"]')) { return; }
+  const bar = el('div', 'cap-chips');
+  bar.setAttribute('data-bar', 'savings-run');
+  const tip = el('span', 'card-note', '到期才会真划钱；条件没到就跳过，不会硬扣。');
+  const btn = el('button', 'btn btn-mini', '手动跑一次到期储蓄计划');
+  btn.type = 'button';
+  btn.addEventListener('click', function () {
+    if (btn.disabled) { return; }
+    btn.disabled = true;
+    btn.textContent = '正在跑…';
+    bxSend('/api/savings/run', 'POST', {}).then(function (res) {
+      /* 后端回什么就说什么：不编没返回的数字。 */
+      const ran = bxArr(res && res.ran).length;
+      const skipped = bxArr(res && res.skipped).length;
+      const note = ran || skipped
+        ? '跑完：执行 ' + ran + ' 个到期计划，跳过 ' + skipped + ' 个（条件没到或已处理）。'
+        : '跑完：此刻没有到期的储蓄计划，什么都没发生。';
+      bxLoad('plans', true);
+      btn.disabled = false;
+      btn.textContent = '手动跑一次到期储蓄计划';
+      if (typeof bxToast === 'function') { bxToast(note, 'ok'); } else if (tip) { tip.textContent = note; }
+    }).catch(function (err) {
+      btn.textContent = '没跑成：' + (err && err.message ? err.message : '未知原因');
+      btn.disabled = false;
+    });
+  });
+  bar.appendChild(btn);
+  bar.appendChild(tip);
+  host.parentNode.insertBefore(bar, host);
+}
+
 function bxRenderSavings(data) {
   data = bxIsObj(data) ? data : {};
   const host = $('plan-goals');
@@ -27,6 +63,7 @@ function bxRenderSavings(data) {
   setText($('plan-goal-tag'), bxCount(block.count, ' 个'));
   bxFillSavingsAccounts($('plan-savings-account'), accounts);
   bxBindSavingsForm();
+  bxSavingsRunBar();
   if (!host) { return; }
   host.replaceChildren();
   if (!items.length) {
