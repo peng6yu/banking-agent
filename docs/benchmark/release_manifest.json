@@ -1,10 +1,10 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-10-27T12:27:46+08:00",
+  "generated_at": "2026-10-27T12:59:28+08:00",
   "git": {
-    "head": "c7cd6663edcbb75caa554636465cd68b2a0440ed",
-    "head_short": "c7cd666",
-    "subject": "feat(bill): 账单异常能下结论（是我刷的 / 不是我刷的），也能撤回",
+    "head": "c22bcc4f259605cc9aee082e52975569a3929c45",
+    "head_short": "c22bcc4",
+    "subject": "feat(web): 计划页收成 3 张卡 + 3 个折叠，提醒不再列两遍",
     "branch": "main",
     "dirty": false,
     "changed_paths": 0
@@ -109,10 +109,10 @@
   },
   "tests": {
     "command": ".venv/bin/python -m pytest -q",
-    "passed": 1840,
+    "passed": 1841,
     "failed": 0,
     "skipped": 4,
-    "duration_s": 21.15,
+    "duration_s": 20.95,
     "log": "tmp/pytest_final.log",
     "parsed": true
   },
