@@ -68,7 +68,6 @@ function bxRenderPlans(data) {
         } else {
           box.appendChild(el('div', 'card-note', '后端没有返回计划计算结果。'));
         }
-        const bar = el('div', 'anomaly-actions');
         const edit = el('button', 'btn btn-mini', '修改');
         edit.type = 'button';
         edit.addEventListener('click', function () {
@@ -76,23 +75,19 @@ function bxRenderPlans(data) {
           if (panel) { panel.open = true; }
           pfStartEdit(goal);
         });
-        bar.appendChild(edit);
         const cancel = el('button', 'btn btn-mini', '停止计划');
         cancel.type = 'button';
         cancel.addEventListener('click', function () { bxCancelGoal(goal.goal_id, cancel); });
-        bar.appendChild(cancel);
         const monitorOn = goal.monitor_enabled === true;
         const monitor = el('button', 'btn btn-mini' + (monitorOn ? '' : ' btn-green'),
           monitorOn ? '关闭后台监测' : '开启后台监测');
         monitor.type = 'button';
         monitor.title = '打开后，节拍器会按固定间隔检查这个目标并生成提醒；只写提醒，不动钱。';
         monitor.addEventListener('click', function () { bxToggleMonitor(goal.goal_id, !monitorOn, monitor); });
-        bar.appendChild(monitor);
-        box.appendChild(bar);
-        box.appendChild(el('div', 'card-note',
+        box.appendChild(bxMore('改目标 / 停止 / 后台监测', [edit, cancel, monitor],
           monitorOn
             ? '后台监测：已开启。节拍器会按间隔检查这个目标，提醒写进「提醒」，不会动钱。'
-            : '后台监测：未开启。保存目标不会让它自动跑；需要持续监测时点上面的按钮。'));
+            : '后台监测：未开启。保存目标不会让它自动跑；需要持续监测时在上面打开。'));
         goalHost.appendChild(box);
       });
     }
@@ -130,12 +125,9 @@ function bxRenderPlans(data) {
         }
         if (textOf(task.status) === 'scheduled') {
           const bar = el('div', 'anomaly-actions');
-          const btn = el('button', 'btn btn-mini', '让助手撤销这笔预约');
-          btn.type = 'button';
-          btn.addEventListener('click', function () {
+          bar.appendChild(bxLink('让助手撤销这笔预约', function () {
             bxAsk('帮我撤销 ' + textOf(task.due_text) + ' 给 ' + (textOf(task.payee_name) || '收款人') + ' 转 ' + textOf(task.amount_yuan) + ' 元的那笔预约');
-          });
-          bar.appendChild(btn);
+          }));
           list.appendChild(bar);
         }
       });
@@ -161,20 +153,19 @@ function bxRenderPlans(data) {
         box.appendChild(el('div', 'card-note', textOf(alert.suggestion)));
         box.appendChild(kvRow('相关计划', textOf(alert.goal_name)));
         box.appendChild(kvRow('触发时间', textOf(alert.created_text)));
-        const bar = el('div', 'anomaly-actions');
-        const ignore = el('button', 'btn btn-mini', '忽略');
+        const ignore = el('button', 'btn btn-mini', '先不管');
         ignore.type = 'button';
+        ignore.title = '只把这条移出待办，不动账；审计里记的是「忽略」。';
         ignore.addEventListener('click', function () {
           pfResolveAlert(alert.alert_id, 'ignore');
         });
-        bar.appendChild(ignore);
-        const resolve = el('button', 'btn btn-mini btn-green', '标记已处理');
+        const resolve = el('button', 'btn btn-mini btn-green', '已处理完');
         resolve.type = 'button';
+        resolve.title = '你已经自己处理或核实过；审计里记的是「已处理」。';
         resolve.addEventListener('click', function () {
           pfResolveAlert(alert.alert_id, 'resolve');
         });
-        bar.appendChild(resolve);
-        box.appendChild(bar);
+        box.appendChild(bxMore('处理这条提醒', [ignore, resolve]));
         alertHost.appendChild(box);
       });
     }

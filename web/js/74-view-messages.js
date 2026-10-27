@@ -23,7 +23,11 @@ function bxMessagesFacts(facts) {
   return box;
 }
 
-function bxMessageAction(btnKey, msg) {
+/* 一条提醒只露主按钮（「我去处理」），去别处看、这次不用、这类别再提醒都收进「其它处理」：
+   同一屏三条提醒时按钮从九个降到三个，主路径也不再和被动的「不用了」抢位置。 */
+function bxMessageButtons(msg) {
+  const box = el('div', 'cap-chips');
+  const rest = [];
   bxArr(msg.actions).forEach(function (act) {
     if (!bxIsObj(act) || !act.label) { return; }
     const btn = el('button', 'btn btn-mini', textOf(act.label));
@@ -33,20 +37,11 @@ function bxMessageAction(btnKey, msg) {
       if (act.kind === 'goto' && act.view) { bxSetView(act.view); return; }
       bxToast('这条提醒没有可执行的下一步，可以先忽略。', 'bad');
     });
-    btnKey.appendChild(btn);
+    rest.push(btn);
   });
-}
-
-/* 一条提醒只露一个主按钮，「这次不用 / 这类别再提醒」收进「不用了」里：
-   同一屏三条提醒时按钮从九个降到六个，主次也不打架了。 */
-function bxMessageFeedback(btnKey, msg) {
-  const more = el('div', 'cap-chips');
-  more.hidden = true;
-  let extra = 0;
   bxArr(msg.feedback_actions).forEach(function (fb) {
     if (!bxIsObj(fb) || !fb.action) { return; }
-    const primary = !!fb.primary;
-    const btn = el('button', 'btn btn-mini' + (primary ? ' btn-green' : ' btn-ghost'), textOf(fb.label));
+    const btn = el('button', 'btn btn-mini' + (fb.primary ? ' btn-green' : ''), textOf(fb.label));
     btn.type = 'button';
     btn.addEventListener('click', function () {
       if (btn.disabled) { return; }
@@ -61,18 +56,10 @@ function bxMessageFeedback(btnKey, msg) {
           bxToast('没记上：' + errorText(err), 'bad');
         });
     });
-    if (primary) { btnKey.appendChild(btn); } else { more.appendChild(btn); extra += 1; }
+    if (fb.primary) { box.appendChild(btn); } else { rest.push(btn); }
   });
-  if (!extra) { return; }
-  const toggle = el('button', 'btn btn-mini btn-ghost', '不用了');
-  toggle.type = 'button';
-  toggle.setAttribute('aria-expanded', 'false');
-  toggle.addEventListener('click', function () {
-    more.hidden = !more.hidden;
-    toggle.setAttribute('aria-expanded', more.hidden ? 'false' : 'true');
-  });
-  btnKey.appendChild(toggle);
-  btnKey.appendChild(more);
+  if (rest.length) { box.appendChild(bxMore('其它处理', rest)); }
+  return box;
 }
 
 /* 顶部导航的待看徽标：不点开总览也知道助手有几条话要说。计数就是 status=new 的条数，
@@ -112,10 +99,7 @@ function bxRenderMessages(data) {
     box.appendChild(el('div', '', textOf(msg.body)));
     const facts = bxMessagesFacts(msg.facts);
     if (facts) { box.appendChild(facts); }
-    const acts = el('div', 'cap-chips');
-    bxMessageAction(acts, msg);
-    bxMessageFeedback(acts, msg);
-    box.appendChild(acts);
+    box.appendChild(bxMessageButtons(msg));
     box.appendChild(el('div', 'field-label', textOf(msg.created_text)));
     list.appendChild(box);
   });

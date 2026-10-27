@@ -3,6 +3,28 @@
 
 /* 页面级轻提示：卡片一刷新，卡内那句状态行就跟着没了；写操作至少要留一条
    「刚才那一下到底成没成」的可见回执，否则用户会以为按钮没接上。 */
+/* 卡片上的动作收进「操作」里。一屏几十个按钮时用户看不出哪个是主路径，
+   又不好把动作藏到别的页面；用原生 details 展开，键盘和读屏都现成。
+   label 说清里面是什么（「改目标 / 停止 / 后台监测」），别写「更多」。 */
+function bxMore(label, nodes, note) {
+  const wrap = el('details', 'row-more');
+  wrap.appendChild(el('summary', '', label || '操作'));
+  const bar = el('div', 'anomaly-actions');
+  bxArr(nodes).forEach(function (node) { if (node) { bar.appendChild(node); } });
+  if (bar.childNodes.length) { wrap.appendChild(bar); }
+  if (note) { wrap.appendChild(el('div', 'card-note', textOf(note))); }
+  return wrap;
+}
+
+/* 只有一件事可以做的行，用文字动作，不用再占一个按钮的位置。 */
+function bxLink(label, onClick, hint) {
+  const btn = el('button', 'btn-link', label);
+  btn.type = 'button';
+  if (hint) { btn.title = hint; }
+  btn.addEventListener('click', onClick);
+  return btn;
+}
+
 function bxToast(text, kind) {
   let host = document.getElementById('bx-toast');
   if (!host) {

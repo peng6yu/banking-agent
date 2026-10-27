@@ -32,8 +32,6 @@ function bxRenderManage(data) {
         const tail = textOf(card.tail);
         const who = tail ? '尾号' + tail + '的卡' : (textOf(card.kind_label) || '这张卡');
         const frozen = textOf(card.status) === 'frozen';
-        const bar = el('div', 'anomaly-actions');
-        bar.appendChild(el('span', 'tag' + (frozen ? ' warn' : ''), who));
         const actions = [];
         if (frozen) {
           actions.push(['解冻这张卡', '帮我解冻' + who]);
@@ -42,14 +40,14 @@ function bxRenderManage(data) {
         }
         actions.push(['调限额', '我想调整' + who + '的限额']);
         actions.push(['挂失', who + '丢了，帮我挂失']);
-        actions.forEach(function (pair) {
+        const nodes = actions.map(function (pair) {
           const btn = el('button', 'btn btn-mini', pair[0]);
           btn.type = 'button';
           btn.title = pair[1];
           btn.addEventListener('click', function () { bxAsk(pair[1]); });
-          bar.appendChild(btn);
+          return btn;
         });
-        cardHost.appendChild(bar);
+        cardHost.appendChild(bxMore(who + '：冻结 / 调限额 / 挂失', nodes));
       });
       cardHost.appendChild(el('div', 'card-note', '卡片操作都需要你在 AI 助手里确认；本页没有直接生效的按钮，避免绕过权限判定。'));
     }
@@ -63,6 +61,9 @@ function bxRenderManage(data) {
       bxEmpty(subHost, '没有订阅代扣记录', textOf(subs.boundary));
     } else {
       subHost.replaceChildren();
+      /* 「只能停银行侧」这句话每条订阅都带一份，挂在列表头说一次即可；逐条重复五遍把金额挤散。 */
+      const stopNote = textOf(items[0].boundary);
+      if (stopNote) { subHost.appendChild(el('div', 'card-note', stopNote)); }
       const list = el('div', 'list');
       items.forEach(function (sub) {
         list.appendChild(bxRow(
@@ -70,15 +71,11 @@ function bxRenderManage(data) {
           textOf(sub.period_label) + ' · 下次扣费 ' + textOf(sub.next_charge_text) + ' · ' + textOf(sub.status_label),
           textOf(sub.amount_yuan) + ' 元'
         ));
-        list.appendChild(el('div', 'card-note', textOf(sub.boundary)));
         if (textOf(sub.status) === 'active') {
           const bar = el('div', 'anomaly-actions');
-          const btn = el('button', 'btn btn-mini', '停掉银行侧代扣');
-          btn.type = 'button';
-          btn.addEventListener('click', function () {
+          bar.appendChild(bxLink('停掉银行侧代扣', function () {
             bxAsk('帮我把「' + textOf(sub.merchant) + '」的银行侧自动扣款停掉');
-          });
-          bar.appendChild(btn);
+          }, '停的是银行这边的代扣；商户那边的会员还要你自己去取消。'));
           list.appendChild(bar);
         }
       });
@@ -123,17 +120,13 @@ function bxRenderManage(data) {
       products.forEach(function (product) {
         const name = textOf(product.name);
         if (!name) { return; }
-        const bar = el('div', 'anomaly-actions');
-        bar.appendChild(el('span', 'tag', 'R' + textOf(product.risk_level)));
         const buy = el('button', 'btn btn-mini', '买「' + name + '」');
         buy.type = 'button';
         buy.addEventListener('click', function () { bxAsk('我想买一点「' + name + '」'); });
-        bar.appendChild(buy);
         const redeem = el('button', 'btn btn-mini', '赎回「' + name + '」');
         redeem.type = 'button';
         redeem.addEventListener('click', function () { bxAsk('我想赎回「' + name + '」'); });
-        bar.appendChild(redeem);
-        productHost.appendChild(bar);
+        productHost.appendChild(bxMore(name + '：买 / 赎回', [buy, redeem]));
       });
     }
   }
@@ -214,15 +207,14 @@ function bxRenderInferred(payload) {
        定性过的会落到下面的「已定性的商户」里，随时可以收回来。 */
     const acts = bxArr(item.actions).filter(function (act) { return bxIsObj(act); });
     if (acts.length) {
-      const bar = el('div', 'anomaly-actions');
-      acts.forEach(function (act) {
+      const nodes = acts.map(function (act) {
         const btn = el('button', 'btn btn-mini' +
           (textOf(act.style) === 'ghost' ? '' : ' btn-green'), textOf(act.label) || '处理');
         btn.type = 'button';
         btn.addEventListener('click', function () { bxRunAction(act); });
-        bar.appendChild(btn);
+        return btn;
       });
-      box.appendChild(bar);
+      box.appendChild(bxMore('这条怎么定性', nodes, '定性以后它就不再是待办；定错的可以随时收回来。'));
     }
     host.appendChild(box);
   });
@@ -240,10 +232,7 @@ function bxRenderInferred(payload) {
       if (acts.length) {
         const bar = el('div', 'anomaly-actions');
         acts.forEach(function (act) {
-          const btn = el('button', 'btn btn-mini', textOf(act.label) || '撤回');
-          btn.type = 'button';
-          btn.addEventListener('click', function () { bxRunAction(act); });
-          bar.appendChild(btn);
+          bar.appendChild(bxLink(textOf(act.label) || '撤回', function () { bxRunAction(act); }));
         });
         line.appendChild(bar);
       }
@@ -309,10 +298,7 @@ function bxRenderMemory() {
         box.appendChild(kvRow('内容', textOf(fact.value)));
         if (textOf(fact.source)) { box.appendChild(el('div', 'card-note', '来源：' + textOf(fact.source))); }
         const bar = el('div', 'anomaly-actions');
-        const del = el('button', 'btn btn-mini', '忘掉这条');
-        del.type = 'button';
-        del.addEventListener('click', function () { bxForgetMemory(textOf(fact.key), del); });
-        bar.appendChild(del);
+        bar.appendChild(bxLink('忘掉这条', function () { bxForgetMemory(textOf(fact.key), this); }));
         box.appendChild(bar);
         host.appendChild(box);
       });

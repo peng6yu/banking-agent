@@ -107,11 +107,11 @@ function bxRenderPersistedPlans(block) {
       }
     });
     if (payHost) { box.appendChild(payHost); }
-    const acts = el('div', 'anomaly-actions');
     const runOne = el('button', 'btn btn-mini', '推进这个计划');
     runOne.type = 'button';
+    runOne.title = '只推进已经到点的步骤；资金动作仍然要你确认。';
     runOne.addEventListener('click', function () { bxRunPlans(runOne, plan.plan_id); });
-    acts.appendChild(runOne);
+    const acts = [runOne];
     if (status !== 'cancelled' && status !== 'completed') {
       const cancel = el('button', 'btn btn-mini', '取消计划');
       cancel.type = 'button';
@@ -121,9 +121,9 @@ function bxRenderPersistedPlans(block) {
           .then(function () { appendBubble('system', '计划已取消：' + textOf(plan.title)); bxRefresh(); })
           .catch(function (err) { cancel.disabled = false; appendBubble('system', '取消失败：' + errorText(err)); });
       });
-      acts.appendChild(cancel);
+      acts.push(cancel);
     }
-    box.appendChild(acts);
+    box.appendChild(bxMore(acts.length > 1 ? '推进 / 取消这个计划' : '推进这个计划', acts));
     host.appendChild(box);
   });
 }

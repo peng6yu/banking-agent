@@ -367,9 +367,8 @@ function bxRenderReminders(block) {
       '下次 ' + (textOf(item.due_text) || BX_NA) + ' · ' + (textOf(item.state_label) || textOf(item.state)) +
       ' · 计划号 ' + textOf(item.plan_id)));
     const acts = el('div', 'anomaly-actions');
-    const end = el('button', 'btn btn-mini', '结束这条提醒');
-    end.type = 'button';
-    end.addEventListener('click', function () {
+    acts.appendChild(bxLink('结束这条提醒', function () {
+      const end = this;
       end.disabled = true;
       bxSend('/api/plans/' + encodeURIComponent(textOf(item.plan_id)), 'PATCH', { status: 'cancelled' })
         .then(function () {
@@ -380,8 +379,7 @@ function bxRenderReminders(block) {
           end.disabled = false;
           appendBubble('system', '结束失败：' + errorText(err));
         });
-    });
-    acts.appendChild(end);
+    }, '结束以后这条提醒不再出现，钱本来也没动。'));
     box.appendChild(acts);
     list.appendChild(box);
   });

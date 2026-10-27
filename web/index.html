@@ -313,15 +313,16 @@
         <div class="card-note">每条提醒都写明依据的那个数字，数字只来自你自己的流水；同一类事 7 天内不重复，连续三次点「这类别再提醒」就不再出现。它只是把值得看一眼的地方指出来，判断仍然是你的。</div>
       </div>
 
+      <!-- 演练台默认折叠：它是演示与排障用的，不该和「你的计划」抢同一屏。 -->
       <details class="panel lv-unknown" id="panel-proactive">
-        <summary class="panel-head"><h2>主动财务演练（模拟数据）</h2><span class="spacer"></span>
-          <span class="side-actions">
-            <button id="btn-pf-refresh" class="btn btn-mini" type="button">刷新</button>
-            <button id="btn-pf-monitor" class="btn btn-mini btn-green" type="button">立即运行监测（手动触发）</button>
-          </span>
+        <summary class="panel-head"><h2>主动财务演练（模拟数据，演示用）</h2><span class="spacer"></span>
           <span class="panel-badge" data-role="badge">未加载</span>
         </summary>
         <div class="panel-body" data-role="body">
+          <div class="pf-actions">
+            <button id="btn-pf-refresh" class="btn btn-mini" type="button">刷新</button>
+            <button id="btn-pf-monitor" class="btn btn-mini btn-green" type="button">立即运行监测（手动触发）</button>
+          </div>
           <div class="pf-note">所有数字都来自后端接口：金额在后端用整数分计算，模型只做解释，这里只做展示换算。后台节拍器只会推进你打开了监测开关的目标（默认 6 小时一次，只写提醒、不动钱）；没打开开关的目标只能在这里手动跑。</div>
 
           <div class="pf-block">
