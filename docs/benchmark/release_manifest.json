@@ -1,10 +1,10 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-10-27T08:49:25+08:00",
+  "generated_at": "2026-10-27T09:27:41+08:00",
   "git": {
-    "head": "782a67386925480ce7f090e8a5eeb74042238902",
-    "head_short": "782a673",
-    "subject": "feat(bill): 流水明细标红命中的笔，点开看是哪条规则",
+    "head": "22e2fbb2304d6f4750ed5fd603bedb7e8b0143c8",
+    "head_short": "22e2fbb",
+    "subject": "refactor(web): 首页只留「需要你过目」，动作各回各的栏目",
     "branch": "main",
     "dirty": true,
     "changed_paths": 1
@@ -111,7 +111,7 @@
     "passed": 1811,
     "failed": 0,
     "skipped": 4,
-    "duration_s": 21.58,
+    "duration_s": 22.93,
     "log": "tmp/pytest_final.log",
     "parsed": true
   },
