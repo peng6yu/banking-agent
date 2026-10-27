@@ -23,7 +23,7 @@ BASE = Path(__file__).resolve().parent
 IMG = BASE / "截图" / "四入口_2026-10-27"   # 四入口版（2026-10-27 重拍）
 IMG_LEGACY = BASE / "截图" / "信息架构"       # 六视图旧版，仅作历史对照
 OUT = BASE / "答辩PPT.pptx"
-TOTAL = 13
+TOTAL = 14
 
 NAVY = RGBColor(0x0F, 0x29, 0x42)
 INK = RGBColor(0x1F, 0x29, 0x37)
@@ -90,7 +90,9 @@ def header(slide, title, index):
 def footer(slide, spec, index):
     para(box(slide, 0.6, 6.9, 12.13, 0.42), spec.get("src", ""), 8.5, False, MUTED, 0)
     rect(slide, 0.6, 6.86, 12.13, 0.015, RGBColor(0xD1, 0xD5, 0xDB))
-    para(box(slide, 0.6, 7.08, 6.4, 0.3), "第 %d / %d 页 · 累计 %s / 10:00" % (index, TOTAL, spec["cum"]), 10, False, MUTED, 0)
+    footer = ("第 %d / %d 页 · %s" % (index, TOTAL, spec["cum"])) if str(spec["cum"]).startswith("附录") \
+        else ("第 %d / %d 页 · 累计 %s / 10:00" % (index, TOTAL, spec["cum"]))
+    para(box(slide, 0.6, 7.08, 6.4, 0.3), footer, 10, False, MUTED, 0)
     para(box(slide, 6.6, 7.08, 6.13, 0.3), "banking-agent · 2026 金融科技大赛人工智能赛道", 10, False, MUTED, 0, PP_ALIGN.RIGHT)
 
 
@@ -414,6 +416,21 @@ SLIDES = [
         "talk": "欢迎现场追问：七步校验、43 条红队、审计链，我们都能当场跑。",
         "cum": "9:20",
         "src": "出处：README「已知限制」与「数字台账」；安全自评报告 R-01～R-20；manifest 见 docs/benchmark/release_manifest.json。",
+    },
+    {
+        "layout": "items",
+        "t": "附录（不计时）：现场怎么证明",
+        "items": [
+            (0, "make test → 1857 passed / 4 skipped（约 23 秒）", "g"),
+            (0, "make redteam → 43/43 PASS（约 30 秒，七列判定表逐条打印）", "g"),
+            (0, "make journeys → 7 条旅程失败 0（3–5 分钟，真浏览器点给你看）", "m"),
+            (1, "红队按赛题点名四类分组：诱导转账 10 / 越权 10 / 注入 10 / 套取 8 / 异常 5", "i"),
+            (1, "每条用例同时验两件事：拦得住（期望色 vs 实际色）＋ 留得下（审计事件）", "i"),
+            (1, "对照表：docs/交付/红队与赛题对照表.md（脚本读 cases.yaml 生成，不手抄）", "i"),
+        ],
+        "talk": "这三条命令现场就能跑，不用回放录像。",
+        "cum": "附录·不计时",
+        "src": "出处：scripts/redteam.py 判定表；tests/redteam/cases.yaml 43 条；实测 29.47 秒。",
     },
 ]
 
