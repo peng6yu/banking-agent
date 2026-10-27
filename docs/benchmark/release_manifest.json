@@ -1,13 +1,13 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-10-27T11:07:09+08:00",
+  "generated_at": "2026-10-27T11:14:25+08:00",
   "git": {
-    "head": "ab3d39d5725d8b85ad7a7bcb88aead8046e17d15",
-    "head_short": "ab3d39d",
-    "subject": "feat(planner): 账单异常核实有了自己的答复路径，按钮发出的那句话不再被订阅抢走",
+    "head": "310cff3e0b10e5a195c6813d140ebdb4a359ee60",
+    "head_short": "310cff3",
+    "subject": "fix(bill): 按钮发出去的那句话，带上这一笔的时间、商户、金额、流水号",
     "branch": "main",
-    "dirty": false,
-    "changed_paths": 0
+    "dirty": true,
+    "changed_paths": 1
   },
   "code": {
     "tools": {
@@ -108,11 +108,11 @@
   },
   "tests": {
     "command": ".venv/bin/python -m pytest -q",
-    "passed": 1823,
+    "passed": 1826,
     "failed": 0,
     "skipped": 4,
-    "duration_s": 20.16,
-    "log": "tmp/pytest_final.log",
+    "duration_s": 20.98,
+    "log": "tmp/pytest_prompt2.log",
     "parsed": true
   },
   "redteam": {
