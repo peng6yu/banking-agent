@@ -34,6 +34,14 @@ SUBSCRIPTION_HIKE_RATIO: Final[float] = 0.30
 ANOMALY_KINDS: Final[tuple[str, ...]] = (
     "split_orders", "odd_hour_overseas", "subscription_hike",
 )
+#: 规则编号跟着检测结果一起走：账单页、流水明细、助手说的是同一句 R-BILL-xx。
+#: 文案与把握度仍在 views/labels.py 的 ANOMALY_RULES 里（那是给人看的），
+#: 编号两边各存一份会被 tests/test_tools.py 钉住必须一致。
+ANOMALY_RULE_IDS: Final[dict[str, str]] = {
+    "split_orders": "R-BILL-01",
+    "odd_hour_overseas": "R-BILL-02",
+    "subscription_hike": "R-BILL-03",
+}
 OVERSEAS_MARKERS: Final[tuple[str, ...]] = (
     "境外", "overseas", "香港", "澳门", "台湾", "日本", "东京", "大阪", "韩国", "首尔",
     "新加坡", "美国", "纽约", "洛杉矶", "英国", "伦敦", "法国", "巴黎", "德国", "柏林",
@@ -245,10 +253,13 @@ def _detect_anomalies(
     found.extend(_odd_hour_anomalies(rows))
     found.extend(_subscription_hike_anomalies([*baseline, *rows]))
     order = {kind: index for index, kind in enumerate(ANOMALY_KINDS)}
-    return sorted(
+    ordered = sorted(
         found,
         key=lambda item: (order.get(str(item["kind"]), 99), -int(item["amount_fen"])),
     )
+    for item in ordered:
+        item["rule_id"] = ANOMALY_RULE_IDS.get(str(item["kind"]), "")
+    return ordered
 
 
 def anomalies_for_month(
@@ -286,6 +297,7 @@ def explain_transaction(
         hits.append(
             {
                 "kind": str(item["kind"]),
+                "rule_id": str(item.get("rule_id") or ""),
                 "title": str(item["title"]),
                 "detail": str(item["detail"]),
                 "amount_fen": int(item["amount_fen"]),

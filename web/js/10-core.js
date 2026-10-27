@@ -51,6 +51,7 @@ const INTENT_LABEL = {
   bill_analysis: '账单分析',
   subscription: '订阅管理',
   birthday_plan: '生日理财计划',
+  assist: '助手直接回答',
   unknown: '未识别'
 };
 

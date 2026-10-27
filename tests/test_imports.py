@@ -117,6 +117,9 @@ LAYERS: dict[str, int] = {
     "app.planner.ticker": 4,
     # 识别即执行（提醒/储蓄）：不建 DAG、不动钱，只落计划与提醒
     "app.planner.assist": 4,
+    # 账单异常的人工核实：用户问「这笔是不是我刷的」时，摊开那一笔的四项事实与规则号。
+    # 与 assist 同层（第 4 层），只读 tools.bill 的检测结果，不写库
+    "app.planner.bill_check": 4,
     # W4 把 1320 行的 routes.py 按「一次请求关心什么」拆成 9 个模块：
     # 装配（routes）、口令（auth）、状态（chat_state）、候选（chat_hints）、
     # 取证（chat_trace）、主流程（chat_flow）、聊天端点（chat_api）、
@@ -314,7 +317,8 @@ ALLOWED: dict[str, frozenset[str]] = {
     "app.planner.intent_schema": _deps(""),
     "app.planner.runner": _deps("app.audit app.clock app.funds app.handoff_store app.models app.money app.planner app.planner.clarify app.planner.dag app.planner.events app.planner.state app.policy.engine app.policy.rules app.security app.security.token app.tools app.tools.base app.tools.registry"),
     # 识别即执行：只读账户、建计划/提醒，钱一律走原有的确认与令牌路径
-    "app.planner.assist": _deps("app.audit app.clock app.memory app.money app.plans app.proactive app.reminder_time app.scope app.subscriptions app.timefmt"),
+    "app.planner.assist": _deps("app.audit app.clock app.memory app.money app.planner.bill_check app.plans app.proactive app.reminder_time app.scope app.subscriptions app.timefmt"),
+    "app.planner.bill_check": _deps("app.clock app.money app.timefmt app.tools.bill"),
     "app.planner.state": _deps("app.audit app.clock app.db app.funds app.ids app.models app.money app.security app.security.breaker app.tools app.tools.base"),
     "app.planner.kb_bridge": _deps("app.knowledge app.knowledge.models app.knowledge.normalize app.knowledge.retrieve"),
     "app.planner.payment_guard": _deps(""),

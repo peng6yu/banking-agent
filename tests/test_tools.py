@@ -458,3 +458,10 @@ def test_resolve_payee_rejects_blank_name(ctx: ToolContext) -> None:
     """错误分支：空姓名在参数校验就被挡下，不会拿着空串去查库。"""
     with pytest.raises(ValidationError):
         registry.execute("resolve_payee", {"name": ""}, ctx=ctx)
+
+def test_anomaly_rule_numbers_are_the_same_in_the_detector_and_on_the_page() -> None:
+    """检测结果自带 R-BILL-xx，页面文案表里也有一份：两边必须逐字一致。"""
+    from app.tools.bill import ANOMALY_RULE_IDS
+    from app.views.labels import ANOMALY_RULES
+
+    assert {kind: rule["rule_id"] for kind, rule in ANOMALY_RULES.items()} == ANOMALY_RULE_IDS

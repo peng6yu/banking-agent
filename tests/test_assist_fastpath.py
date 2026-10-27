@@ -9,8 +9,11 @@
 
 from __future__ import annotations
 
+import time
+
 import pytest
 
+import app.clock as clock
 import app.planner.assist as assist
 import app.proactive as proactive
 from app import db
@@ -302,3 +305,118 @@ def test_reminder_still_wins_over_memory_markers(bank) -> None:
 
     assert out is not None and out["action"] == "reminder_create"
 
+
+# --------------------------------------------------------------- 账单异常核实
+def test_detect_sends_a_bill_question_to_the_bill_path() -> None:
+    """账单页「让 AI 助手核这一笔」的原话：以前「核实 + 那笔」被抢进订阅核对分支。"""
+    assert assist.detect("帮我核实一下凌晨那笔境外消费，是不是我自己刷的。") == "bill"
+    assert assist.detect("帮我核实一下「乐刻健身」这几笔是不是订阅") == "subscription"
+
+
+def _night_tx(conn, tx_id: str, amount_fen: int, merchant: str, hour: int) -> None:
+    """今天的某点整一笔支出：账单三条规则是读时算的，造数就能命中。"""
+    parts = time.localtime(clock.now_ms() / 1000)
+    ts_ms = int(
+        time.mktime((parts.tm_year, parts.tm_mon, parts.tm_mday, hour, 0, 0, 0, -1, -1)) * 1000
+    )
+    account_id = str(
+        conn.execute("SELECT id FROM accounts WHERE type='debit'").fetchone()["id"]
+    )
+    conn.execute(
+        "INSERT INTO transactions"
+        " (id, account_id, direction, amount_fen, counterparty, category, note, ts_ms,"
+        " balance_after_fen, channel) VALUES (?, ?, 'out', ?, ?, '购物', '', ?, 0, 'manual')",
+        (tx_id, account_id, amount_fen, merchant, ts_ms),
+    )
+
+
+def test_bill_check_answers_with_the_one_transaction_it_found(bank) -> None:
+    bank.execute("DELETE FROM transactions")
+    _night_tx(bank, "t_night", 288_000, "Apple Store 香港", 3)
+    bank.commit()
+    out = assist.handle(bank, "帮我核实一下凌晨那笔境外消费，是不是我自己刷的。")
+    assert out["action"] == "bill_check"
+    text = out["summary"]
+    assert "疑似订阅" not in text, "账单异常不能答成订阅清单"
+    assert "R-BILL-02" in text and "流水号 t_night" in text
+    assert "不是欺诈认定" in text
+    assert any("冻结" in choice["label"] for choice in out["choices"])
+    assert [item["rule_id"] for item in out["data"]["anomalies"]] == ["R-BILL-02"]
+
+
+def test_bill_check_is_honest_when_nothing_hit(bank) -> None:
+    bank.execute("DELETE FROM transactions")
+    bank.commit()
+    out = assist.handle(bank, "帮我核实一下凌晨那笔境外消费")
+    assert out["action"] == "bill_check"
+    assert "没有命中账单规则" in out["summary"]
+    assert out["data"]["anomalies"] == []
+
+
+def test_bill_check_pivots_to_the_action_once_the_user_says_it_was_not_them(bank) -> None:
+    bank.execute("DELETE FROM transactions")
+    _night_tx(bank, "t_night", 288_000, "Apple Store 香港", 3)
+    bank.commit()
+    out = assist.handle(bank, "这笔不是我刷的，帮我处理")
+    text = out["summary"]
+    assert "临时冻结" in text and "争议交易" in text and "流水号 t_night" in text
+    assert any("冻结" in choice["value"] for choice in out["choices"])
+
+def _hike_txs(bank) -> None:
+    """上月 25.00 + 本月 35.00 的同一家订阅：命中 R-BILL-03（涨价 40%）。"""
+    parts = time.localtime(clock.now_ms() / 1000)
+    year, month = parts.tm_year, parts.tm_mon
+    previous = (year, month - 1) if month > 1 else (year - 1, 12)
+    account_id = str(
+        bank.execute("SELECT id FROM accounts WHERE type='debit'").fetchone()["id"]
+    )
+    rows = (("t_prev", previous, 2_500), ("t_cur", (year, month), 3_500))
+    for tx_id, (row_year, row_month), amount_fen in rows:
+        ts_ms = int(
+            time.mktime((row_year, row_month, 5, 10, 0, 0, 0, -1, -1)) * 1000
+        )
+        bank.execute(
+            "INSERT INTO transactions"
+            " (id, account_id, direction, amount_fen, counterparty, category, note, ts_ms,"
+            " balance_after_fen, channel) VALUES (?, ?, 'out', ?, '爱奇艺会员', '订阅', '', ?, 0, 'manual')",
+            (tx_id, account_id, amount_fen, ts_ms),
+        )
+
+
+def test_a_scene_question_never_borrows_another_kind_of_anomaly(bank) -> None:
+    """问凌晨境外，账上只有订阅涨价：必须说这一类没命中，不能拿涨价冒充当目标。"""
+    bank.execute("DELETE FROM transactions")
+    _hike_txs(bank)
+    bank.commit()
+    out = assist.handle(bank, "帮我核实一下凌晨那笔境外消费，是不是我自己刷的。")
+    assert out["action"] == "bill_check"
+    text = out["summary"]
+    assert "没有命中「凌晨、境外」" in text
+    assert "我按这句话在账上找到的是这一笔" not in text
+    assert out["data"]["anomalies"] == [], "没找到就是没找到，不能冒充"
+    assert out["data"]["other_anomalies"], "别的异常要列出来供点选"
+    assert any("核对「爱奇艺会员」" in choice["label"] for choice in out["choices"])
+
+
+def test_a_hike_answer_talks_about_this_months_charge_not_the_difference(bank) -> None:
+    """涨价异常记的是差额（10 元），答复要说这个月扣了 35 元、上月 25 元。"""
+    bank.execute("DELETE FROM transactions")
+    _hike_txs(bank)
+    bank.commit()
+    out = assist.handle(bank, "爱奇艺会员这个月涨价了，帮我核实一下")
+    text = out["summary"]
+    assert "35.00 元（上月 25.00 元，涨了 10.00 元）" in text
+    assert "R-BILL-03" in text
+    assert "业务管理" in text, "订阅涨价该指向停代扣"
+    assert "争议交易" not in text, "订阅涨价不是盗刷，别教人报争议交易"
+
+def test_a_hike_is_never_handled_as_a_stolen_card(bank) -> None:
+    """账上只有订阅涨价时，用户说「不是我刷的」不能教他报争议交易。"""
+    bank.execute("DELETE FROM transactions")
+    _hike_txs(bank)
+    bank.commit()
+    out = assist.handle(bank, "这笔不是我刷的，帮我处理")
+    text = out["summary"]
+    assert "争议交易" not in text
+    assert "没有命中「被盗刷（不是你刷的）」" in text
+    assert "核对「爱奇艺会员」" in "".join(choice["label"] for choice in out["choices"])

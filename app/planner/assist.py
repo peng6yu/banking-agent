@@ -29,6 +29,7 @@ import app.proactive as proactive
 import app.reminder_time as reminder_time
 import app.memory as memory
 import app.subscriptions as subscriptions
+from app.planner.bill_check import handle_bill_check, looks_like_bill
 from app.money import fen_to_yuan_str, yuan_short
 import app.timefmt as timefmt
 
@@ -208,7 +209,7 @@ _SAVINGS_AMOUNT_RE: Final[re.Pattern[str]] = re.compile(r"(?:存|攒)[^，。；
 
 
 def detect(text: str) -> str | None:
-    """返回 'reminder' / 'savings' / 'plan' / 'subscription' / 'memory' / None；只做关键词判定，不碰数据库。"""
+    """返回 'reminder' / 'savings' / 'plan' / 'bill' / 'subscription' / 'memory' / None；只做关键词判定，不碰数据库。"""
     clean = _clean(text)
     if not clean:
         return None
@@ -225,6 +226,11 @@ def detect(text: str) -> str | None:
         # 有锚点、又没有金额/收款人：这是给既存的钱设时间点，不是要现在动钱。
         if scope.reminder_anchor(clean) and not _REMINDER_TRANSFER_RE.search(clean):
             return "reminder"
+    # 账单异常核实先于订阅：「核实一下凌晨那笔境外消费」里「核实」和「那笔」都是
+    # 订阅核对的关键词，以前就被抢去问「3 条疑似订阅要核哪一条」——用户问的是某几笔消费，
+    # 答的却是商户的周期扣款。账单异常看的是流水，订阅看的是商户，两件事分开认。
+    if looks_like_bill(clean):
+        return "bill"
     # 逐笔核实订阅：要有动作词 + 对象词，或者用户直接下结论（「不是我订的」）。
     # 放在储蓄判断之前：这两句的用词不重叠，但「核实」比「存」更该优先。
     if (
@@ -1277,7 +1283,17 @@ def _handle_subscription(conn, text: str, user_id: str) -> dict[str, Any]:
         return {
             "intent": "assist",
             "action": "subscription_check",
-            "summary": f"现在有 {len(candidates)} 条疑似订阅，要逐笔核对哪一条？点一条，我把每一笔的日期、金额、备注原文念给你听。",
+            "summary": (
+                f"这句话里没有商户名，我这边有 {len(candidates)} 条疑似订阅，认不出你要核哪一条：\n"
+                + "\n".join(
+                    f"· 「{item.get('merchant')}」{item.get('period_label') or ''}"
+                    f" · 每笔约 {item.get('avg_amount_yuan')} 元"
+                    f" · 最近一次 {item.get('last_text') or ''}"
+                    f" · 共 {item.get('occurrences')} 笔"
+                    for item in candidates[:4]
+                )
+                + "\n点一条，我把每一笔的日期、金额、备注和流水号念给你听。"
+            ),
             "choices": [
                 {"label": f"核对「{item['merchant']}」（{item.get('occurrences')} 笔）", "value": f"帮我核实一下「{item['merchant']}」这几笔是不是订阅"}
                 for item in candidates[:8]
@@ -1348,7 +1364,7 @@ def _handle_subscription(conn, text: str, user_id: str) -> dict[str, Any]:
         tail = f" · {note}" if note else ""
         lines.append(
             f"{index}) {row['ts_text']} · {row['amount_yuan']} 元 · {row['category']}"
-            f" · {row['channel_label']}{tail}"
+            f" · {row['channel_label']}{tail} · 流水号 {row.get('transaction_id')}"
         )
     candidate = next(
         (item for item in candidates if str(item.get("merchant") or "") == merchant), None
@@ -1392,6 +1408,8 @@ def handle(conn, text: str, *, session_id: str | None = None) -> dict[str, Any] 
         return _handle_reminder(conn, text, user_id)
     if kind == "plan":
         return _handle_plan(conn, text, user_id)
+    if kind == "bill":
+        return handle_bill_check(conn, text, user_id)
     if kind == "subscription":
         return _handle_subscription(conn, text, user_id)
     if kind == "memory":
