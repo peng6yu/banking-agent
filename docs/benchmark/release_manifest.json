@@ -1,10 +1,10 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-10-27T09:28:11+08:00",
+  "generated_at": "2026-10-27T10:23:33+08:00",
   "git": {
-    "head": "7a5b30a0d2ea4125dbb21c33d23fc2dd1891f75f",
-    "head_short": "7a5b30a",
-    "subject": "docs: 数据字典按新参数重生成，全仓测试数同步到 1811",
+    "head": "81ec8dd506a0c468f0ca31c1569e5f792fd97f4c",
+    "head_short": "81ec8dd",
+    "subject": "refactor(web): 一行只留主路径，其余动作收进这一行的「操作」",
     "branch": "main",
     "dirty": false,
     "changed_paths": 0
@@ -111,7 +111,7 @@
     "passed": 1811,
     "failed": 0,
     "skipped": 4,
-    "duration_s": 22.93,
+    "duration_s": 20.77,
     "log": "tmp/pytest_final.log",
     "parsed": true
   },
