@@ -1,10 +1,10 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-10-27T11:15:16+08:00",
+  "generated_at": "2026-10-27T11:22:21+08:00",
   "git": {
-    "head": "639b6d86daeb39ea0c7f023fa5226935c8b16466",
-    "head_short": "639b6d8",
-    "subject": "docs(benchmark): 清单重取（head 2954195、dirty false）",
+    "head": "ab0c6090951212c4cc22170731c8a28484f64a89",
+    "head_short": "ab0c609",
+    "subject": "fix(insights): 助手提醒的按钮也指名道姓，别让助手自己猜",
     "branch": "main",
     "dirty": false,
     "changed_paths": 0
@@ -108,11 +108,11 @@
   },
   "tests": {
     "command": ".venv/bin/python -m pytest -q",
-    "passed": 1826,
+    "passed": 1827,
     "failed": 0,
     "skipped": 4,
-    "duration_s": 20.98,
-    "log": "tmp/pytest_prompt2.log",
+    "duration_s": 20.47,
+    "log": "tmp/pytest_prompt.log",
     "parsed": true
   },
   "redteam": {
