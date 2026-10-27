@@ -3,7 +3,18 @@
 ## 7.1 system prompt（**逐字使用，不要改写**）
 
 ```
-你是银行 AI 助手，可以调用工具帮用户查询和操作账户。
+你是「小银」，这位用户自己的银行 AI 助手。语气像一个熟悉的柜员：先说结论，再补依据，不客套、不堆术语。
+你不是每轮从零开始：上面几轮对话和系统给你的「长期记忆」都算数，但要分清哪些是用户这次亲口说的。
+
+预设（用户没特别说明时按这个来）：
+- 用户在说自己：自己的账户、自己的钱、自己的卡。
+- 金额没给就不猜：动钱的请求缺金额就先问，不要拿历史金额顶上。
+- 偏好只当默认值：这次说了不同的账户、收款人或金额，以这次为准。
+- 你只负责听懂和填槽，执行与拦截都在执行层；没看到工具结果就不要说「已经办好了」。
+- 工具是白名单：你手上只有 emit_intent（以及系统提供的查询快路），白名单之外的能力一律没有，别承诺、别假装调用。
+
+思维顺序（内部照这个走，不要输出这段思考）：
+1) 这句是查询、动钱还是管理？2) 真正要办的是哪一件？3) 缺哪个关键槽位？4) 有没有触到硬性规则？5) 再调用 emit_intent，缺的槽位如实写进 missing。
 
 硬性规则：
 1. 你只能通过工具做事。不许自己计算余额，不许编造交易、金额或时间。
@@ -15,6 +26,8 @@
 6. 你没有权限绕过确认。黄色和红色操作由系统拦截并请用户确认，
    不要在没拿到工具结果前声称「已经完成」。
 7. 工具报错时用一句人话解释，不要输出英文错误码或堆栈。
+8. 你只处理与钱有关的事：账户、余额、流水、账单、转账、收款人、订阅代扣、预约转账、计划与预算、理财持仓、额度与风控确认。
+   与钱无关的请求（天气、闲聊、写作、编程、翻译等）不建任何对象：一句话说明你只管账上和计划里的事，再给出最接近的资金动作。
 ```
 
 这段 prompt 存放在 `app/planner/intent.py` 的 `SYSTEM_PROMPT` 常量里，测试会断言它包含 `<DATA>` 字样。
@@ -322,8 +335,21 @@ for node in topo_sort(dag):
 | GET | `/api/tools` | — | 工具清单 | 左栏「我能做什么」 |
 | GET | `/api/health` | — | `{ok, model, db}` | 存活探针 |
 | POST | `/api/scheduled/run` | — | `{ok, executed, items}` | 立刻执行一次到点的定时转账（**答辩演示用**，后台节拍每 30 秒也会跑） |
+| POST | `/api/reminders` | `ReminderCreate`（`text` 1–40、`due_ms`、`repeat` none/daily/weekly/monthly、`hour` 默认 9、`minute` 默认 0、`day`、`weekday`） | `{ok, plan, due_ms, due_text, repeat, repeat_label, anchor, anchor_label}` | 计划页表单建一条提醒（**文案必须含资金锚点**：还款日/会员扣费/预约转账/预算/储蓄目标/额度，否则 400 并返回边界话术；只提醒、不动钱）；日历复发由 `app/reminder_time.py` 算，计划步到点后回 pending |
+| POST | `/api/subscriptions/verdict` | `SubscriptionVerdictRequest`（`merchant` 1–60、`verdict` not_subscription / confirmed、`note` 0–200） | `{ok, verdict}` | 用户给「疑似订阅」定性；**两种结论都让该商户退出待办**（只提醒、不动钱、不建计划、不替用户退订） |
+| POST | `/api/subscriptions/verdict/clear` | `SubscriptionVerdictClearRequest`（`merchant` 1–60） | `{ok, merchant, cleared}` | 撤回定性，让流水的推断重新生效（`cleared:false` 表示本来就没定性过） |
+| POST | `/api/transactions/manual` | `ManualTransactionRequest`（`merchant` 1–40、`amount_fen` 1–1e8、`direction` out/in、`category` 默认「其他」、`note` 0–80） | `{ok, manual:true, notice, transaction, balance_after_fen, audit_seq, idempotent}` | 用户手动补录一笔流水（现金/刷卡单没进本行）：只写本行 `transactions` 与演示余额，不对应任何真实支付；同账户+方向+金额+商户+分类+备注且**同一本地自然日**重复提交复用原流水（`idempotent:true`，不重复扣钱） |
+| GET | `/api/chat/history?session_id=&limit=` | — | `{ok, session_id, found, title, turns[]}` | 某个会话最近几轮原文，刷新页面时把气泡画回来；`found:false` 表示这个会话没记忆 |
+| GET | `/api/chat/latest?limit=` | — | `{ok, session_id, turns[], last_ms, title}` | 最近一次真聊过的会话：首屏没存 `session_id` 时接着它，而不是新开一个空会话 |
+| GET | `/api/memory` | — | `{ok, facts[], count, prompt_block}` | 助手对用户的长期记忆（跨会话）；`prompt_block` 是注入提示词的那一段，前端只展示不参与判断 |
+| POST | `/api/memory` | `MemoryWriteRequest`（`key` 1–40、`value` 1–200、`kind` fact/preference/profile、`source`） | `{ok, fact}` | 手动记一条偏好/事实（同键覆盖写，落审计 `memory.written`） |
+| DELETE | `/api/memory/{key}` | — | `{ok, key, removed}` | 忘掉一条（幂等；落审计 `memory.forgotten`） |
 | POST | `/api/demo/reset` | — | `{ok}` | 重置演示数据 |
 | GET | `/` | — | `index.html` | 静态页 |
+
+**确认帧的 `subscription` 字段（2026-10-25 停代扣联动轮新增）**：`cancel_subscription` 这类「停银行侧代扣」的确认卡，除了原有的 `action_text/amount/...` 之外还带一个 `subscription` 对象——`{merchant, amount_fen, amount_yuan, period, period_label, next_charge_text, boundary_text, status, status_label}`。前端据此把「金额」行写成「不动本金余额（只停银行侧代扣）」，并补出「订阅商户 / 每期金额 / 下次扣费 / 当前状态」四行；`boundary_text` 固定是「只停了银行侧周期性代扣，商户会员需要你自己去商户端取消」。没有这个字段的普通确认卡照旧按金额渲染。
+
+**管理页疑似订阅的 `stopped` 字段**：`GET /api/business/management` 的 `subscriptions.inferred` 除 `items` / `settled` 之外还带 `stopped[]`（`sub_id, merchant, amount_fen, amount_yuan, period, period_label, next_charge_text, status, status_label, boundary_text`）与 `stopped_count`——停掉银行侧代扣的商户**不再进 `items` 待办**，而是列到「已停止银行侧代扣」一栏。
 
 ### 异常 → HTTP 映射（统一在 `main.py` 注册 handler）
 
@@ -348,14 +374,20 @@ for node in topo_sort(dag):
 | `confirm` | `confirmation_id, action_text, expires_in_s` | 需要确认 |
 | `factor` | `confirmation_id, required[]` | 需要多因子 |
 | `tool` | `node_id, ok, summary` | 工具执行完 |
-| `done` | `summary, balance_after_fen` | 全部完成 |
+| `done` | `summary, balance_after_fen`；识别即执行（`intent=assist`）额外带 `intent, action, choices[], data`；澄清轮带 `choices[]` | 全部完成（assist 快路不建 DAG，直接 done） |
 | `error` | `code, user_text` | 任何失败 |
 
 格式严格按 SSE：`event: {name}\ndata: {json}\n\n`。
 
+**`choices` 的语义**（2026-10-25）：`done` 事件里的 `choices` 是服务端按缺失槽位从库里生成的**可点选项**（`amount_fen` / `payee_name` / `payee_names` / `card_tail` / `product_code` / `subscription_name` / `due_ms` / `date_hint`，最多 8 条）。前端把它渲染成 chips，点一下等于替用户把那句话发出去——用户不必手打；服务端照旧重新解析与裁决，选项本身不带任何权限。
+
+**chips 只问当前槽位**（2026-10-25）：`_choices_for` 先看这一句正在问哪个槽位（`_focused_slots` + `_SLOT_QUESTION_HINTS`），只给那一个槽位的候选；`unknown` / 低置信度时给 `_broad_choices` 的 8 条固定去处，不再出现「收款人与金额混排」或「一个选项都没有」。
+
+**同名对象必须可区分**：`assist` 生成结束类 chip 时，同名计划/提醒的文案带「（MM-DD HH:MM · pl_xxx）」，`value` 是「取消计划 pl_xxx」/「取消提醒 pl_xxx」；服务端先按计划号认（`by_id`），同时命中多条则回 `plan_cancel_choose` / `reminder_cancel_choose` 反问，绝不按标题猜。
+
 **操作说明（SSE 是长连接）**：`confirm` / `factor` 事件到达时这条流**不会结束**——执行器正等着用户点头。必须保持连接、**在流还开着的时候** `POST /api/confirm` 回灌确认（黄灯）或回灌因子（红灯）；整轮跑完之后会话才从 `executor.RUNS` 摘除，此后回灌会拿到 400「会话已结束或不存在」。命令行客户端要另开一个请求去 POST 确认；前端不受影响。
 
-## 7.7 前端（`web/index.html`，单文件）
+## 7.7 前端（`web/index.html` 壳 + `web/app.css` + `web/js/*.js` 17 个模块）
 
 ### 布局
 
@@ -379,6 +411,8 @@ for node in topo_sort(dag):
 | 配色：绿 `#16a34a`、黄 `#d97706`、红 `#dc2626` | 三色必须先声夺人 |
 | 每个事件到达后 100ms 内更新对应面板 | 「实时」是创新分 |
 | 确认按钮必须显式写清金额和收款人 | 防误触 |
+| 缺槽位的澄清必须给可点 chips（≤8 条），点一下直接发送 | 答辩现场不必手打长句，也避免打错被反问 |
+| 总览「待处理授权」可原地批准/拒绝（仅当 `can_confirm_here` 且未过期），不可原地时说明原因 | 服务端仍会按当下重新裁决，按钮不是后门 |
 | 审计面板每来一条加一行，显示 `seq` 与短哈希前 8 位 | 可验证感 |
 
 ### 前端函数约定
@@ -388,7 +422,21 @@ for node in topo_sort(dag):
 | `sendMessage()` | 发起 /api/chat，开流，分发事件 |
 | `handleEvent(name, data)` | 按 7.6 表更新 DOM |
 | `renderIntent(data)` / `renderPlan(data)` / `renderPolicy(data)` / `renderFactor(data)` / `renderAudit(row)` | 各面板渲染 |
-| `confirmAction(id, approve, factor)` | POST /api/confirm |
+| `confirmAction(id, approve, factor, proofs, sid)` | POST /api/confirm；`sid` 是发起该轮确认的会话（总览页的待确认卡属于别的会话，必须带它自己的 `session_id`） |
+| `bxRenderReminders(block)` / `bxBindReminderForm()` / `bxSubmitReminder()` | 计划页的提醒列表与表单：表单只调 `POST /api/reminders`；列表读 `GET /api/business/plans` 的 `reminders` 段，「结束这条提醒」= `PATCH /api/plans/{id} {status:'cancelled'}`；每条卡还会显示 `anchor_label`（这条提醒盯的是哪笔钱），表单提示写明「只记和钱有关的时间点」 |
+| `bxDueParts(value)` | `datetime-local` → 本地时区 `{ms,hour,minute,weekday,day}`，`weekday` 与 `reminder_time` 的 0=周一 对齐 |
+| `bxSubscriptionVerdict(merchant, verdict)` / `bxSubscriptionVerdictClear(merchant)` | 疑似订阅定性：`POST /api/subscriptions/verdict` 与 `/clear`；气泡按结论分文案（confirmed 明说「已从待办拿掉」并给撤回入口），成功后 `bxCacheDrop()` + `bxRefresh()` |
+| `bxRenderInferred(block)` 的 `settled` 段 | 已定性的商户不再进 `items`（服务端 `detect_recurring` 就过滤掉了），改由 `data.settled` 列出，每行带「重新当成疑似」按钮（`bxRunAction` kind `subscription_verdict_clear`） |
+| `bxInlineFactor(box, cid, sid, onDone)` | 就地补验证：拉 `POST /api/factor/challenge` 渲染口令行 → 带 `proofs` 调 `confirmAction(cid, true, null, proofs, sid)`；用于总览待处理授权 |
+| `bxRenderHandoffs(host, block, tagId)` / `bxHandoffCard(item)` / `bxHandoffPost(item, action, note)` | 人工接管队列：领取 / 要求补充信息（`note` 必填）/ 拒绝（不动钱）/ 取消这一轮，写审计的操作者是 `BX_OPERATOR` |
+| `bxLoadChatHistory()` | 启动时按「有 `sessionStorage` 的 sid 就查 `/api/chat/history`，否则查 `/api/chat/latest`」把上一段对话的气泡画回来；先出「这是上次的对话（标题，最近 N 轮，服务端存着）」再逐轮回放，之后才跑 `bxRestoreSession()` |
+| `bxRenderMemory()` / `bxSaveMemory(btn)` / `bxForgetMemory(key, btn)` / `bxMemoryField(id, label, placeholder)` | 管理页「助手对你的长期记忆」卡：`GET /api/memory` 列出（键/类型/内容/来源/时间）并逐条给「忘掉这条」（`DELETE /api/memory/{key}`），底部表单 `POST /api/memory` 手动补一条 |
+| 聊天流的 `onStart` | 只在「这一轮没带 sid」或「sid 变了」时提示一句：「会话 s_xxx（同一条会话一直用下去，刷新也接得上）」——**不再每轮打印「已建立会话」**，那是在制造「每句话都新开会话」的错觉 |
+| `renderConfirm` 的订阅行 | 确认帧带 `subscription` 时，金额行改「不动本金余额（只停银行侧代扣）」，并追加订阅商户 / 每期金额 / 下次扣费 / 当前状态四行；确认按钮文案也带商户名 |
+| `bxBindManualForm()` / `bxSubmitManualTransaction()` | 账单页「手动记一笔」表单：`POST /api/transactions/manual` → 气泡说明「只进本行流水与演示余额」+ 结果框写流水号/渠道/分类 → 清空输入并刷新账单；同日重复提交由服务端幂等，气泡会明说「这笔今天已经记过，没有重复记账」 |
+| `bxRunAction` 的 `subscription_check` 分支 | 管理页「逐笔核对这几笔」不是死文案：`bxAsk(act.prompt)` 真发一句「帮我核实一下「商户」这几笔是不是订阅」，由快路回逐笔明细 |
+| `bxBindBirthdayForm()` / `bxSubmitBirthdayPlan()` / `bxRenderBirthdayResult(plan)` | 生日计划：`POST /api/plans/birthday` 建单，卡片渲染预算/可支配/预留/到点与逐项状态 |
+| `bxPayBirthdayItem(planId, itemKey, btn, host)` / `bxBirthdayFactor(...)` / `bxReloadBirthdayResult(planId)` | 逐项付款：红档先拿 `waiting_factor` → 口令行 → 带 `proofs` 重发同一请求；成功后用 `GET /api/plans/{id}`（返回 `{ok, plan}`）重绘卡片，所以「已付款」与列表状态一致 |
 | `escapeHtml(s)` | **所有来自后端的文本都要过一遍**，防 XSS |
 
 ## 7.8 前端禁止事项

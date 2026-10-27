@@ -14,7 +14,7 @@ from typing import Any
 import pytest
 
 from app import db
-from app.clock import SystemBusy
+from app.clock import SystemBusy, ValidationError
 from app.planner import dag as planner_dag
 from app.planner import executor
 from app.security import factors
@@ -328,3 +328,79 @@ def test_challenge_endpoint_issues_one_per_required_factor(bank: Path) -> None:
 def test_challenge_endpoint_rejects_unknown_factor(bank: Path) -> None:
     res = asyncio.run(_with_pending("s_red_http_bad", factor="passport"))
     assert res.status_code == 400
+
+# ---------------------------------------------- 重发挑战不能把锁定计数清零（A1）
+
+
+def test_reissuing_a_challenge_does_not_reset_the_lock(conn: Any) -> None:
+    """把「重新获取验证码」当成解锁按钮，是 6 位码能被穷举的根因。
+
+    累计口径生效后：第一张挑战错满 5 次，第二张挑战即使码对也必须被拒。
+    """
+    first = _challenge(conn)
+    wrong = "000000" if first["code"] != "000000" else "111111"
+    for _ in range(factors.MAX_ATTEMPTS):
+        factors.verify(
+            conn,
+            session_id="s_f",
+            confirmation_id="cf_x",
+            required=["sms"],
+            proofs=[{"factor": "sms", "challenge_id": first["challenge_id"], "code": wrong}],
+        )
+    second = factors.issue(
+        conn,
+        session_id="s_f",
+        confirmation_id="cf_x",
+        factor="sms",
+        now=int(first["expires_ms"]) + factors.ISSUE_COOLDOWN_MS,
+    )
+    result = factors.verify(
+        conn,
+        session_id="s_f",
+        confirmation_id="cf_x",
+        required=["sms"],
+        proofs=[{"factor": "sms", "challenge_id": second["challenge_id"], "code": second["code"]}],
+    )
+    assert result["ok"] is False
+    assert result["invalid"][0]["reason"] == "TOO_MANY_ATTEMPTS"
+
+
+def test_issue_is_capped_per_confirmation(conn: Any) -> None:
+    """同一张确认最多签发 3 张挑战；第 4 次直接拒绝，不再发码。"""
+    start = 1_000_000
+    for index in range(factors.MAX_ISSUES_PER_CONFIRMATION):
+        factors.issue(
+            conn,
+            session_id="s_f",
+            confirmation_id="cf_cap",
+            factor="sms",
+            now=start + index * factors.ISSUE_COOLDOWN_MS,
+        )
+    with pytest.raises(ValidationError) as excinfo:
+        factors.issue(
+            conn,
+            session_id="s_f",
+            confirmation_id="cf_cap",
+            factor="sms",
+            now=start + 10 * factors.ISSUE_COOLDOWN_MS,
+        )
+    assert excinfo.value.fields.get("reason") == "ISSUE_LIMIT"
+    rows = conn.execute(
+        "SELECT COUNT(*) FROM factor_challenges WHERE confirmation_id = 'cf_cap'"
+    ).fetchone()[0]
+    assert rows == factors.MAX_ISSUES_PER_CONFIRMATION
+
+
+def test_issue_has_a_cooldown_between_resends(conn: Any) -> None:
+    """连点「重新获取」不该立刻发第二张码：冷却期内直接拒绝，并告诉还要等几秒。"""
+    first = _challenge(conn)
+    with pytest.raises(ValidationError) as excinfo:
+        factors.issue(
+            conn,
+            session_id="s_f",
+            confirmation_id="cf_x",
+            factor="sms",
+            now=int(first["expires_ms"]) - factors.CHALLENGE_TTL_MS + 1,
+        )
+    assert excinfo.value.fields.get("reason") == "ISSUE_COOLDOWN"
+    assert int(excinfo.value.fields.get("retry_after_s") or 0) >= 1

@@ -234,13 +234,19 @@ def new_confirmation(
     now_ms = clock.now_ms()
     ttl = int(ttl_ms) if ttl_ms else confirm_timeout_ms()
     who = _display_payee(state.conn, action)
+    text = action_text(node.tool, action, payee=who)
+    if node.tool == "cancel_subscription":
+        # 「取消订阅」四个字等于没说是哪一条：确认卡上得写清商户和月费，用户才知道
+        # 自己在点什么。action_text() 是纯函数、被别的工具复用，不能让它连库；订阅
+        # 对象只有到建卡这一步才查得到，就在这里覆写一次。查不到就保留原文案。
+        text = _subscription_action_text(state.conn, action) or text
     conf = Confirmation(
         id=new_id("cf"),
         node_id=node.id,
         action=action,
         level=decision.level,
         required_factors=list(decision.required_factors),
-        action_text=action_text(node.tool, action, payee=who),
+        action_text=text,
         created_ms=now_ms,
         expires_ms=now_ms + ttl,
         payee_name=who,
@@ -280,6 +286,30 @@ def _new_answer_future() -> asyncio.Future[dict[str, Any]]:
             "new_confirmation 必须在事件循环里调用：确认卡要能接住早到的答案"
         ) from exc
     return loop.create_future()
+
+
+def _subscription_action_text(conn: sqlite3.Connection, action: Action) -> str | None:
+    """停止代扣的确认卡文案：带上商户与周期金额，别只写「取消订阅」。
+
+    查不到就返回 None，调用方退回原来的文案——宁可话少，也不编一个商户名。
+    """
+    sub_id = str(action.params.get("sub_id") or "").strip()
+    if not sub_id:
+        return None
+    if action.account_id:
+        row = conn.execute(
+            "SELECT merchant, amount_fen, period FROM subs WHERE id = ? AND account_id = ?",
+            (sub_id, str(action.account_id)),
+        ).fetchone()
+    else:
+        row = conn.execute(
+            "SELECT merchant, amount_fen, period FROM subs WHERE id = ?", (sub_id,)
+        ).fetchone()
+    if row is None:
+        return None
+    period_label = "每月" if str(row["period"]) == "monthly" else "每年"
+    money_text = fen_to_yuan_str(int(row["amount_fen"]))
+    return f"停止银行侧代扣「{row['merchant']}」（{period_label} {money_text} 元）"
 
 
 def _display_payee(conn: sqlite3.Connection, action: Action) -> str | None:

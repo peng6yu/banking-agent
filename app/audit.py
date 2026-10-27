@@ -57,6 +57,9 @@ EVENT_TYPES: Final[frozenset[str]] = frozenset(
         "scheduled.executed",
         "scheduled.deferred",
         "tool.executed",
+        # 主动提醒：生成了什么、用户采纳还是忽略，都要能复盘「这条提醒从哪来、后来怎样」
+        "message.generated",
+        "message.feedback",
         # 黄档操作在提交时发现日累计已被别的会话推过红线：重新裁决并升级为红
         "policy.upgraded",
         "injection.detected",
@@ -67,6 +70,12 @@ EVENT_TYPES: Final[frozenset[str]] = frozenset(
         # 阶段 5 主动财务管理：目标、监测运行、提醒的生命周期
         "savings_goal.created",
         "savings_goal.updated",
+        # 每期真的从储蓄卡划一笔进目标（余额变了），以及取消时原路划回：
+        # 这是本项目里第一条「后台自动动钱」的路径，必须和预约转账一样逐笔可查。
+        "savings.deposited",
+        "savings.refunded",
+        # 到点但没划成（余额不够）：钱没动，可「为什么这期没攒上」必须留痕
+        "savings.skipped",
         "proactive.monitor_run",
         "proactive.alert_created",
         "proactive.alert_resolved",
@@ -96,6 +105,17 @@ EVENT_TYPES: Final[frozenset[str]] = frozenset(
         "suitability.checked",
         # 订阅：从流水推断出的潜在订阅（不是已确认事实，audit 里要能区分）
         "subscription.inferred",
+        # 疑似订阅的用户定性：只有用户自己说「是我订的 / 不是我订的」才落这条，
+        # 推断永远不自动转正，也不自动消失。
+        "subscription.verdict",
+        # 撤回定性：用户点错了或者商户改了收费方式，可以把结论撤掉让它重新待办
+        "subscription.verdict_cleared",
+    # 用户自己补录的一笔流水（接不了银行接口时的唯一入口）；只写本行账。
+    "transaction.manual",
+        # 用户核实过一组异常：按「账户 + 规则 + 单笔流水」落，不写钱、只免打扰。
+        # 结论分两档（自己刷的 / 不是我刷的），撤销另记一类：核实记录被删也是一件事实。
+        "bill.anomaly_acked",
+        "bill.anomaly_unacked",
         # 跨场景计划：计划与步骤的生命周期
         "plan.created",
         "plan.updated",
@@ -111,6 +131,11 @@ EVENT_TYPES: Final[frozenset[str]] = frozenset(
         "handoff.cancelled",
         "handoff.resumed",
         "handoff.resume_failed",
+        # 长期记忆：用户亲口说过/确认过的偏好与事实，写和忘都要留痕。
+        # 记忆会影响后续每轮对话的默认值，是「这个 agent 越来越懂这个人」的证据链，
+        # 用户也有权知道「你都记住了我什么」，所以写与删分开记两类。
+        "memory.written",
+        "memory.forgotten",
         "session.end",
     }
 )

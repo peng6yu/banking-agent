@@ -254,6 +254,9 @@ def change_card_pin(ctx: ToolContext, params: dict[str, Any], token: str | None 
     pin = str(params.get('pin') or '').strip()
     if len(pin) != 6 or not pin.isdigit():
         return fail_result('PIN_INVALID', '卡密码得是 6 位数字，请再确认一下。')
+    old_pin = str(params.get('old_pin') or '').strip()
+    if old_pin and (len(old_pin) != 6 or not old_pin.isdigit()):
+        return fail_result('PIN_INVALID', '原密码也得是 6 位数字，请再确认一下。')
     card, error = _locate_card(ctx, params)
     if card is None:
         return _lookup_failure(error, params)
@@ -262,6 +265,18 @@ def change_card_pin(ctx: ToolContext, params: dict[str, Any], token: str | None 
     if current in ('lost', 'closed'):
         code = 'CARD_LOST' if current == 'lost' else 'CARD_CLOSED'
         return fail_result(code, f'尾号 {tail} 的卡{_STATUS_ZH[current]}，改密码得到柜面办理。')
+    # 已经设过密码的卡必须先验证原密码。pin_hash 以前只写不读：谁拿到这轮执行权
+    # 谁就能直接覆盖密码，改密等于没有门槛。首次设置（pin_hash 为空）不需要原密码。
+    stored = str(card['pin_hash'] or '')
+    if stored:
+        if not old_pin:
+            return fail_result(
+                'PIN_OLD_REQUIRED',
+                f'尾号 {tail} 的卡已经设过密码，改之前得先验证原密码。请把原 6 位密码一起告诉我。',
+            )
+        salt, _, digest = stored.partition('$')
+        if hashlib.sha256((salt + old_pin).encode('utf-8')).hexdigest() != digest:
+            return fail_result('PIN_OLD_WRONG', '原密码不对，密码没有改。')
     salt = secrets.token_hex(8)
     digest = hashlib.sha256((salt + pin).encode('utf-8')).hexdigest()
     with db.tx(ctx.conn):

@@ -6,6 +6,7 @@ from typing import Any, Final
 from app import audit, clock, funds
 from app.clock import BankError, TokenMismatch
 from app.models import Action, Decision, ToolResult
+from app.money import fen_to_yuan_str
 from app.planner import dag as planner_dag
 from app.planner.clarify import remember as remember_clarify
 from app.planner.events import emit_event, summarize, trace_event
@@ -100,7 +101,7 @@ async def _settle(state: RunState, node: Any, rec: NodeRec, result: ToolResult, 
         # 而不是只活在内存的 state.question 里（重启后那条线索就断了）。
         # 建单失败绝不能打断对话：用户要的是一句追问，不是 500，所以整段旁路 try/except。
         try:
-            from app import handoffs as handoffs_mod
+            from app import handoff_store as handoffs_mod
 
             reason = "PAYEE_AMBIGUOUS" if (data.get("candidates") or []) else "PAYEE_NOT_FOUND"
             handoffs_mod.create(
@@ -123,6 +124,9 @@ async def _settle(state: RunState, node: Any, rec: NodeRec, result: ToolResult, 
                 "summary": question,
                 "question": question,
                 "balance_after_fen": balance_of(state),
+                "balance_after_yuan": (
+                    fen_to_yuan_str(balance_of(state)) if balance_of(state) is not None else None
+                ),
                 # 候选收款人必须以结构化形式下发：前端要渲染可点的列表，
                 # 而不是让用户照着一段中文自己敲尾号。
                 "clarification": _payee_clarification(node, data, question, split=split_run),

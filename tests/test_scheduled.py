@@ -92,3 +92,56 @@ def test_monthly_recurring_rolls_forward(ctx) -> None:
     assert row["status"] == "scheduled"
     assert row["due_ms"] > DUE
 
+
+# --------------------------------------------------------------- HTTP 边界回归
+
+def test_verify_route_passes_plain_dicts_to_the_use_case(monkeypatch) -> None:
+    """回归：/api/scheduled/{id}/verify 曾把 pydantic 模型直接传下去。
+
+    factors._normalize 只认 dict，模型会被静默丢弃，表现成「口令全对却仍报
+    FACTOR_NOT_VERIFIED」。这条从路由函数这一层盯住，不依赖库和策略。
+    """
+    import asyncio
+
+    from app.api import plans_api
+    from app.api.schemas import ScheduledVerifyRequest
+    from app.models import FactorProof
+
+    seen: list[Any] = []
+    monkeypatch.setattr(plans_api, "payload", lambda data: data)
+    monkeypatch.setattr(
+        plans_api.use_cases.scheduled,
+        "scheduled_submit_verify",
+        lambda scheduled_id, *, proofs: seen.append(proofs) or {"ok": True},
+    )
+    request = ScheduledVerifyRequest(
+        proofs=[FactorProof(factor="face", challenge_id="fc_1", code="123456")]
+    )
+    asyncio.run(plans_api.scheduled_verify("sch_1", request))
+    assert seen and isinstance(seen[0][0], dict), "路由层必须先把模型转成 dict"
+    assert seen[0][0]["challenge_id"] == "fc_1"
+
+
+def test_scheduled_challenge_uses_the_same_list_envelope(monkeypatch) -> None:
+    """F3 回归：挑战只有一种出站形状。
+
+    工具层 issue() 返回单张挑战的扁平字典；/api/factor/challenge 一直是
+    challenges 列表，而 /api/scheduled/{id}/challenge 曾经把字段摊在顶层，
+    前端得写两套解析。用例层负责包成同一形状，这里钉住它。
+    """
+    import contextlib
+
+    from app import db
+    from app.use_cases import scheduled as scheduled_uc
+
+    flat = {"challenge_id": "fc_x", "factor": "face", "code": "123456"}
+    monkeypatch.setattr(
+        scheduled_uc.scheduled,
+        "challenge_scheduled",
+        lambda conn, scheduled_id, factor: dict(flat, factor=factor),
+    )
+    monkeypatch.setattr(db, "open_conn", lambda *a, **k: contextlib.nullcontext(object()))
+    monkeypatch.setattr(db, "tx", lambda conn: contextlib.nullcontext())
+    outcome = scheduled_uc.scheduled_issue_challenge("sch_1", factor="face")
+    assert outcome.ok is True
+    assert [item["challenge_id"] for item in outcome.data["challenges"]] == ["fc_x"]

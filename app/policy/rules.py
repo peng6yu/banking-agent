@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from typing import Callable, Final
 
 from app.models import Action, Decision, RiskLevel
-from app.money import fen_to_yuan_str
+from app.money import yuan_label
 
 # 单笔限额：一笔超过 1000 元即红（R08，可验证的红）。
 SINGLE_LIMIT_FEN: Final[int] = 100_000
@@ -121,11 +121,6 @@ class Rule:
     emit: Callable[[Action, PolicyContext], Decision]
 
 
-def _yuan(fen: int) -> str:
-    """只在出口把分格式化成「1,000.00 元」，引擎内部全程 int 分。"""
-    return f"{fen_to_yuan_str(fen)} 元"
-
-
 def _payee_label(action: Action) -> str:
     """收款方展示名：params 里有人名用人名，只有 id 就显示 id，都没有就说「对方」。"""
     for key in ("payee_name", "merchant_name", "payee_id"):
@@ -222,10 +217,10 @@ def _emit_yellow_transfer(action: Action, ctx: PolicyContext) -> Decision:
     if action.tool in {"schedule_transfer", "scheduled_transfer"}:
         # 预约的钱今天不走，文案要说清是「排期」，别让用户以为当场就转出去了。
         text = (
-            f"预约一笔向 {_payee_label(action)} 转出 {_yuan(_amount(action))} 的转账，需要你确认"
+            f"预约一笔向 {_payee_label(action)} 转出 {yuan_label(_amount(action))} 的转账，需要你确认"
         )
     else:
-        text = f"即将向 {_payee_label(action)} 转出 {_yuan(_amount(action))}，需要你确认"
+        text = f"即将向 {_payee_label(action)} 转出 {yuan_label(_amount(action))}，需要你确认"
     return _decision(
         "yellow",
         "R06_transfer_yellow",
@@ -241,8 +236,8 @@ def _emit_red_daily(action: Action, ctx: PolicyContext) -> Decision:
     # 「验过就能多花」正是赛题对红档的定义（强验证），与「无依据的硬限额」是两回事。
     # 真正的硬拒绝只在显式配置了绝对上限（R13）时出现。
     text = (
-        f"今天已经转出 {_yuan(ctx.spent_today_fen)}，再转 {_yuan(_amount(action))} "
-        f"会让当日累计超过 {_yuan(ctx.limit_fen)}，属于大额转账：需要人脸和短信验证后才能继续。"
+        f"今天已经转出 {yuan_label(ctx.spent_today_fen)}，再转 {yuan_label(_amount(action))} "
+        f"会让当日累计超过 {yuan_label(ctx.limit_fen)}，属于大额转账：需要人脸和短信验证后才能继续。"
     )
     return _decision("red", "R07_transfer_red_daily", "TRANSFER_DAILY_RED", text, ctx, ("face", "sms"))
 
@@ -250,8 +245,8 @@ def _emit_red_daily(action: Action, ctx: PolicyContext) -> Decision:
 def _emit_absolute_cap(action: Action, ctx: PolicyContext) -> Decision:
     cap = int(ctx.absolute_cap_fen or 0)
     text = (
-        f"今天已经转出 {_yuan(ctx.spent_today_fen)}，再转 {_yuan(_amount(action))} "
-        f"会超过账户的绝对每日限额 {_yuan(cap)}，今天这笔不能转了；明天的额度会重新计算。"
+        f"今天已经转出 {yuan_label(ctx.spent_today_fen)}，再转 {yuan_label(_amount(action))} "
+        f"会超过账户的绝对每日限额 {yuan_label(cap)}，今天这笔不能转了；明天的额度会重新计算。"
     )
     return _decision("red", "R13_absolute_cap", "ABSOLUTE_DAILY_CAP", text, ctx)
 
@@ -261,12 +256,12 @@ def _emit_red_single(action: Action, ctx: PolicyContext) -> Decision:
     # 文案要说清「验证后继续」，不能还停在「我不能直接做」。
     if action.tool in {"schedule_transfer", "scheduled_transfer"}:
         text = (
-            f"预约金额 {_yuan(_amount(action))} 超过 {_yuan(ctx.single_limit_fen)}上限，"
+            f"预约金额 {yuan_label(_amount(action))} 超过 {yuan_label(ctx.single_limit_fen)}上限，"
             "这笔预约需要人脸和短信验证后才能确认"
         )
     else:
         text = (
-            f"单笔 {_yuan(_amount(action))} 超过 {_yuan(ctx.single_limit_fen)}上限，"
+            f"单笔 {yuan_label(_amount(action))} 超过 {yuan_label(ctx.single_limit_fen)}上限，"
             "这笔需要人脸和短信验证后才能继续"
         )
     return _decision("red", "R08_transfer_red_single", "TRANSFER_SINGLE_RED", text, ctx, ("face", "sms"))

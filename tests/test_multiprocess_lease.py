@@ -70,14 +70,23 @@ def _insert(
 
 
 def _run_workers(path: Path, mode: str, count: int) -> list[Any]:
-    """同一起跑线起 count 个进程，返回每个进程打印的 JSON。"""
-    start_at = int(time.time() * 1000) + 600
+    """同一起跑线起 count 个进程，返回每个进程打印的 JSON。
+
+    起跑用文件闸门（见 tests/lease_worker.py 的说明）：先等每个子进程都摸到 ready，
+    父进程再写 go，让所有人在几乎同一微秒进 execute_due 的 SELECT；只对墙钟毫秒的话，
+    解释器启动慢的那个醒来时行已经被执行完，它压根查不到到期行，返回空列表。
+    """
+    gate = path.parent / f"lease-gate-{os.getpid()}-{time.monotonic_ns()}"
+    gate.mkdir()
+    go_file = gate / "go"
     env = dict(os.environ)
     env["CAPABILITY_SECRET"] = SECRET
     env["PYTHONPATH"] = str(ROOT)
+    env["LEASE_READY_DIR"] = str(gate)
+    env["LEASE_GO_FILE"] = str(go_file)
     procs = [
         subprocess.Popen(
-            [sys.executable, str(WORKER), str(path), mode, str(start_at)],
+            [sys.executable, str(WORKER), str(path), mode, "0"],
             cwd=str(ROOT),
             env=env,
             stdout=subprocess.PIPE,
@@ -86,6 +95,14 @@ def _run_workers(path: Path, mode: str, count: int) -> list[Any]:
         )
         for _ in range(count)
     ]
+    deadline = time.time() + 60
+    while True:
+        ready = [p for p in gate.iterdir() if p.name != "go"]
+        if len(ready) >= count:
+            break
+        assert time.time() < deadline, f"只有 {len(ready)}/{count} 个 worker 就绪：{[p.poll() for p in procs]}"
+        time.sleep(0.002)
+    go_file.write_text("", encoding="utf-8")
     outs: list[Any] = []
     for proc in procs:
         out, err = proc.communicate(timeout=60)
@@ -121,21 +138,30 @@ def _balance(path: Path) -> int:
 
 
 def test_four_processes_racing_the_same_due_transfer_charge_once(bank: Path) -> None:
+    """4 个进程抢同一行：钱只出一次。
+
+    这里**不**断言「3 个进程都收到 CLAIMED_BY_ANOTHER_WORKER」：到得稍晚的那个进程
+    执行 SELECT 时行可能已被改成 executed，它压根查不到到期行，返回空列表——
+    这同样是安全的结果，把它算失败只会让用例在慢机器/高负载下随机变红。
+    真正的不变量是：只有一个 executed、流水只多一笔、余额只少一次，
+    并且任何看到过这一行的进程，结论只能是「我执行」或「被租约挡下」。
+    """
     _insert(bank, "sched_race")
     before = _tx_count(bank)
     outs = _run_workers(bank, "due", 4)
 
-    executed = _executed(outs)
-    assert len(executed) == 1, f"只能有一笔真正执行，实际 {len(executed)}：{outs}"
-    assert executed[0]["scheduled_id"] == "sched_race"
-    skipped = [
+    flat = [
         item
         for out in outs
         for item in (out if isinstance(out, list) else out.get("items", []))
-        if item.get("status") == "skipped"
     ]
-    assert len(skipped) == 3
-    assert {item["reason"] for item in skipped} == {"CLAIMED_BY_ANOTHER_WORKER"}
+    executed = [item for item in flat if item.get("status") == "executed"]
+    skipped = [item for item in flat if item.get("status") == "skipped"]
+    assert len(executed) == 1, f"只能有一笔真正执行，实际 {len(executed)}：{outs}"
+    assert executed[0]["scheduled_id"] == "sched_race"
+    assert all(item.get("status") in {"executed", "skipped"} for item in flat), flat
+    assert all(item.get("reason") == "CLAIMED_BY_ANOTHER_WORKER" for item in skipped), skipped
+    assert {item.get("scheduled_id") for item in flat} == {"sched_race"}
     assert _tx_count(bank) == before + 1
     assert _balance(bank) == START_BALANCE_FEN - AMOUNT_FEN
 

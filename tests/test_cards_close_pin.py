@@ -94,3 +94,48 @@ def test_card_ops_need_a_token(ctx) -> None:
     with pytest.raises(MissingCapability):
         cards.close_card(ctx, {"card_tail": TAIL}, None)
 
+
+def _pin_hash(conn: Any) -> str:
+    row = conn.execute("SELECT pin_hash FROM cards WHERE tail = ?", (TAIL,)).fetchone()
+    return str(row["pin_hash"] or "")
+
+
+def test_first_pin_needs_no_old_pin(ctx) -> None:
+    assert _pin_hash(ctx.conn) == ""
+    params = {"card_tail": TAIL, "pin": "246810"}
+    result = cards.change_card_pin(ctx, params, _token("change_card_pin", params))
+    assert result.ok is True
+
+
+def test_changing_a_set_pin_requires_the_old_one(ctx) -> None:
+    first = {"card_tail": TAIL, "pin": "246810"}
+    cards.change_card_pin(ctx, first, _token("change_card_pin", first))
+    before = _pin_hash(ctx.conn)
+    params = {"card_tail": TAIL, "pin": "135790"}
+    result = cards.change_card_pin(ctx, params, _token("change_card_pin", params))
+    assert result.ok is False
+    assert result.error_code == "PIN_OLD_REQUIRED"
+    assert _pin_hash(ctx.conn) == before
+
+
+def test_wrong_old_pin_is_refused_and_nothing_changes(ctx) -> None:
+    first = {"card_tail": TAIL, "pin": "246810"}
+    cards.change_card_pin(ctx, first, _token("change_card_pin", first))
+    before = _pin_hash(ctx.conn)
+    params = {"card_tail": TAIL, "pin": "135790", "old_pin": "000000"}
+    result = cards.change_card_pin(ctx, params, _token("change_card_pin", params))
+    assert result.ok is False
+    assert result.error_code == "PIN_OLD_WRONG"
+    assert _pin_hash(ctx.conn) == before
+
+
+def test_correct_old_pin_lets_the_change_through(ctx) -> None:
+    first = {"card_tail": TAIL, "pin": "246810"}
+    cards.change_card_pin(ctx, first, _token("change_card_pin", first))
+    before = _pin_hash(ctx.conn)
+    params = {"card_tail": TAIL, "pin": "135790", "old_pin": "246810"}
+    result = cards.change_card_pin(ctx, params, _token("change_card_pin", params))
+    assert result.ok is True
+    assert _pin_hash(ctx.conn) != before
+
+

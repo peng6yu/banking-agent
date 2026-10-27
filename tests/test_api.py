@@ -17,7 +17,7 @@ import httpx
 import pytest
 
 from app import db
-from app.api import routes
+from app.api import chat_flow, routes
 from app.llm import LLMError, LLMResponse, ToolCall
 from app.main import app
 from app.planner import executor
@@ -205,6 +205,29 @@ def test_sse_frame_is_exactly_two_lines(bank: Path) -> None:
     assert routes.frame("tool", {"ok": True}) == 'event: tool\ndata: {"ok": true}\n\n'
 
 
+def test_sse_frames_keep_the_keys_the_page_reads(bank: Path) -> None:
+    """把 SSE 帧的键集合钉住：改名字要改这条测试，不能让页面静默读到 undefined。
+
+    前端 30-chat.js / 40-confirm.js / 95-session.js 直接读这些键，
+    而它们不在 openapi 里（SSE 不是普通响应），契约测试扫不到，只能在这里钉。
+    """
+    events, _answers, _repeats = chat("s_api_shape", "给李静转 500 元")
+    expected = {
+        "start": {"session_id", "now_ms"},
+        "intent": {"intent", "slots", "missing", "confidence", "session_id"},
+        "trace": {"node_id", "tool", "tool_name", "level", "rule_id", "reason_text", "amount_fen"},
+        "confirm": {
+            "confirmation_id", "node_id", "tool", "level", "rule_id", "action_text",
+            "amount_fen", "amount_yuan", "expires_in_s", "reason_text", "source_account",
+        },
+        "tool": {"node_id", "ok", "summary"},
+        "done": {"summary", "balance_after_fen", "balance_after_yuan", "question"},
+    }
+    for frame, keys in expected.items():
+        got = set(payload(events, frame))
+        assert not keys - got, f"{frame} 帧少了 {sorted(keys - got)}；现在有 {sorted(got)}"
+
+
 def test_health_reports_the_authoritative_tool_count_and_a_live_db(bank: Path) -> None:
     resp = call("GET", "/api/health")
     assert resp.status_code == 200
@@ -249,7 +272,10 @@ def test_chat_transfer_flow_confirms_and_moves_the_money(bank: Path) -> None:
     assert card["confirmation_id"] and card["action_text"]
     assert card["expires_in_s"] == 120
     assert "transfer" in [data["tool"] for name, data in events if name == "trace"]
-    assert payload(events, "done")["balance_after_fen"] == before - AMOUNT_FEN
+    done = payload(events, "done")
+    assert done["balance_after_fen"] == before - AMOUNT_FEN
+    # 分与元必须成对下发：SSE 帧同样不许只给分不给元（前端不该自己除 100）。
+    assert done["balance_after_yuan"] == f"{(before - AMOUNT_FEN) / 100:,.2f}"
     assert balance() == before - AMOUNT_FEN
 
 
@@ -257,7 +283,9 @@ def test_cancel_endpoint_stops_the_run_and_frees_the_hold(bank: Path) -> None:
     before = balance()
     events, answers, _repeats = chat("s_api_c", "给李静转 500 元", cancel=True)
     assert answers[0].json()["cancelled"] is True
-    assert "done" not in names(events)
+    # 取消也要给一个终帧：客户端靠 done 区分「正常收尾」与「流被截断」。
+    assert names(events)[-1] == "done"
+    assert events[-1][1]["ended"] == "cancelled"
     assert balance() == before
     conn = db.connect()
     try:
@@ -285,7 +313,8 @@ def test_confirm_twice_is_idempotent(bank: Path) -> None:
 
 def test_session_and_audit_endpoints_explain_the_run(bank: Path) -> None:
     events, _answers, _repeats = chat("s_api_s", "给李静转 500 元")
-    assert payload(events, "done")["balance_after_fen"]
+    done = payload(events, "done")
+    assert done["balance_after_fen"] and done["balance_after_yuan"]
     session = call("GET", "/api/session/s_api_s").json()
     assert session["found"] is True
     assert session["status"] in {"done", "cancelled"}
@@ -345,7 +374,9 @@ def test_unhandled_error_is_500_without_a_stack(monkeypatch: pytest.MonkeyPatch,
     def boom() -> Any:
         raise RuntimeError("secret internal detail")
 
-    monkeypatch.setattr(routes, "get_adapter", boom)
+    # W4 拆分后聊天主流程在 app/api/chat_flow.py：它 import 的是那个模块里的
+    # get_adapter，补丁要打在真正被调用的模块上（打 routes 上的副本不会生效）。
+    monkeypatch.setattr(chat_flow, "get_adapter", boom)
     resp = call("POST", "/api/chat", json={"session_id": "s_api_x", "text": "你好"}, raise_app_exceptions=False)
     assert resp.status_code == 500
     assert resp.json() == {"code": "INTERNAL", "user_text": "系统开小差了，已经记录。"}
@@ -358,8 +389,29 @@ def test_index_serves_the_frontend_and_unknown_route_stays_chinese(bank: Path) -
     root = call("GET", "/")
     assert root.status_code == 200
     assert "text/html" in root.headers["content-type"]
-    assert "api/chat" in root.text
+    # W5 之后 index.html 只是壳：结构在 HTML、样式在 /static/app.css、脚本在 /static/js/*.js。
+    assert "/static/app.css" in root.text
+    assert "/static/js/10-core.js" in root.text
     missing = call("GET", "/api/nope")
     assert missing.status_code == 404
     assert missing.json()["code"] == "HTTP_ERROR"
     assert "Not Found" not in missing.text
+
+
+def test_static_assets_are_served_without_the_api_token(bank: Path) -> None:
+    """样式与脚本挂在 /static 下，不校验 X-API-Token：否则没令牌就只剩一个白页。
+
+    这条同时锁住「壳引用的文件真的存在」——旧版把 CSS/JS 内联在同一份 HTML 里，
+    拆分之后最容易犯的错就是文件名改了却忘了改壳。
+    """
+    css = call("GET", "/static/app.css")
+    assert css.status_code == 200
+    assert "text/css" in css.headers["content-type"]
+    assert "--green" in css.text
+
+    core = call("GET", "/static/js/10-core.js")
+    assert core.status_code == 200
+    assert "api/chat" in core.text or "API_CHAT" in core.text
+
+    assert call("GET", "/static/js/nope.js").status_code == 404
+

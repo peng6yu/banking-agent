@@ -11,6 +11,8 @@
 from __future__ import annotations
 
 import asyncio
+import re
+import time
 from pathlib import Path
 from typing import Any
 
@@ -84,12 +86,14 @@ def test_overview_balance_and_month_totals_come_from_the_database(bank: Path) ->
     try:
         row = conn.execute(
             "SELECT COALESCE(SUM(amount_fen), 0) AS total, COUNT(*) AS n FROM transactions"
-            " WHERE account_id = ? AND direction = 'out' AND ts_ms >= ? AND ts_ms < ?",
+            " WHERE account_id = ? AND direction = 'out' AND ts_ms >= ? AND ts_ms < ?"
+            " AND category NOT IN ('账户互转', '理财')",
             (account["account_id"], window["start_ms"], window["end_ms"]),
         ).fetchone()
     finally:
         conn.close()
-    assert month["total_out_fen"] == int(row["total"])
+    # 支出只认钱真的离开净资产的：账户互转与理财单列，不进这一个数。
+    assert month["spend_out_fen"] == int(row["total"])
     assert month["out_count"] == int(row["n"])
     for cat in month["by_category"]:
         # 分类只保证金额是分，不保证有 yuan 字段——前端按 amount_fen 格式化
@@ -102,6 +106,32 @@ def test_overview_trend_is_six_points_and_last_month_is_partial(bank: Path) -> N
     assert len(trend) == 6
     assert trend[-1]["partial"] is True
     assert all("net_positive" in point for point in trend)
+
+
+def test_month_whose_spending_exceeds_income_shows_a_minus_sign(bank: Path) -> None:
+    """亏损月份的「结余」必须带负号。
+
+    `net_yuan` 曾经是 `fen_to_yuan_str(abs(net))`：趋势表把 -1,311.00 写成 1,311.00，
+    和账单页红色的 -1,311.00 并排出现——同一屏两个结余，用户不知道该信哪个。
+    """
+
+    conn = db.connect()
+    try:
+        conn.execute(
+            "INSERT INTO transactions (id, account_id, direction, amount_fen, counterparty,"
+            " category, note, ts_ms, balance_after_fen, channel, reversal_of)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            ("t_neg_overspend", DEBIT_ACCOUNT_ID, "out", 90_000_000, "一笔超支", "购物", "",
+             int(time.time() * 1000), 1_000_000, "app", None),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    last = get("/api/business/overview").json()["trend"][-1]
+    assert last["net_fen"] < 0
+    assert last["net_positive"] is False
+    assert last["net_yuan"].startswith("-"), last["net_yuan"]
 
 
 def test_overview_never_sells_empty_lists_as_unavailable(bank: Path) -> None:
@@ -154,10 +184,82 @@ def test_bill_anomaly_evidence_points_at_real_transactions(bank: Path) -> None:
         assert set(ids) == seen
 
 
+def test_bill_anomaly_hands_the_assistant_the_actual_transaction(bank: Path) -> None:
+    """点「让 AI 助手核这一笔」时，发出去的那句话必须带这一笔的身份。
+
+    以前 labels 里写死一句「帮我核实一下凌晨那笔境外消费」——卡片上明明有商户、金额、
+    流水号，服务端却只能猜；同一个月两笔凌晨境外时必然猜错。
+    """
+    data = get("/api/business/bill?period=month").json()
+    for item in data["anomalies"]["items"]:
+        asks = [a for a in item["actions"] if a["kind"] == "prompt"]
+        if not asks:
+            continue
+        prompt = asks[0]["prompt"]
+        assert item["amount_yuan"] in prompt or (
+            item["comparison"] and item["comparison"]["current_yuan"] in prompt
+        ), prompt
+        for tx_id in item["evidence"]["tx_ids"]:
+            assert tx_id in prompt, prompt
+        if item["merchant"]:
+            assert item["merchant"] in prompt, prompt
+        assert "那笔境外消费，是不是我自己刷的" not in prompt
+
+
+def test_a_hike_anomaly_shows_this_months_charge_not_the_difference(bank: Path) -> None:
+    data = get("/api/business/bill?period=month").json()
+    hikes = [i for i in data["anomalies"]["items"] if i["kind"] == "subscription_hike"]
+    assert hikes, "种子数据里应该有一条订阅涨价"
+    for item in hikes:
+        comparison = item["comparison"]
+        assert item["amount_fen"] == comparison["current_fen"]
+        assert item["amount_yuan"] == comparison["current_yuan"]
+        assert "上月" in item["amount_note"]
+
+
 def test_bill_period_year_is_supported(bank: Path) -> None:
     data = get("/api/business/bill?period=year").json()
     assert data["period"] == "year"
     assert data["range"]["start_ms"] < data["range"]["end_ms"]
+
+
+def test_bill_defaults_to_the_savings_card_and_lists_the_choices(bank: Path) -> None:
+    """账单只覆盖一张卡，默认是主储蓄卡；可切换的卡必须一并给出，前端才不用猜。"""
+    data = get("/api/business/bill?period=month").json()
+    assert data["account"]["account_id"] == DEBIT_ACCOUNT_ID
+    assert data["account"]["type"] == "debit"
+    assert {row["account_id"] for row in data["accounts"]} >= {DEBIT_ACCOUNT_ID, CREDIT_ACCOUNT_ID}
+    assert "储蓄卡" in data["scope_note"]
+
+
+def test_bill_can_be_scoped_to_the_credit_card(bank: Path) -> None:
+    """切到信用卡看的是刷卡/还款和可用额度，不能还拿储蓄卡的流水充数。"""
+    data = get(f"/api/business/bill?period=month&account_id={CREDIT_ACCOUNT_ID}").json()
+    assert data["account"]["account_id"] == CREDIT_ACCOUNT_ID
+    assert data["account"]["type"] == "credit"
+    assert data["account"]["credit_limit_fen"] == CREDIT_LIMIT_FEN
+    assert "信用卡" in data["scope_note"]
+
+    window = data["range"]
+    conn = db.connect()
+    try:
+        row = conn.execute(
+            "SELECT COALESCE(SUM(amount_fen), 0) AS total, COUNT(*) AS n FROM transactions"
+            " WHERE account_id = ? AND direction = 'out' AND ts_ms >= ? AND ts_ms < ?"
+            " AND category NOT IN ('账户互转', '理财')",
+            (CREDIT_ACCOUNT_ID, window["start_ms"], window["end_ms"]),
+        ).fetchone()
+    finally:
+        conn.close()
+    assert data["spend_out_fen"] == int(row["total"])
+    assert data["out_count"] == int(row["n"])
+
+
+def test_bill_refuses_an_account_that_does_not_exist(bank: Path) -> None:
+    """切错卡比报错更糟：不存在的账户要明确拒绝，而不是静默回落到默认卡。"""
+    res = get("/api/business/bill?period=month&account_id=a_hacker")
+    assert res.status_code == 400
+    assert res.json()["code"] == "VALIDATION"
 
 
 # ---------------------------------------------------------------- 业务管理
@@ -175,7 +277,7 @@ def test_management_reports_the_suitability_gate_honestly(bank: Path) -> None:
     assert invest["suitability_assessed"] is False
     gate = invest["suitability"]
     assert gate["assessed"] is False
-    assert gate["question_count"] == 5
+    assert len(gate["questions"]) == 5
     assert {band["level"] for band in gate["level_bands"]} == {"C1", "C2", "C3", "C4", "C5"}
     assert "不是监管口径" in gate["disclaimer"]
     note = invest["suitability_note"]
@@ -229,19 +331,28 @@ def test_plans_reports_the_real_scheduler_not_a_promise(bank: Path) -> None:
 # ---------------------------------------------------------------- 执行记录
 
 
-def test_executions_expose_nine_task_states_and_audit_chain(bank: Path) -> None:
+def test_executions_expose_task_state_labels_and_audit_chain(bank: Path) -> None:
+    """状态要全：DAG 节点真的会出现 pending / skipped，缺了就在表里露英文。"""
+
     data = get("/api/business/executions").json()
-    assert set(data["state_labels"]) == {
+    labels = data["state_labels"]
+    assert set(labels) == {
+        "waiting",
         "draft",
+        "pending",
         "need_info",
         "waiting_confirm",
         "waiting_factor",
         "running",
         "done",
+        "success",
         "failed",
         "cancelled",
+        "skipped",
         "manual",
     }
+    # 前端表格直接显示 label：任何一个英文 key 漏翻，用户看到的就是 "pending"
+    assert all(text and text != key for key, text in labels.items())
     audit = data["audit"]
     assert audit["chain_ok"] is True
     # append_only 是一句人话解释，不是布尔：界面直接把它展示给用户
@@ -276,3 +387,120 @@ def test_business_views_require_the_api_token(
             )
 
     assert asyncio.run(with_token()).status_code == 200
+
+# ------------------------------------------------- 前端拼出来的字段名
+
+def test_every_dynamic_money_key_has_a_backend_field() -> None:
+    """前端用 bxMoney(obj, 'base') 拼出 'base_fen' / 'base_yuan'。
+
+    键名是运行时拼的，静态 grep 'base_fen' 查不到，于是「这个字段没人读、
+    可以删」的判断会误伤（订阅的 monthly_active 就这样被删过一次，页面变成
+    「月合计 暂不可用」）。这里把 web/js 里所有拼出来的 base 跟后端字面量
+    对一遍，删字段时能立刻被挡住。
+    """
+    root = Path(__file__).resolve().parents[1]
+    pattern = re.compile(r"bxMoney\(\s*[^,()]+?,\s*'([a-z0-9_]+)'")
+    bases: dict[str, str] = {}
+    for js in sorted((root / "web" / "js").glob("*.js")):
+        for line_no, line in enumerate(js.read_text(encoding="utf-8").splitlines(), 1):
+            for match in pattern.finditer(line):
+                bases.setdefault(match.group(1), f"{js.name}:{line_no}")
+    assert bases, "一个 bxMoney 都没扫到，说明前端改了写法，这条守卫需要跟着改"
+    backend = "\n".join(
+        path.read_text(encoding="utf-8") for path in sorted((root / "app").rglob("*.py"))
+    )
+    missing = [
+        f"{base} ({where})"
+        for base, where in sorted(bases.items())
+        if f'"{base}_fen"' not in backend and f'"{base}_yuan"' not in backend
+    ]
+    assert not missing, f"前端拼出来的金额字段后端没有：{missing}"
+
+
+# ---------------------------------------------------------------- 契约形状
+
+_READ_ENDPOINTS = (
+    "/api/health",
+    "/api/tools",
+    "/api/chat/latest",
+    "/api/messages",
+    "/api/handoffs",
+    "/api/business/overview",
+    "/api/business/bill",
+    "/api/business/management",
+    "/api/business/plans",
+    "/api/business/executions",
+    "/api/transactions",
+)
+
+#: JSON schema 里的参数边界不是金额字段，只是名字像。
+_UNIT_ALLOWED_KEYS = frozenset({"min_fen", "max_fen"})
+
+
+def _walk(node: Any, path: str = ""):
+    if isinstance(node, dict):
+        for key, value in node.items():
+            yield f"{path}/{key}", node, key, value
+            yield from _walk(value, f"{path}/{key}")
+    elif isinstance(node, list):
+        for item in node:
+            yield from _walk(item, f"{path}[]")
+
+
+def test_every_read_endpoint_answers_with_ok(bank: Path) -> None:
+    """读端点也要有一致的信封：页面不用为「这块有没有 ok」写两套判断。"""
+    conn = db.connect()
+    try:
+        session_id = str(conn.execute("SELECT id FROM sessions LIMIT 1").fetchone()["id"])
+    finally:
+        conn.close()
+    endpoints = _READ_ENDPOINTS + (
+        f"/api/audit?session_id={session_id}",
+        f"/api/session/{session_id}",
+    )
+    for url in endpoints:
+        res = get(url)
+        assert res.status_code == 200, (url, res.status_code, res.text[:120])
+        body = res.json()
+        assert body.get("ok") is True, f"{url} 的响应缺少 ok=true：{list(body)[:6]}"
+
+
+def test_truncated_lists_say_how_many_there_really_are(bank: Path) -> None:
+    """会截断的列表必须带 total：页面上的「共 N 条」不能只是本页条数。"""
+    conn = db.connect()
+    try:
+        session_id = str(conn.execute("SELECT id FROM sessions LIMIT 1").fetchone()["id"])
+    finally:
+        conn.close()
+    audit = get(f"/api/audit?session_id={session_id}").json()
+    assert audit["total"] >= audit["count"]
+    handoffs = get("/api/handoffs").json()
+    assert handoffs["total"] >= handoffs["count"]
+    latest = get("/api/chat/latest").json()
+    assert isinstance(latest.get("total"), int)
+
+
+def test_every_fen_and_ms_field_has_a_readable_twin(bank: Path) -> None:
+    """有 _fen 就要有 _yuan，有 _ms 就要有 _text：前端不该自己做除法和时间格式化。"""
+    conn = db.connect()
+    try:
+        session_id = str(conn.execute("SELECT id FROM sessions LIMIT 1").fetchone()["id"])
+    finally:
+        conn.close()
+    endpoints = _READ_ENDPOINTS + (
+        f"/api/audit?session_id={session_id}",
+        f"/api/session/{session_id}",
+    )
+    missing: list[str] = []
+    for url in endpoints:
+        body = get(url).json()
+        for path, parent, key, value in _walk(body):
+            if "/payload/" in path:
+                continue  # 审计 payload 是内部证据，不按展示字段的规矩来
+            if key in _UNIT_ALLOWED_KEYS or not isinstance(value, int):
+                continue
+            if key.endswith("_fen") and key[:-4] + "_yuan" not in parent:
+                missing.append(f"{url} {path}")
+            if key.endswith("_ms") and key[:-3] + "_text" not in parent:
+                missing.append(f"{url} {path}")
+    assert not missing, "这些字段缺配套的可读值：" + chr(10) + chr(10).join(missing)

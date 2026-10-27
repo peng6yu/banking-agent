@@ -8,6 +8,8 @@
 2. 服务端生成随机码，只把 sha256(secret|challenge_id|code) 落库（明文不落库）；
 3. 校验在服务端做：挑战必须属于同一个会话/同一张确认卡、没过期、没用过、
    尝试次数没超；通过后立刻标记 used_ms，重放同一份证明不再生效；
+   错误次数按「同一张确认 + 同一个因子」累计，且同一张确认最多签发 3 张挑战、
+   两次签发至少隔 10 秒——这样「重新获取验证码」不能把 5 次计数清零；
 4. POST /api/confirm 必须带 proofs；缺一个必需因子就仍然是 waiting_factor。
 
 局限（照实写，不夸大）：这是一个竞赛演示环境，没有接真实短信网关和人脸活体
@@ -41,6 +43,13 @@ CHALLENGE_TTL_MS: Final[int] = 300_000
 
 #: 同一张挑战最多允许错几次；超过就作废，必须重新申请。
 MAX_ATTEMPTS: Final[int] = 5
+
+#: 同一张确认、同一个因子，最多签发几张挑战。超过就不再发码——
+#: 否则「5 次锁定」只要重新申请一张挑战就能把计数器归零，6 位码等于可以无限试。
+MAX_ISSUES_PER_CONFIRMATION: Final[int] = 3
+
+#: 同一张确认、同一个因子两次签发之间的最短间隔（毫秒），挡住连点「重新获取」。
+ISSUE_COOLDOWN_MS: Final[int] = 10_000
 
 #: 演示回显开关：只有显式设成 0/false 才关掉，默认开（现场没短信网关）。
 ECHO_ENV: Final[str] = "FACTOR_DEMO_ECHO"
@@ -80,6 +89,36 @@ def _new_code() -> str:
     return f"{secrets.randbelow(10**6):06d}"
 
 
+def _guard_issue(conn: sqlite3.Connection, confirmation_id: str, kind: str, current: int) -> None:
+    """同一张确认、同一个因子：最多 3 张挑战，两次之间至少隔 10 秒。
+
+    这不是体验上的啰嗦，而是「5 次锁定」能不能成立的前提：如果重发一张挑战
+    就把错误计数清零，6 位码可以无限试。
+    """
+    stats = conn.execute(
+        "SELECT COUNT(*) AS n, MAX(created_ms) AS last_ms FROM factor_challenges"
+        " WHERE confirmation_id = ? AND factor = ?",
+        (confirmation_id, kind),
+    ).fetchone()
+    issued = int(stats["n"] or 0)
+    if issued >= MAX_ISSUES_PER_CONFIRMATION:
+        raise ValidationError(
+            f"这张确认的验证码已经发过 {issued} 次，不能再发新的了。"
+            "请用已经拿到的那条验证码；都过期了就等这张确认卡结束，重新发起一次操作。",
+            reason="ISSUE_LIMIT",
+            confirmation_id=confirmation_id,
+            factor=kind,
+        )
+    last_ms = stats["last_ms"]
+    if last_ms is not None and current - int(last_ms) < ISSUE_COOLDOWN_MS:
+        wait_s = (ISSUE_COOLDOWN_MS - (current - int(last_ms)) + 999) // 1000
+        raise ValidationError(
+            f"刚发过一次验证码，{wait_s} 秒后才能再发，先试试刚才那条。",
+            reason="ISSUE_COOLDOWN",
+            retry_after_s=wait_s,
+        )
+
+
 def issue(
     conn: sqlite3.Connection,
     *,
@@ -106,6 +145,7 @@ def issue(
             provider=provider_name,
         )
     current = int(now if now is not None else clock.now_ms())
+    _guard_issue(conn, confirmation_id, kind, current)
     challenge_id = new_id("fc")
     code = _new_code()
     expires_ms = current + CHALLENGE_TTL_MS
@@ -172,6 +212,47 @@ def _normalize(proofs: Any) -> list[dict[str, str]]:
     return cleaned
 
 
+def _find_challenge(
+    conn: sqlite3.Connection,
+    proof: dict[str, str],
+    session_id: str,
+    confirmation_id: str,
+    factor: str,
+    current: int,
+) -> Any:
+    """按 proof 找回挑战；不合格时直接返回拒绝原因（字符串，不是异常）。
+
+    顺序是契约的一部分（前端按 reason 出提示）：找不到 → 不属于这张卡 →
+    因子不符 → 已用过 → 已过期。不要重排。
+    """
+    if not proof["challenge_id"]:
+        return "CHALLENGE_NOT_FOUND"
+    row = conn.execute(
+        "SELECT * FROM factor_challenges WHERE id = ?", (proof["challenge_id"],)
+    ).fetchone()
+    if row is None:
+        return "CHALLENGE_NOT_FOUND"
+    if str(row["session_id"]) != str(session_id) or str(row["confirmation_id"]) != str(confirmation_id):
+        return "CHALLENGE_NOT_BOUND"
+    if str(row["factor"]) != factor:
+        return "FACTOR_MISMATCH"
+    if row["used_ms"] is not None:
+        return "CHALLENGE_USED"
+    if int(row["expires_ms"]) <= current:
+        return "CHALLENGE_EXPIRED"
+    return row
+
+
+def _attempts_used(conn: sqlite3.Connection, confirmation_id: str, factor: str) -> int:
+    """同一张确认、同一个因子已经错了多少次（跨所有已签发挑战累计）。"""
+    row = conn.execute(
+        "SELECT COALESCE(SUM(attempts), 0) FROM factor_challenges"
+        " WHERE confirmation_id = ? AND factor = ?",
+        (confirmation_id, factor),
+    ).fetchone()
+    return int(row[0])
+
+
 def verify(
     conn: sqlite3.Connection,
     *,
@@ -191,34 +272,19 @@ def verify(
     current = int(now if now is not None else clock.now_ms())
     need = [str(f).strip().lower() for f in required or ()]
     verified: list[str] = []
-    missing: list[str] = []
     invalid: list[dict[str, str]] = []
     for proof in _normalize(proofs):
         factor = proof["factor"]
         if factor not in need or factor in verified:
             invalid.append({"factor": factor, "reason": "UNEXPECTED_FACTOR"})
             continue
-        row = None
-        if proof["challenge_id"]:
-            row = conn.execute(
-                "SELECT * FROM factor_challenges WHERE id = ?", (proof["challenge_id"],)
-            ).fetchone()
-        if row is None:
-            invalid.append({"factor": factor, "reason": "CHALLENGE_NOT_FOUND"})
+        row = _find_challenge(conn, proof, session_id, confirmation_id, factor, current)
+        if isinstance(row, str):
+            invalid.append({"factor": factor, "reason": row})
             continue
-        if str(row["session_id"]) != str(session_id) or str(row["confirmation_id"]) != str(confirmation_id):
-            invalid.append({"factor": factor, "reason": "CHALLENGE_NOT_BOUND"})
-            continue
-        if str(row["factor"]) != factor:
-            invalid.append({"factor": factor, "reason": "FACTOR_MISMATCH"})
-            continue
-        if row["used_ms"] is not None:
-            invalid.append({"factor": factor, "reason": "CHALLENGE_USED"})
-            continue
-        if int(row["expires_ms"]) <= current:
-            invalid.append({"factor": factor, "reason": "CHALLENGE_EXPIRED"})
-            continue
-        if int(row["attempts"]) >= MAX_ATTEMPTS:
+        # 累计口径：同一张确认、同一个因子，把所有挑战上的错误次数加起来。
+        # 只看当前这张挑战的话，重新申请一张就能把尝试次数清零（见 MAX_ISSUES_PER_CONFIRMATION）。
+        if _attempts_used(conn, confirmation_id, factor) >= MAX_ATTEMPTS:
             invalid.append({"factor": factor, "reason": "TOO_MANY_ATTEMPTS"})
             continue
         expected = str(row["code_hash"])
@@ -256,7 +322,9 @@ __all__ = [
     "CHALLENGE_TTL_MS",
     "ECHO_ENV",
     "FACTOR_KINDS",
+    "ISSUE_COOLDOWN_MS",
     "MAX_ATTEMPTS",
+    "MAX_ISSUES_PER_CONFIRMATION",
     "PROVIDER_ENV",
     "REAL_PROVIDERS",
     "echo_enabled",

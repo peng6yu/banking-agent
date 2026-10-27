@@ -118,7 +118,7 @@ def transfer(
             "hold_id": hold.hold_id,
             "status": hold.status,
             "amount_fen": amount_fen,
-            "amount_yuan": _yuan(amount_fen),
+            "amount_yuan": fen_to_yuan_str(amount_fen),
             "payee_id": payee_id,
             "payee_name": payee_name(ctx.conn, payee_id),
             "expires_ms": hold.expires_ms,
@@ -198,7 +198,7 @@ def reserve_funds(
             "hold_id": hold.hold_id,
             "status": hold.status,
             "amount_fen": amount_fen,
-            "amount_yuan": _yuan(amount_fen),
+            "amount_yuan": fen_to_yuan_str(amount_fen),
             "purpose": str(params.get("purpose", "")),
             "expires_ms": hold.expires_ms,
             "idempotent": bool(hold.reused),
@@ -362,7 +362,7 @@ def _commit(
             "hold_id": hold_id,
             "status": "committed",
             "amount_fen": amount_fen,
-            "amount_yuan": _yuan(amount_fen),
+            "amount_yuan": fen_to_yuan_str(amount_fen),
             "merchant": str(params.get("merchant", "")),
             "item": str(params.get("item", "")),
             "balance_after_fen": int(outcome.balance_after_fen),
@@ -387,11 +387,6 @@ def _insufficient(exc: InsufficientFunds) -> ToolResult:
             "account_id": str(exc.fields.get("account_id", "")),
         },
     )
-
-
-def _yuan(amount_fen: int) -> str:
-    """分转成带千分位的中文金额串。"""
-    return fen_to_yuan_str(amount_fen)
 
 
 __all__ = ["MERCHANT_WHITELIST", "pay_merchant", "reserve_funds", "transfer"]

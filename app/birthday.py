@@ -31,7 +31,7 @@ import json
 import logging
 from typing import Any, Final
 
-from app import audit, clock, db, funds
+from app import audit, clock, db, funds, plan_hooks, timefmt
 from app.clock import BankError, InsufficientFunds, ValidationError
 from app import ids
 from app.ids import new_id
@@ -92,15 +92,10 @@ PAY_BOUNDARY: Final[str] = (
     "后台到点只提醒，不代扣；真正付款要你在助手里确认一次，"
     "同样过策略裁决、能力令牌（必要时多因子）。"
 )
-TIME_TEXT_FMT: Final[str] = "%Y-%m-%d %H:%M"
 
 
 def _now_ms() -> int:
     return clock.now_ms()
-
-
-def _time_text(ms: int) -> str:
-    return _dt.datetime.fromtimestamp(ms / 1000).strftime(TIME_TEXT_FMT)
 
 
 def _load(raw: Any) -> dict[str, Any]:
@@ -281,11 +276,11 @@ def _authorization_view(row) -> dict[str, Any]:
         "decision": decision,
         "items": list(scope.get("items") or []),
         "created_ms": int(row["created_ms"]),
-        "created_text": _time_text(int(row["created_ms"])),
+        "created_text": timefmt.minute_text(int(row["created_ms"])),
         "used_ms": int(row["used_ms"]) if row["used_ms"] is not None else None,
         "revoked_ms": int(row["revoked_ms"]) if row["revoked_ms"] is not None else None,
         "expires_ms": int(row["expires_ms"]) if row["expires_ms"] is not None else None,
-        "expires_text": _time_text(int(row["expires_ms"])) if row["expires_ms"] is not None else "",
+        "expires_text": timefmt.minute_text(int(row["expires_ms"])) if row["expires_ms"] is not None else "",
         "active": status == "active",
         "boundary": AUTH_BOUNDARY,
     }
@@ -739,7 +734,7 @@ def _budget_view(row: Any, step: Any | None) -> dict[str, Any]:
         "hold_id": str(row["hold_id"] or "") if "hold_id" in row.keys() else "",
         "step_state": str(step["state"]) if step is not None else "",
         "step_due_ms": int(step["due_ms"]) if step is not None else None,
-        "step_due_text": _time_text(int(step["due_ms"])) if step is not None else "",
+        "step_due_text": timefmt.minute_text(int(step["due_ms"])) if step is not None else "",
         "detail": payload,
         "needs_user": str(row["status"]) == "reserved",
         "boundary": PAY_BOUNDARY,
@@ -899,14 +894,14 @@ def create_plan(
         "birthday": day.isoformat(),
         "budget_fen": budget,
         "trigger_ms": trigger_ms,
-        "trigger_text": _time_text(trigger_ms),
+        "trigger_text": timefmt.minute_text(trigger_ms),
         "items": stored_items,
         "account_id": str(account["id"]),
         # 授权（一次性代扣授权）绑定的计划版本号：只有用户改计划才 +1，
         # 后台的暂停/定时推进不动它，否则一生成待确认项目授权就自动失效了。
         "version": 1,
         "summary": f"生日 {day.isoformat()}，预算 {fen_to_yuan_str(budget)} 元，"
-        f"生日前 {TRIGGER_DAYS_BEFORE} 天（{_time_text(trigger_ms)}）提醒，付款要你确认。",
+        f"生日前 {TRIGGER_DAYS_BEFORE} 天（{timefmt.minute_text(trigger_ms)}）提醒，付款要你确认。",
     }
     plan_title = str(title or "").strip() or f"{day.month} 月 {day.day} 日生日计划"
     reserved_fen = sum(item["amount_fen"] for item in clean)
@@ -1020,6 +1015,131 @@ def _mark_step(conn, plan_id: str, item_key: str, state: str, error: str = "") -
     )
 
 
+# 付生日项目时「缺多因子」的那一轮不能扔：用户补验证回来，必须拿同一张确认卡、
+# 同一个 run 继续，否则新卡会把上一张签发的 proofs 全判成无效（钱没动，项目却被
+# 记成失败）。这里按会话记住在等验证的那一轮，超时或用户放弃时清掉。
+_WAITING: dict[str, dict[str, Any]] = {}
+WAITING_TTL_MS: Final[int] = 10 * 60_000
+
+
+async def _await_task(task: "asyncio.Task[Any]", timeout: float = 30.0) -> None:
+    """等这一轮跑完；等不到就收掉，别把后台任务挂在事件循环上。"""
+    try:
+        await asyncio.wait_for(task, timeout=timeout)
+    except asyncio.TimeoutError:
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+
+
+async def _settle_run(
+    conn,
+    *,
+    plan_id: str,
+    item_key: str,
+    session_id: str,
+    account_id: str,
+    amount_fen: int,
+    label: str,
+    view_item: dict[str, Any],
+    cid: str | None,
+    seen: dict[str, Any],
+) -> dict[str, Any]:
+    """一轮付款跑完后结算预算行：成功记 committed + hold，失败记 failed。
+
+    从事件流里取 tool 帧：executor 跑完会把 RunState 从 RUNS 摘掉，结果只能在
+    事件里接。成功/失败都要落审计，并把 step 标成 done/failed。
+    """
+    tool_event = seen.get("tool") or {}
+    if bool(tool_event.get("ok")):
+        summary = str(tool_event.get("summary") or "")
+        hold_id = _latest_hold_id(
+            conn,
+            session_id=session_id,
+            account_id=account_id,
+            amount_fen=amount_fen,
+        )
+        with db.tx(conn):
+            _finish(conn, plan_id, item_key, "committed", summary, hold_id=hold_id or None)
+            _mark_step(conn, plan_id, item_key, "done")
+            audit.append(
+                conn,
+                "plan.item_paid",
+                {
+                    "plan_id": plan_id,
+                    "item_key": item_key,
+                    "account_id": account_id,
+                    "amount_fen": amount_fen,
+                    "hold_id": hold_id,
+                    "confirmation_id": cid,
+                    "summary": summary,
+                },
+                session_id=f"plan:{plan_id}",
+            )
+        # 清单全部付完时把授权标 used（一次性）；还有项目没付就留着给到点用
+        _maybe_use_authorization(conn, plan_id)
+        # 返回值要反映刚写完的状态：否则接口说「已付款」，item 里还写着「预算已预留」
+        fresh = conn.execute(
+            "SELECT * FROM plan_budgets WHERE plan_id = ? AND item_key = ?", (plan_id, item_key)
+        ).fetchone()
+        if fresh is not None:
+            view_item = _budget_view(fresh, _step_map(conn, plan_id).get(item_key))
+        return {
+            "ok": True,
+            "status": "paid",
+            "item": view_item,
+            "summary": summary,
+            "confirmation_id": cid,
+            "message": f"已经付了{label} {fen_to_yuan_str(amount_fen)} 元。",
+        }
+    error_code = str(tool_event.get("error_code") or "PAYMENT_FAILED")
+    last_error = str(tool_event.get("summary") or "付款没有成功")
+    # 失败也可能已经建过 hold（建了又释放）：能查到就记上，出问题能顺着 hold 看流水。
+    failed_hold = _latest_hold_id(
+        conn,
+        session_id=session_id,
+        account_id=account_id,
+        amount_fen=amount_fen,
+    )
+    with db.tx(conn):
+        _finish(
+            conn,
+            plan_id,
+            item_key,
+            "failed",
+            f"{error_code}:{last_error}",
+            hold_id=failed_hold or None,
+        )
+        _mark_step(conn, plan_id, item_key, "failed", last_error)
+        audit.append(
+            conn,
+            "plan.item_failed",
+            {
+                "plan_id": plan_id,
+                "item_key": item_key,
+                "account_id": account_id,
+                "amount_fen": amount_fen,
+                "hold_id": failed_hold,
+                "error_code": error_code,
+                "error_text": last_error,
+                "confirmation_id": cid,
+            },
+            session_id=f"plan:{plan_id}",
+        )
+    fresh = conn.execute(
+        "SELECT * FROM plan_budgets WHERE plan_id = ? AND item_key = ?", (plan_id, item_key)
+    ).fetchone()
+    if fresh is not None:
+        view_item = _budget_view(fresh, _step_map(conn, plan_id).get(item_key))
+    return {
+        "ok": False,
+        "status": "failed",
+        "error_code": error_code,
+        "user_text": last_error,
+        "item": view_item,
+        "confirmation_id": cid,
+    }
+
+
 async def pay_item(
     *,
     plan_id: str,
@@ -1027,7 +1147,7 @@ async def pay_item(
     session_id: str,
     approve: bool = True,
     proofs: list[dict[str, Any]] | None = None,
-    confirm_timeout_ms: int = 15_000,
+    confirm_timeout_ms: int = 120_000,
 ) -> dict[str, Any]:
     """付生日计划里的某一项：确认 → 策略 → 令牌 → 执行，和手动付款同一条路径。"""
     conn = db.connect()
@@ -1082,6 +1202,79 @@ async def pay_item(
         # 而不是让工具层在建 hold 时抛一个难懂的执行错误。
         _assert_available_for_item(conn, account_id, int(row["amount_fen"]))
         view_item = _budget_view(row, _step_map(conn, plan_id).get(item_key))
+        # 上一轮还在等验证：接着那一轮走（同一张确认卡、同一个 run）。
+        # 重开一张卡会让用户手里的口令对不上——钱没动，项目却被记成付款失败。
+        pending = _WAITING.get(session_id)
+        if pending is not None:
+            pending_cid = str(pending.get("cid") or "")
+            pending_task: asyncio.Task = pending["task"]
+            pending_seen: dict[str, Any] = pending["seen"]
+            if (
+                not pending_cid
+                or pending_task.done()
+                or _now_ms() - int(pending.get("created_ms") or 0) > WAITING_TTL_MS
+            ):
+                # 这一轮已经结束（确认卡过期/用户放弃/进程内异常）：清掉记录，按新的一轮处理
+                _WAITING.pop(session_id, None)
+                if not pending_task.done():
+                    pending_task.cancel()
+                    await asyncio.gather(pending_task, return_exceptions=True)
+            elif not approve:
+                _WAITING.pop(session_id, None)
+                await executor.resume(session_id, pending_cid, False)
+                await _await_task(pending_task)
+                with db.tx(conn):
+                    _finish(conn, plan_id, item_key, "declined", "用户拒绝付款")
+                    _mark_step(conn, plan_id, item_key, "skipped", "用户拒绝付款")
+                    audit.append(
+                        conn,
+                        "plan.item_declined",
+                        {"plan_id": plan_id, "item_key": item_key, "amount_fen": row["amount_fen"]},
+                        session_id=f"plan:{plan_id}",
+                    )
+                    revoke_authorization(conn, plan_id, reason="用户拒绝付款")
+                return {
+                    "ok": True,
+                    "status": "declined",
+                    "item": view_item,
+                    "message": "这一项按你说的没有付款，预算留着。",
+                }
+            else:
+                result = await executor.resume(
+                    session_id, pending_cid, True, proofs=proofs or []
+                )
+                if str(result.get("status")) == "waiting_factor":
+                    # 口令还是不齐：保持这一轮原地再要一次，别把预算记成付款失败
+                    with db.tx(conn):
+                        _finish(conn, plan_id, item_key, "reserved", "等待多因子验证")
+                    pending["required"] = list(result.get("required") or [])
+                    return {
+                        "ok": False,
+                        "status": "waiting_factor",
+                        "required": pending["required"],
+                        "proof_state": str(result.get("proof_state") or ""),
+                        "confirmation_id": pending_cid,
+                        "item": view_item,
+                        "message": "还差验证：这一步要动钱，缺口令不会执行，补上验证再提交。",
+                    }
+                _WAITING.pop(session_id, None)
+                if str(result.get("status")) in ("approved", "rejected", "expired"):
+                    await _await_task(pending_task)
+                if not pending_task.done():
+                    pending_task.cancel()
+                    await asyncio.gather(pending_task, return_exceptions=True)
+                return await _settle_run(
+                    conn,
+                    plan_id=plan_id,
+                    item_key=item_key,
+                    session_id=session_id,
+                    account_id=account_id,
+                    amount_fen=int(row["amount_fen"]),
+                    label=str(row["label"]),
+                    view_item=view_item,
+                    cid=pending_cid,
+                    seen=pending_seen,
+                )
         if not approve:
             with db.tx(conn):
                 _finish(conn, plan_id, item_key, "declined", "用户拒绝付款")
@@ -1150,19 +1343,25 @@ async def pay_item(
                     # 答复之后这一轮还要继续往下跑（令牌 → 工具）。resume 只负责
                     # 解掉确认的等待，执行是原来那个 task 在做——不等它收尾就取消，
                     # 会拿到一张「已批准但钱没动」的假结果。
-                    try:
-                        await asyncio.wait_for(task, timeout=30)
-                    except asyncio.TimeoutError:
-                        task.cancel()
-                        await asyncio.gather(task, return_exceptions=True)
-        finally:
+                    await _await_task(task)
+        except Exception:
             if not task.done():
                 task.cancel()
                 await asyncio.gather(task, return_exceptions=True)
+            raise
         if str(result.get("status")) == "waiting_factor":
-            # 缺因子：一分钱没动，把预算退回 reserved，等用户补验证
+            # 缺因子：一分钱没动，把预算退回 reserved，等用户补验证。
+            # 这一轮**不取消**：补验证回来要拿同一张确认卡接着走，重开一张卡会
+            # 让上一张签发的 proofs 全部对不上（钱没动，项目却被记成付款失败）。
             with db.tx(conn):
                 _finish(conn, plan_id, item_key, "reserved", "等待多因子验证")
+            _WAITING[session_id] = {
+                "cid": cid,
+                "task": task,
+                "seen": seen,
+                "required": list(result.get("required") or []),
+                "created_ms": _now_ms(),
+            }
             return {
                 "ok": False,
                 "status": "waiting_factor",
@@ -1171,80 +1370,21 @@ async def pay_item(
                 "item": view_item,
                 "message": "还差验证：这一步要动钱，缺口令不会执行，补上验证再提交。",
             }
-        tool_event = seen.get("tool") or {}
-        if bool(tool_event.get("ok")):
-            summary = str(tool_event.get("summary") or "")
-            hold_id = _latest_hold_id(
-                conn,
-                session_id=session_id,
-                account_id=account_id,
-                amount_fen=int(row["amount_fen"]),
-            )
-            with db.tx(conn):
-                _finish(conn, plan_id, item_key, "committed", summary, hold_id=hold_id or None)
-                _mark_step(conn, plan_id, item_key, "done")
-                audit.append(
-                    conn,
-                    "plan.item_paid",
-                    {
-                        "plan_id": plan_id,
-                        "item_key": item_key,
-                        "account_id": account_id,
-                        "amount_fen": int(row["amount_fen"]),
-                        "hold_id": hold_id,
-                        "confirmation_id": cid,
-                        "summary": summary,
-                    },
-                    session_id=f"plan:{plan_id}",
-                )
-            # 清单全部付完时把授权标 used（一次性）；还有项目没付就留着给到点用
-            _maybe_use_authorization(conn, plan_id)
-            return {
-                "ok": True,
-                "status": "paid",
-                "item": view_item,
-                "summary": summary,
-                "confirmation_id": cid,
-                "message": f"已经付了{row['label']} {fen_to_yuan_str(int(row['amount_fen']))} 元。",
-            }
-        error_code = str(tool_event.get("error_code") or "PAYMENT_FAILED")
-        last_error = str(tool_event.get("summary") or "付款没有成功")
-        # 失败也可能已经建过 hold（建了又释放）：能查到就记上，出问题能顺着 hold 看流水。
-        failed_hold = _latest_hold_id(
+        if not task.done():
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+        return await _settle_run(
             conn,
+            plan_id=plan_id,
+            item_key=item_key,
             session_id=session_id,
             account_id=account_id,
             amount_fen=int(row["amount_fen"]),
+            label=str(row["label"]),
+            view_item=view_item,
+            cid=cid,
+            seen=seen,
         )
-        with db.tx(conn):
-            _finish(
-                conn, plan_id, item_key, "failed", f"{error_code}:{last_error}",
-                hold_id=failed_hold or None,
-            )
-            _mark_step(conn, plan_id, item_key, "failed", last_error)
-            audit.append(
-                conn,
-                "plan.item_failed",
-                {
-                    "plan_id": plan_id,
-                    "item_key": item_key,
-                    "account_id": account_id,
-                    "amount_fen": int(row["amount_fen"]),
-                    "hold_id": failed_hold,
-                    "error_code": error_code,
-                    "error_text": last_error,
-                    "confirmation_id": cid,
-                },
-                session_id=f"plan:{plan_id}",
-            )
-        return {
-            "ok": False,
-            "status": "failed",
-            "error_code": error_code,
-            "user_text": last_error,
-            "item": view_item,
-            "confirmation_id": cid,
-        }
     finally:
         conn.close()
 
@@ -1667,3 +1807,12 @@ __all__ = [
     "run_due_authorized",
     "trigger_at",
 ]
+
+
+# ------------------------------------------------------------------ 计划钩子登记
+# plans.py（第 2 层）与 planner/ticker.py（第 4 层）不能 import 本模块（第 5 层：
+# 这里要驱动执行器、确认卡与能力令牌）。它们通过 app/plan_hooks.py 的注册表找到
+# 下面两个实现——调用方向是依赖倒置，不是循环依赖。
+# 登记放在文件末尾：必须确保两个函数都已定义；重复 import 只会登记一次。
+plan_hooks.register_plan_updated(on_plan_updated)
+plan_hooks.register_due_authorized(run_due_authorized)

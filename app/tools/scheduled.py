@@ -32,6 +32,7 @@ import app.audit as audit  # noqa: PLR0402
 import app.db as db  # noqa: PLR0402
 import app.funds as funds  # noqa: PLR0402
 import app.ids as ids  # noqa: PLR0402
+import app.timefmt as timefmt
 from app.clock import PolicyDenied, ValidationError, now_ms
 from app.ids import idempotency_key
 from app.models import Action, ToolResult
@@ -131,7 +132,7 @@ def schedule_transfer(
             session_id=ctx.session_key(),
         )
     who = payee_name(ctx.conn, payee_id)
-    when = _time_text(due_ms)
+    when = timefmt.minute_text(due_ms)
     extra = "，每月重复" if recurrence == "monthly" else ""
     return ok_result(
         {
@@ -170,7 +171,7 @@ def list_scheduled(
             "amount_fen": int(row["amount_fen"]),
             "amount_yuan": fen_to_yuan_str(int(row["amount_fen"])),
             "due_ms": int(row["due_ms"]),
-            "due_text": _time_text(int(row["due_ms"])),
+            "due_text": timefmt.minute_text(int(row["due_ms"])),
             "recurrence": str(row["recurrence"]),
             # 到点复判升级成红灯但还没强验证：前端要明确提示「需要再验一次」，
             # 别让用户以为它只是「还没到点」。
@@ -683,9 +684,40 @@ def _defer(
             "defer_count": count, "amount_fen": amount_fen}
 
 
-def _time_text(ms: int) -> str:
-    stamp = datetime.datetime.fromtimestamp(ms / 1000, tz=datetime.UTC).astimezone()
-    return stamp.strftime("%Y-%m-%d %H:%M")
+def required_factors_for(
+    conn: sqlite3.Connection, scheduled_id: str, *, now: int | None = None
+) -> list[str]:
+    """只读：这笔预约到点复判后需要哪些强验证因子；算不出来就给空表。
+
+    为什么要有这个函数：预约被挂到 needs_verification 之后，页面上只显示
+    「等待你补验证」是不够的——用户还得知道要补哪几个因子、能不能在页面上补。
+    入口在 /api/scheduled/{id}/challenge，参数正是这里的因子名；把因子算一遍
+    交给页面，用户才不用猜。这里不写库、不发令牌、不动钱。
+    """
+    try:
+        row = conn.execute(
+            "SELECT * FROM scheduled_transfers WHERE id = ?", (scheduled_id,)
+        ).fetchone()
+        if row is None:
+            return []
+        stamp = int(now if now is not None else now_ms())
+        action = build_action(
+            "scheduled_transfer",
+            {
+                "payee_id": str(row["payee_id"]),
+                "amount_fen": int(row["amount_fen"]),
+                "due_ms": int(row["due_ms"]),
+            },
+            str(row["account_id"]),
+            int(row["amount_fen"]),
+        )
+        decision = _fresh_decision(conn, action, stamp)
+        if getattr(decision, "level", "") != "red":
+            return []
+        return [str(item) for item in getattr(decision, "required_factors", [])]
+    except Exception:  # noqa: BLE001 - 只读探针，算不出来就当没有
+        log.warning("scheduled.required_factors_failed id=%s", scheduled_id)
+        return []
 
 
 def _tx(conn: sqlite3.Connection) -> Any:

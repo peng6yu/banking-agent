@@ -373,3 +373,495 @@
 ### 遗留
 - 场景 3 仍无产品横向对比表（只有适当性 + 列表 + 申赎）；候选为下一步。
 - 43 条红队仍为自研用例集；外部样本复测未做。
+
+## v2.2.0 快路口语轮：说一句就办（提醒 / 储蓄 / 点选澄清 / 总览就地批准）  2026-10-25
+
+> 起因：v2.1 之后按真实使用路径走了一遍前端，发现三处「模型答得对、用户还要再动手」的断点：①建立提醒和记储蓄必须先自己填表单；②缺槽位时只被追问一句，得自己把金额/收款人/卡号敲进对话；③总览页的待处理授权只能「去确认」，跨会话还得自己找。本轮只补这三个断点，不动资金链路、不动判级。
+
+### 一、识别即执行快路（新模块）
+- [x] 新增 `app/planner/assist.py`（intent=`assist`）：`detect(text, session_id)` → `handle()`，**不建 DAG、不动钱**——储蓄只改计划的 `saved_fen`，提醒只落一条 `plans` 步骤（`kind='reminder'`）。
+- [x] 词表口径：`REMINDER_MARKERS`（提醒/记得/别忘/叫我/到点/闹钟）配合 `REMINDER_EXCLUDES`（生日/转账/汇款/付款/支付/申购/赎回/还款），避免把「提醒我明天还款」当提醒建单；`SAVINGS_MARKERS` 不含单字「储蓄」，且 detect 先把「储蓄卡 + 余额/账单」「转账」「这个月花了多少」判给查余额/查账单/转账，锁住「储蓄卡 ≠ 储蓄目标」。
+- [x] `create_reminder()` 支持一次性 + daily/weekly/monthly；`active_reminders(conn, user_id)` 供读侧列表（只取 steps 里 `kind=='reminder'` 且 plan 活跃的那一步）。
+- [x] 修复本轮暴露的真 bug：取消提醒分支原用 `plan["id"]`，而 `_active_reminders` 返回的主键叫 `plan_id` → `KeyError: 'id'`；改为 `plans.update(conn, str(plan["plan_id"]), user_id=user_id, status="cancelled")`。
+
+### 二、循环提醒的到点语义
+- [x] 新增 `app/reminder_time.py`：`REPEATS={daily,weekly,monthly}`、`label()`、`next_after()`、`next_from_payload()`；按**本地日历**算下一次，月 31 日在短月 clamp 到月末（2026-01-31 → 2026-02-28）。
+- [x] `app/plans.py::_run_step` 的 reminder 分支：循环提醒响过一次**不置 done**，用 `next_from_payload` 把 state 改回 `pending`、前移 `due_ms`；审计 `plan.step_done` 带 `repeat` / `next_due`。一次性提醒照旧只响一次。
+
+### 三、API 与读侧
+- [x] `POST /api/reminders`（`schemas.ReminderCreate`：`text` 1–40、`due_ms`、`repeat` none/daily/weekly/monthly、`hour`=9、`minute`=0、`day`、`weekday`）；返回 `{ok, plan, due_ms, due_text, repeat, repeat_label}`，坏入参统一 400 `VALIDATION`。
+- [x] `GET /api/business/plans` 新增 `reminders` 块（`items[].state_label`、`count`、`empty_reason`），与既有 `alerts` 并存；状态文案 `REMINDER_STATE_LABELS`（等待到点/正在提醒/已提醒/提醒失败/已跳过）。
+
+### 四、前端补齐（web/index.html）
+- [x] `done` 事件的 `choices` → 可点 chips（去重、最多 8 条、点一下等于替用户发那句话，服务端重新解析，选项不带权限）；澄清轮的 `done` 也带 `choices`，来源 key：`amount_fen / payee_name / payee_names / card_tail / product_code / subscription_name / due_ms / date_hint`。
+- [x] 总览待处理授权块重写：`can_confirm_here` 且未过期时给「批准执行 / 拒绝」并在原地调用；否则保留「去确认 / 去完成验证」并说明原因（过期 / 需要人脸短信 / 这一轮已结束）。`confirmAction` 增第 5 参 `sid`，因为总览的卡属于**别的会话**，必须带它自己的 `session_id`。
+- [x] 计划页新增提醒卡：表单（文案/到点/重复）+ 列表（重复文案、下次时间、状态、计划号、「结束这条提醒」）。周期提醒提交时只传 `hour/minute/weekday/day` 不传 `due_ms`，避免用户挑了过去的日期立刻触发。
+
+### 五、验收（全部 exit 0）
+- [x] pytest：**1464 passed / 4 skipped，37.50s**（2026-10-25 全量；10-24 基线 1419 收集 = 1415 + 4 skip）。
+- [x] 新增 40 条用例：`tests/test_assist_fastpath.py` 26、`tests/test_reminder_time.py` 8、`tests/test_reminder_api.py` 11（含月末 clamp、循环提醒 re-arm 后仍 pending 且审计带 repeat、一次性响过后从活跃列表消失、取消提醒不动余额）；另在 detect 参数表补 5 条「储蓄卡 ≠ 储蓄目标」回归。
+- [x] 红队 **43/43**、e2e `--offline` **13/13**、前端自检 **66/66**、内联 JS `node --check` 通过。
+- [x] 数字对账：1419 → 1468 收集 = +40 新用例 + 5 条回归 + 4 条 `test_imports` 参数化（两个新模块 × ALLOWED/LAYERS 两张表）。
+
+### 六、文档与单一事实源
+- [x] `docs/02`：登记 `app/planner/assist.py`、`app/reminder_time.py`、三个新测试文件；`docs/07`：§7.5 补 `POST /api/reminders`，§7.6 补 `done` 的 assist 字段与「choices 的语义」，§7.7 改 `confirmAction(id, approve, factor, proofs, sid)` 并补提醒三函数，硬性要求补「缺槽位必须给可点 chips ≤8」「总览可原地批准/拒绝，服务端仍重新裁决」。
+- [x] `docs/10` §10.2 补 `app/reminder_time.py` 与 `app/planner/assist.py` 两行必测点。
+- [x] 14 个文件的规模数字批量对齐（1415→1464、88→91、39→40、196.86s→37.50s、日期→2026-10-25），`release_manifest.json` 重新生成；PROGRESS 只追加不改写历史。
+
+### 遗留（照实说）
+- `tests/test_imports.py::_exists` 存在既有缺陷：`APP_DIR` 已是 `repo/app`，函数却又拼 `"app/<mod>"`，导致 `from app.planner import assist` 这类**子模块**依赖永远识别不到、恒为 False。本轮只补登记未修缺陷——修它会一次性改变整张依赖表的判定，留作单独一轮。
+- 提醒只到「页内提醒」，未接系统通知/短信；储蓄目标只是记录，不产生任何资金动作（这是设计，不是缺口）。
+- 真实短信/人脸渠道仍未接（沿用 v2.0 的桩），未推送远程仓库。
+
+
+## v2.3.0 功能体检轮：选项、批准、AI 管计划（2026-10-25）
+
+> 起因：以真实用户口吻投诉「需要我选的地方没有能选的选项、计划与提醒不能由 AI 建立或结束、疑似的东西没有批准按钮」。这一轮不加新故事，只把已有能力补到「能点、能批、能结束」。
+
+### 一、需要选择的地方真的能选（choices 对齐问句）
+- [x] `app/api/routes.py::_choices_for` 重写：先按 `parsed.missing` 里**这一句正在问的那个槽位**（`_focused_slots` + `_SLOT_QUESTION_HINTS`）出 chips，不再把全部缺失槽位混排成一锅（原实现把「生日礼物给谁」的收款人候选和 100/500/1000 金额混在一起）。
+- [x] `unknown` / 低置信度分支不再零选项：`_broad_choices` 给 8 条固定去处（查余额 / 看账单 / 我有哪些提醒 / 我的计划列表 / 有什么理财产品 / 我有哪些持仓 / 预约转账 / 人工接管队列），并附 `_INTENT_EXAMPLES` 话术示例。
+- [x] 前端 `renderDone` 补 `else if (data.question)` 兜底：没对上意思时给 4 个可点去处，不再是空白追问。
+- [x] 点选后的**短回答合并**（`app/planner/clarify.py`：`remember_slots` / `_merge_slots`，kind=`slots`）：chip 值仍是裸槽位值（如「李静」「500 元」），原来点下去被当成全新话语重新解析 → unknown；现在反问轮登记槽位、点选时合并，指向同一个计划/申购继续走。
+- [x] 同名消歧：`app/planner/assist.py` 里 `_stamp_text` / `_plan_cancel_choices` / `_reminder_cancel_choices`，同名计划或提醒的 chip 文案带「（时间 · pl_xxx）」并支持按计划号点选（原来两份「API 测试」、8 条「喝水」只给标题，点下去分不清动哪一条）。
+
+### 二、计划与提醒由 AI 建立、也由 AI 结束
+- [x] 提醒：建立走 `assist.create_reminder`（一次性 / daily / weekly / monthly，`app/reminder_time.py` 算下一次），结束走新增的双向语序（「结束提醒 喝水」「把提醒结束掉」都认）+ `reminder_cancel_choose` 多命中反问；取消只改计划状态，余额不动。
+- [x] 计划：新增 `_PLAN_LIST_RE` / `_PLAN_CANCEL_RE` 两条快路 + `_handle_plan`（`plan_list` / `plan_cancel` / `plan_cancel_choose` / `plan_cancel_none`），列表按 `PLAN_STATUS_LABELS` 给中文状态；「我的计划列表」现在返回「你有 N 个计划，先列最近 5 个」并附可点「结束」chip。
+- [x] 读侧修正：`active_reminders` 原来从 plan 级 `plan_view` 取 `due_text`，恒为空（页面显示「下次 —」）；改为从步骤 payload 取 `due_ms` 现算，并补 `state` / `repeat_label`。
+- [x] 生日计划可从页面直接建：新卡片「新建生日计划（预算 + 鲜花蛋糕）」（标题 / 日期 / 预算 / 鲜花 / 蛋糕 / 到点自动付款），提交 `POST /api/plans/birthday`；卡片列出预算·计划内·已付款、可支配/余额/预留与到点时间，逐项「现在付这一项」/「取消这份计划」。
+- [x] 生日付款补验证链路打通（后端 + 前端）：红档 `POST /api/plans/{id}/items/{key}/pay` 返 `status:'waiting_factor'` → 前端 `bxBirthdayFactor` 调 `POST /api/factor/challenge` 渲染口令输入 → 带 `proofs` 重发同一请求完成付款；错口令仍可重试。修 `app/birthday.py::_settle_run` 的返回值 bug：视图在事务提交前构造，接口说已付款而卡片仍显示「预算已预留」，现在两处分支都重查 `plan_budgets` 重建视图。
+- [x] 生日计划明细有了 HTTP 出口：`GET /api/plans/{id}` 在 `birthday.budgets` 非空时改用 `birthday.plan_with_budgets`，返回 `budget` / `items[]` / `authorization`（原来 `plans.view_plan` 拿不到，前端无处渲染 items 与付款按钮）。
+
+### 三、疑似的东西给批准空间
+- [x] 总览「待处理的授权」：`_pending_confirmations` 增 `can_verify_here`（未过期 + run 在 running/waiting + 无必填因子）；为真时卡片直接给「就地验证并批准」（新增 `bxInlineFactor`：拉 `/api/factor/challenge` → 口令行 → 带 proofs 批准 / 拒绝），否则说明为什么不能（过期 / 需人脸短信 / 这一轮已结束）。
+- [x] 硬拦截面板：`renderFactor` 在 `required` 为空时原先是静默 `return null`，现在给出规则号、理由、额度口径，并给「换个说法再说」「知道了」两个出口。
+- [x] 人工接管队列有 UI 了（后端早就有 `/api/handoffs/*`，前端零入口）：概览「让 AI 助手来做」与安全页各一张队列卡，`bxHandoffCard` 支持领取 / 要求补充信息（带备注输入）/ 拒绝（不动钱）/ 取消这一轮，操作以「演示客服」写审计。
+- [x] 疑似订阅可定性（新表 + 新端点）：`subscription_verdicts`（`app/db.py`）、`subscriptions.verdicts` / `record_verdict`、审计事件 `subscription.verdict`、`POST /api/subscriptions/verdict`；管理页每条疑似订阅给「不是我订的 / 确实是我订的 / 让助手核实这几笔」，判为「不是我订的」后从推断列表消失并计入 `dismissed_count`。
+- [x] 预约转账的补验证在后端补齐：`scheduled.required_factors_for`（只读重裁）→ `business._scheduled_tasks` 增 `needs_verification` / `required_factors` / `can_verify_here` 与状态文案「等待你补验证」；接口 `POST /api/scheduled/{id}/challenge|verify` 既有可用。
+
+### 四、验收（全部 exit 0）
+- [x] pytest 全量：**1468 passed / 4 skipped，61.53s**（`tmp/pytest_round6.log`；v2.2.0 的 1464 基线 + 本轮 4 条新用例）。
+- [x] 新增/改动用例：`tests/test_birthday_plan.py` +2（红档 proofs 复用同一 run 付成功、错口令可重试且余额不变）、`tests/test_assist_fastpath.py` +2 改 1（同名计划 / 同名提醒的 chip 值互异并只作用于点中那条）、`tests/test_imports.py` 登记 `app.subscriptions` 新依赖与 `app.tools.base`；`tests/lease_worker.py` + `tests/test_multiprocess_lease.py` 把墙钟起跑改成文件闸门（`LEASE_READY_DIR` / `LEASE_GO_FILE`）修多进程租约时序 flake。
+- [x] 红队 **43/43**、e2e `--offline` **13/13**、前端自检 **66/66**、内联 JS `node --check` 通过（本轮改动后重跑，日志 `tmp/redteam_round6.log` / `tmp/e2e_round6.log`）。
+- [x] 真浏览器逐条点过：chips 点选接回、总览就地批准/拒绝、接管队列四类操作、疑似订阅三按钮、预约转账红档全流程、生日计划建单 + 红档付款。
+- [x] 规模对账：`openapi` 路径 **41**（新增 `POST /api/subscriptions/verdict`），`tests/test_*.py` **91**，表 **31**（新增 `subscription_verdicts`）。
+
+### 五、文档与单一事实源
+- [x] `docs/02` 补 `subscription_verdicts`、`POST /api/subscriptions/verdict`、`SubscriptionVerdictRequest`、新测试点数；`docs/07` 补 chips 消歧（按计划号点选）与生日付款补验证/重试；`docs/10` 补三条必测点（生日付款 proofs、同名消歧、订阅定性）。
+- [x] 规模数字批量对齐：1464→**1468**、API 40→**41**、表 30→**31**、37.50s→**61.53s**、日期→2026-10-25；`release_manifest.json` 重生成。
+
+### 遗留（照实说）
+- 预约转账的「补验证」按钮只做到后端字段与接口（`can_verify_here` / `required_factors`），计划页那一行仍只有「让助手撤销这笔预约」，没接 `bxInlineFactor`。
+- 管理页工具按钮的话术仍不带对象（如「冻结」「挂失」用通用话术，靠卡片上下文补全），未逐张改写成「冻结尾号 4417 这张卡」。
+- `tests/test_imports.py::_exists` 的路径拼接缺陷仍未修（`APP_DIR` 已是 `repo/app`，函数又拼 `app/<mod>`，子模块依赖恒判 False）；本轮只登记不修。
+- 真实短信/人脸仍是桩；提醒未接系统通知；本轮未 push 远程。
+
+## v2.4.0 订阅定性口径修正  2026-10-25
+
+**起因**：用户在业务管理页点了「确实是我订的」，卡片上出现了 tag「你的结论：确实是我订的」，但它仍然挂在「疑似订阅」待办里没消失（用户原话：「点击是我定的这个待办不会消失啊」）。
+
+**根因**：`subscriptions.detect_recurring` 只过滤了 `verdict == not_subscription`（当初把 confirmed 当成「保留着给用户看一眼」），产品口径应是「两种定性都算处理完」——误报是处理完，确认也是处理完，留着只会让待办永远清不掉。
+
+### 一、后端
+- [x] `app/subscriptions.py`：`detect_recurring` 的过滤改成 `if item.get("verdict") in VERDICT_ACTIONS`（局部变量 `dismissed` → `settled`），两种结论都让商户退出推断列表；docstring 同步口径。
+- [x] `app/subscriptions.py` 新增 `clear_verdict(conn, *, user_id, merchant)`：撤回定性（`DELETE FROM subscription_verdicts`），空商户抛 `ValidationError`，返回 `{merchant, cleared}`，落 `subscription.verdict_cleared` 审计；`__all__` 补该项。
+- [x] `app/audit.py`：`EVENT_TYPES` 增 `subscription.verdict_cleared`（闭集 62 → **63** 类）。
+- [x] `app/api/schemas.py`：新增 `SubscriptionVerdictClearRequest`（`merchant` 1–60，`extra=forbid`）。
+- [x] `app/api/routes.py`：新增 `POST /api/subscriptions/verdict/clear` → `{ok, merchant, cleared}`（API 路径 41 → **42**）。
+- [x] `app/api/business.py`：`management_view` 的 `inferred` 增 `confirmed_count` / `settled_count` / `settled[]`（每条带「重新当成疑似」动作 `subscription_verdict_clear`），保留 `dismissed_count`。
+
+### 二、前端（web/index.html）
+- [x] `bxRenderInferred` 重写：先 `replaceChildren()`；待办为空时也渲染「疑似订阅（从流水推断，0 个）」+「没有待处理的疑似订阅：N 条你已经定过性」，不再整块消失让人以为坏了。
+- [x] 删掉永不命中的「你的结论」tag 分支（定性后已不在 items 里），改在末尾新增「已定性的商户（N 条）」块：每行 `merchant` + `verdict_label` + 时间 + 「重新当成疑似」按钮。
+- [x] `bxSubscriptionVerdict` 成功气泡按 `verdict` 分文案：confirmed 明说「已经从待办拿掉了，不替你退订、也不变成代扣」，并指路撤回入口。
+- [x] 新增 `bxSubscriptionVerdictClear(merchant)`（`POST /api/subscriptions/verdict/clear` → 按 `cleared` 出气泡 → `bxCacheDrop()` + `bxRefresh()`），`bxRunAction` 开头加 `subscription_verdict_clear` 分支。
+
+### 三、测试
+- [x] 新增 `tests/test_subscriptions_verdict.py`（8 条）：两种定性各自从 `detect_recurring` 消失、全部定性后待办为空而 `verdicts` 仍在、撤回后重新出现且二次 `cleared:false`、`management_view` 的 `settled`/`confirmed_count`/`actions` 形状、非法入参抛 `ValidationError`、两条审计事件顺序 + `audit.verify_chain`、HTTP 往返（verdict → count-1 → clear → 复原）。
+- [x] 踩坑记录：`tests/tool_fixtures.bank` 只 `db.connect(tmp_path/...)`、**不 monkeypatch `db.DEFAULT_DB_PATH`**，所以走 HTTP 的用例默认读写真实 `data/bank.db`；测试里用 `PRAGMA database_list` 取到路径再 monkeypatch 才隔离干净（`tests/tool_fixtures.USER_ID` 是 `u_test`）。
+
+### 四、验收（全部 exit 0）
+- [x] pytest 全量：**1476 passed / 4 skipped，48.76s**（`tmp/pytest_r7.log`；v2.3.0 的 1468 基线 + 本轮 8 条新用例）。
+- [x] `ls tests/test_*.py | wc -l` = **92**；`scripts/check_frontend.py` **66/66**；抽 `<script>` 后 `node --check` 通过。
+- [x] 真浏览器（8112 真模型 + `data/api_token`）逐条点过：管理页 3 条疑似订阅 → 点百度网盘「确实是我订的」→ 头部变 2 个、离队进「已定性的商户（1 条）」→ 点「重新当成疑似」复原 3 条 → 三条全部定性 → 「疑似订阅（从流水推断，0 个）」+「没有待处理的疑似订阅：3 条你已经定过性」+ 三条撤回按钮（截图 `tmp/shot_subs_settled.png`）。验证完 `make reseed` 恢复种子态。
+- [x] 规模对账：API 路径 **42**、审计事件 **63** 类、表 **31**、`tests/test_*.py` **92**。
+
+### 五、文档与单一事实源
+- [x] 批量改数：1468→**1476**、61.53s→**48.76s**、API 41→**42**、审计事件 62→**63**、测试文件 91→**92**（README、docs/{00,02,03,07,10,13,15,技术文档,安全自评报告,答辩PPT大纲,提交物对照表}、docs/交付/{比赛演示方案,交付说明,build_ppt.py}、docs/benchmark/*、docs/audit/feature_matrix.md）；v2.2.0/v2.3.0 章节里的历史数字保持原样不改写。
+- [x] `docs/03` `subscription_verdicts` 行、`docs/10` 必测点按新口径重写（两种结论都退出待办、`settled` 可撤回、两条审计）。
+- [x] `docs/07` §7.5 补 `POST /api/subscriptions/verdict` 与 `/clear`，§7.7 补 `bxSubscriptionVerdict` / `bxSubscriptionVerdictClear` 与 `settled` 段；`docs/02` 测试登记表追 `tests/test_subscriptions_verdict.py`(8)。
+- [x] `release_manifest.json` 重生成；`build_ppt.py` 的 chips 数字随批量脚本更新后重建 PPT。
+
+### 遗留（照实说）
+- 预约转账的「补验证」按钮仍只在后端字段与接口层，计划页那一行只有「让助手撤销这笔预约」。
+- 管理页工具按钮话术仍不带对象（「冻结」「挂失」靠卡片上下文补全）。
+- `tests/test_imports.py::_exists` 路径拼接缺陷未修（子模块依赖恒判 False）。
+- 真实短信/人脸仍是桩；提醒未接系统通知；本轮未 push 远程。
+
+---
+
+## v2.5.0 逐笔核实与会话记忆轮（2026-10-25）
+
+**起因（用户原话）**：「帮我核实一下…到底干了啥，要真的核实，而不是给个结论；要逐笔核实，不要一起核实；会话要有记忆，不该每问一句都像新会话，要能联想；还要有订单手动录入的入口。」
+
+### 1. 逐笔核实（真核实，不是给结论）
+
+- 后端 `app/subscriptions.py`：新增 `merchant_transactions(conn, account_id, merchant, *, lookback_months, as_of, limit=12)`（该商户逐笔：时间、金额、分类、渠道中文名、备注，按时间倒序）与 `merchants_with_transactions()`（用户只报商户名时对名字用）；`CHANNEL_LABELS` 把 app/auto/bank/overseas/pos… 翻成「手机银行/自动扣款/柜面/境外/刷卡」。只读，不动钱。
+- 快路 `app/planner/assist.py`：新增 `detect() → "subscription"`（「核实/核对/查一下… + 订阅/代扣/扣款/续费」或「有哪些订阅」；不动「我有哪些提醒」「查余额」）与 `_handle_subscription`：
+  - 只报商户名 → `action=subscription_check`，summary 逐条列每笔，附推断与「把握度中/间隔」，末尾写清「这些是账上流水原文，不是商户订单；我没有银行官方接口，也拿不到商户侧订单，所以『是不是订阅』只能由你定」；
+  - 「XX 不是我订的 / 确实是我订的」→ 走 `subscriptions.record_verdict`（同结论重复说不多写一行；改口覆盖）并回两个可点 chip；
+  - 无商户名 → 列疑似订阅候选，每条 chip「核对「X」（N 笔）」；空态诚实说「近 6 个月没找到每月/每年、金额基本一致的扣款」。
+- 管理页「逐笔核对这几笔」按钮从 `prompt` 改成 `kind=subscription_check`，点下去真的发那句核实请求；前端 `bxRunAction` 新增该分支 → `bxAsk(act.prompt)`。
+
+### 2. 会话记忆（重启后还接得上）
+
+- 新表 `chat_turns(session_id, seq, role CHECK IN ('user','assistant'), content, ts_ms)`，主键 `(session_id, seq)` + 时间索引；只留最近 200 轮（写入时剪枝），单条截断 4000 字。
+- 新模块 `app/chat_history.py`（第 1 层，只依赖 `app.db`/`app.clock`）：`append` / `recent` / `title` / `latest` / `clear`。**刻意不写 `sessions` 表**——那张表的行由 `planner.state.open_run` 建，它靠「新插入」判断要不要写 `session.start` 审计；记忆模块提前 INSERT 会让这个事件凭空消失（本轮真踩到，`tests/test_api.py` 抓到）。标题改为从第一条用户消息现算，最近会话从 `chat_turns` 的 `MAX(ts_ms)` 找。
+- `routes.py`：`_remember` 改为「内存 deque + 落库」两写，写库失败只 warning 不打断对话；`_turns` 内存空就回库读（服务重启后模型仍接得上话）；新增 `GET /api/chat/history`、`GET /api/chat/latest`。
+- 前端：`bxLoadChatHistory()` 在启动时（`bxRestoreSession()` 之前）回放上一段对话——有 sessionStorage 的 sid 就查 history，否则查 latest 并把 sid 写回；先出「这是上次的对话（标题，最近 N 轮，服务端存着）」再逐轮画气泡。刷新页面不再是一片空白。
+
+### 3. 订单手动录入（现金/刷卡单没进本行）
+
+- `POST /api/transactions/manual`（`ManualTransactionRequest`：merchant 1–40、amount_fen 1–1e8、direction out/in、category 默认「其他」、note 0–80）：只写本行 `transactions`（channel='manual'）与演示余额，**不对应任何真实支付**；同账户+方向+金额+商户+分类+备注且同一本地自然日重复提交 → 复用原流水（`idempotent:true`，不重复扣钱）；余额不足 409 `INSUFFICIENT_FUNDS` 且一分不动；写审计 `transaction.manual`（闭集 63→64）。
+- 前端账单页新增「手动记一笔」卡（商户/金额/支出或收入/分类/备注 + 提交），成功气泡写「只进本行流水与演示余额」+ 结果框写流水号/渠道/分类，同日重复会明说「这笔今天已经记过，没有重复记账」。
+
+### 4. 测试与验收
+
+- 新增 `tests/test_subscription_check.py`(13) `tests/test_chat_memory.py`(13) `tests/test_manual_transaction.py`(18)：逐笔明细与只读、两种定性退出待办、未知商户不写结论；记忆顺序/剪枝/重启仍在/`clear` 后 `sessions` 仍 0 行；补录扣加余额、同日幂等、改备注算新一笔、余额不足 409、7 种坏入参 400、计入账单合计、审计落链。
+- 全量 `.venv/bin/python -m pytest -q` → **1521 passed, 4 skipped, 1 warning in 55.62s**（`tmp/pytest_r9.log`，exit 0）；`tests/test_*.py` **95** 个；前端 `scripts/check_frontend.py` **66/66**，抽 `<script>` 后 `node --check` 通过。
+- 真浏览器（8112 真模型 + 真 `api_token`）实测三件事：管理页「逐笔核对这几笔」→ 聊天出现 3 笔逐条明细（15.00 元 · 订阅 · 自动扣款 · 自动续费）与两个定性 chip；硬刷新后历史气泡回显（「这是上次的对话（我有哪些提醒，最近 2 轮，服务端存着）」）；账单页手动记 23.50 元 → 余额 12,860.50 → 12,837.00、结果框写流水号，同日重复提交回「这笔今天已经记过，没有重复记账」且余额不变。截图 `tmp/shot_r9_chat.png`。
+
+### 5. 规模与文档
+
+- 规模：数据库表 **32** 张（+chat_turns）、审计事件 **64** 类（+transaction.manual）、API 路径 **45** 条（+manual/history/latest）、工具 35、规则 13、`tests/test_*.py` **95**。
+- 文档：`docs/02` 登记 `app/chat_history.py` 与三个测试文件；`docs/03` 加 `chat_turns` 行、表数量 32、事件闭集 64 并点明新增三类事件；`docs/07` §7.5 加三个端点（含幂等与「只进本行账」口径）、§7.7 加 `bxLoadChatHistory`/`bxBindManualForm`/`bxSubmitManualTransaction` 与 `subscription_check` 分支；`docs/10` §10.2 补三行必测点；README/验收报告/PPT/清单数字统一到 1521/4、55.62s、45 路由、32 表、64 事件、95 测试文件。
+
+### 6. 遗留
+
+1. 预约转账的补验证仍只有后端字段与接口，计划页那一行还没有「补验证并执行」按钮；
+2. 管理页工具按钮的话术仍不带对象（点了只发「我要转账」这类泛问）；
+3. `tests/test_imports.py::_exists` 的路径拼接缺陷未修（`APP_DIR` 已是 `repo/app`，函数又拼 `app/<mod>`，子模块依赖恒判 False）；
+4. 真实短信/人脸仍是桩；提醒未接系统通知；未 push 远程。
+
+
+## v2.6.0 助手智能度 + 长期记忆 + 停代扣联动 2026-10-25
+
+### 1. 起因（用户原话）
+
+> 确认代扣了之后为什么疑似订阅这里还有这个疑似订单，而且确认框里面还没有相关的具体订阅信息？而且这个agent智能程度太差了，你能不能让他成为你harness对话的这种要有预设和思维连等等，只不过给他限制他能用的工具。不要每次对话都要建立一个新的会话啊我希望他能像hermes一样越用越智能。你好好分析我的请求。
+
+紧随其后又要求「继续所有任务，并且你要按照用户的习惯完整做审计」。四件事拆开是：①停掉银行侧代扣之后，该商户还挂在「疑似订阅」待办里；②停代扣的确认卡只有一句「取消订阅」，没有商户、月费、下次扣费；③助手缺人格与思考步骤，也不该每句话都新开一个会话；④要能跨会话记住用户（越用越智能）。
+
+### 2. 停代扣后疑似订阅仍在待办
+
+- 根因：`subscriptions.detect_recurring` 只看流水，与 `subs` 表互不相干——停掉银行侧代扣只改 `subs.status`，推断链路完全看不见。
+- `app/subscriptions.py`：`detect_recurring` 额外排除该账户下 `subs.status='cancelled'` 的商户；新增 `stopped_debits(conn, account_id)`（`sub_id/merchant/amount_fen/amount_yuan/period/period_label/next_charge_text/status/status_label/boundary_text`），`boundary_text` 固定「只停了银行侧周期性代扣，商户会员需要你自己去商户端取消」。
+- `app/api/business.py`：`management_view` 的 `subscriptions.inferred` 增 `stopped[]` 与 `stopped_count`——停过的商户不进 `items` 待办，改列到「已停止」一栏；note 同步改口径。
+- 前端 `bxRenderInferred`：新增「已停止银行侧代扣（N 条）」块，每条带商户、状态、每期金额、原下次扣费与边界句。
+
+### 3. 确认卡补出具体订阅信息
+
+- `app/planner/events.py`：新增 `_subscription_row(conn, sub_id, account_id=None)`；`describe_confirmation` 对 `cancel_subscription` 出 `details['subscription']`，`confirmation_frame` / `prompt_payload` 透传该字段。
+- `app/planner/state.py`：`new_confirmation` 对 `cancel_subscription` 把 `action_text` 覆写成「停止银行侧代扣「爱奇艺会员」（每月 25.00 元）」——原来只回工具名中文「取消订阅」。
+- 真模型实测确认帧：`subscription={merchant, amount_fen, amount_yuan:'25.00', period:'monthly', period_label:'每月', next_charge_text:'2026-11-24 23:03', boundary_text, status:'active', status_label:'生效中'}`。
+- 前端 `renderConfirm`：带 `subscription` 时金额行改「不动本金余额（只停银行侧代扣）」，并追加「订阅商户 / 每期金额 / 下次扣费 / 当前状态」四行；确认按钮文案带商户名。
+
+### 4. 助手的人格、预设与思考步骤（提示词 v2）
+
+- `app/planner/intent.py` 的 `SYSTEM_PROMPT` 重写：人格「小银」（银行里的办事助手，话短、先说结论）、5 条预设（不确定就问一句但不是每句都问；金额/账户/收款人只认当次原话；不编造额度与产品；只申请不执行；高风险先说明再请确认）、5 步内部思考顺序（听清要办什么 → 缺什么槽位 → 有没有歧义 → 这动作风险如何 → 该不该先反问），**原有 7 条硬性规则逐字保留**（末条仍是「工具报错时用一句人话解释，不要输出英文错误码或堆栈」）。
+- 工具权限没有放松：模型仍然只能通过 `emit_intent` 的 schema 申请（意图 + 槽位白名单），执行侧照样过 `PolicyEngine` + 能力令牌。提示词写明「你只能申请，不能执行」——人格与思考步骤改的是表达，不是权限。
+- `build_messages(text, history=None, *, memory_block='')`：记忆非空时追加第二条 system（「长期记忆只当默认值；涉及金额、账户、收款人时以本次原话为准」）。
+
+### 5. 不再每句话都新开会话
+
+- `routes.py`：`session_id = request.session_id or _resume_session_id()`——没带 sid 时用 `chat_history.latest(limit=1)` 接上最近一次真聊过的会话，而不是新建。
+- 前端 `onStart` 重写：只在「这一轮没带 sid」或「sid 变了」时提示「会话 s_xxx（同一条会话一直用下去，刷新也接得上）」，删掉每轮都打印的「已建立会话」——那句提示本身在制造「每句话都新开会话」的错觉。
+- 上下文反问：`_contextualize()` 对 `intent=unknown` 或 0<confidence<0.5 的轮次把上一句念回来（「上一句你问的是「我有哪些提醒」，这一句我没太跟上……」），再给 8 条兜底 chips（查余额/看账单/理财/订阅/提醒/计划/储蓄目标/卡）。
+
+### 6. 越用越智能：长期记忆
+
+- 新表 `agent_memory(user_id, mem_key, mem_value, kind CHECK IN ('fact','preference','profile'), source, updated_ms)`，主键 `(user_id, mem_key)`（33 张表）。
+- `app/memory.py`（第 1 层）：`remember` / `forget` / `all_facts` / `prompt_block`，键 ≤ 40 字、值 ≤ 200 字，同键覆盖写；审计 `memory.written` / `memory.forgotten`（闭集 64→66，payload 只存 value 前 40 字）。
+- `app/memory_extract.py`：每轮对话后 best-effort 抽 1—5 条事实（`remember_facts` 工具，永不抛）；近义去重——`_norm` 归一化后，包含关系或 `difflib` 相似度 ≥ 0.82 就沿用旧键覆盖写，否则真实模型会把「记账喜欢按周看」拆成「记账习惯」+「记账周期偏好」两条。
+- 快路 `assist.py` 加记忆分支：`memory_remember`（「记住…」→ 落库并回执）、`memory_list`（「你记得我什么」→ 逐条列 + `忘掉「X」` chips）、`memory_forget`（先按键再按值匹配，多命中回 `memory_forget_choose`，零命中不删也不报错）；含「提醒」的话仍优先按提醒处理。
+- `app/api/memory_api.py` + `GET/POST /api/memory`、`DELETE /api/memory/{key}`；前端管理页新增「助手对你的长期记忆」卡（列出/手写/忘掉）。
+
+### 7. 测试与验收
+
+- 新增 `tests/test_memory.py`(13)、`tests/test_sub_stop_link.py`(10)；`tests/test_assist_fastpath.py` 加记忆快路 7 条；`tests/test_chat_memory.py` / `tests/test_api.py` / `tests/test_imports.py` 按新行为更新（记忆模块不写 `sessions`，否则 `session.start` 审计消失——本轮真踩到并修）。
+- 全量 `.venv/bin/python -m pytest -q` → **1560 passed, 4 skipped, 1 warning in 40.82s**（`tmp/pytest_r11.log`，exit 0）；`tests/test_*.py` **97** 个（`tests/` 下 102 个）。
+- 前端 `scripts/check_frontend.py` **66/66**；抽内联 `<script>` 后 `node --check` 通过。
+- 真浏览器（8112 真模型 + 真 `api_token`）：
+  - 确认卡：说「把爱奇艺会员的自动续费停掉」→ 卡上出现「订阅商户 爱奇艺会员 / 每期金额 25.00 元 · 每月 / 下次扣费 2026-11-24 23:03 / 当前状态 生效中」，金额行写「不动本金余额（只停银行侧代扣）」，按钮「确认：不动本金余额（只停银行侧代扣） → 「爱奇艺会员」」；点「拒绝」后气泡明说这一轮不继续。截图 `tmp/shot_confirm_sub.png`。
+  - 管理页：疑似订阅 0 个（「1 条你已经定过性」）+「已停止银行侧代扣（2 条：百度网盘 12.00 元、网易云音乐 15.00 元）」；长期记忆卡 3 条（记账习惯 / 常用银行卡 / 记账周期偏好），各带「忘掉这条」。截图 `tmp/shot_memory_card.png`。
+  - 会话续接：刷新后聊天顶部「这是上次的对话（…最近 8 轮，服务端存着）」→ 逐轮回放 →「已接着上次的会话 s_xxx」。
+  - 面板审计（按用户要求把七个页签逐块点过）：overview / bill / plans / manage / security 的每张卡都有对应动作或明确说明；需要选择处一律有可点 chips/按钮；疑似对象（授权、接管单、疑似订阅、预约补验证、生日逐项付款、被拒操作）都有批准或处理入口。
+
+### 8. 规模与文档
+
+- 规模：数据库表 **33**（+agent_memory）、审计事件 **66**（+memory.written/forgotten）、API 路径 **47**（46 条 `/api/*` + 根路径；+3 记忆端点 → 53 个 operation）、工具 35、规则 13、`tests/test_*.py` **97**、`app` 模块 **81**。
+- 文档：`docs/02` 登记 `app/memory.py` / `app/memory_extract.py` / `app/api/memory_api.py` 与两个测试文件；`docs/03` 加 `agent_memory` 行与两类记忆审计；`docs/07` §7.1 提示词 v2 逐字同步、§7.5 加三个记忆端点并写明确认帧 `subscription` 与管理页 `stopped` 契约、§7.7 加记忆卡三个函数与 `onStart`/`renderConfirm` 两行；`docs/10` 补三行必测点；README 能力表加「⑧ 长期记忆」并改写订阅代扣行；全库数字统一到 1560/4、40.82s、47 路由、33 表、66 事件、97 测试文件。
+
+### 9. 遗留
+
+1. 记忆抽取只认「稳定偏好与事实」的一句话表达，闲聊与情绪不记；没有向量检索，注入靠 `updated_ms` 取最近 20 条。
+2. 停代扣只停银行侧；商户会员（真正退订）仍需用户自己去商户端，界面已明确写出。
+3. `tests/test_imports.py::_exists` 的路径拼接缺陷仍未修（子模块依赖恒判 False）。
+4. 真实短信/人脸仍是桩；提醒未接系统通知；未 push 远程。
+
+
+## v2.7.0 W1 立规矩 + 资金不变量（2026-10-26）
+
+### 1. 起因
+
+用户原话（m04120）：「前两个可以但是第三个我们涉及到的不是全是关于钱的操作吗怎么还有喝水」，随后（m04130）：「所有agent的操作都是和钱有关的，我不知道你能不能理解我的意思」。据此确立一条**硬不变量**并写进代码：这个助手的每一个动作都必须落在一个资金对象上（账户 / 卡 / 收款人 / 流水 / 账单 / 订阅代扣 / 预约转账 / 计划与预算 / 理财持仓 / 额度 / 风控确认 / 人工接管）；对不上任何资金对象的请求不属于它承接，只说明边界、不建对象。
+
+W1 只做「立规矩 + 资金不变量」，不改任何对外行为。
+
+### 2. 资金边界（新增 app/scope.py，第 0 层、只依赖标准库）
+
+- 三张词表：MONEY_MARKERS（钱/余额/账户/卡/流水/转账/收款人/商户/账单/订阅/代扣/理财/额度/支出/收入…）、NON_MONEY_MARKERS（天气/笑话/唱歌/翻译/写代码/星座/你好…）、REMINDER_ANCHORS 六个资金时间点：还款日（repayment）、订阅扣费（deduction）、预约转账（scheduled）、预算（budget）、储蓄目标（savings）、额度与大额（limit）。
+- 函数：classify() → money / off / unknown；out_of_scope_reply()；reminder_anchor()；anchor_label()；anchor_choices()（6 条可点选项）；is_money_text()。文案集中四句：BOUNDARY_HEAD / OUT_OF_SCOPE_REPLY / REMINDER_BOUNDARY / MEMORY_BOUNDARY。
+
+### 3. 三处漏洞的落地修法
+
+1. **通用提醒收窄成资金时间点**（app/planner/assist.py）：_create_reminder 先取锚点，取不到直接 raise ValidationError(REMINDER_BOUNDARY)；payload_json / meta_json 都带 anchor；_active_reminders 视图带 anchor / anchor_label；列表行显示「还款日 · 下次 …」。聊天里「提醒我 9 点喝水」不再建对象，回 reminder_anchor_needed + 6 个锚点 chips。
+2. **长期记忆只收与钱有关的事实**（app/memory_extract.py 与 assist._handle_memory）：抽取器在写入前用 scope.is_money_text(key + value) 过滤，不过就 log.info('memory.extract_item_out_of_scope') 丢弃；提示词规则 1 改成「只抽与资金/账户/计划有关的稳定偏好或事实」并加规则 1.1「与钱无关的事一律不记（住址、称呼、天气、兴趣、心情都算），宁可不记」；聊天里「记住我喜欢喝咖啡」回 memory_out_of_scope + 3 个资金向 chips。
+3. **无关请求走边界话术、不建对象**（app/api/routes.py 与 app/planner/intent.py）：_events 在 payment_guard 之后判 parsed.intent == 'unknown' 且 scope.out_of_scope_reply(text) 非空 → 把边界句写进 parsed.question、ok=False，done 帧带 out_of_scope: true；提示词加规则 8「你只处理与钱有关的事……与钱无关的请求不建任何对象：一句话说明你只管账上和计划里的事，再给出最接近的资金动作」。docs/07 §7.1 代码块逐字同步（tests/test_planner.py 逐字断言）。
+
+### 4. 规矩工程化（W1-A，guard-builder）
+
+- scripts/arch_report.py（427 行，纯标准库）：量文件行数、>80 行函数、重名顶层函数、跨层反向依赖、未登记依赖、前端 $('id') 引用缺失；顺带修了 _DECLARED_RE 把 JS 动态赋值当静态声明的 bug。
+- scripts/arch_baseline.json：191 文件 / 32 长函数 / 55 重名组的**存量债记账**；基线语义「不许变坏」，合理增长须 --write-baseline 重新记帐（手改 JSON 会被 test_baseline_limits_are_canonical 拦下）。
+- tests/test_imports.py：**修掉 _exists 的路径拼接缺陷**（APP_DIR 已是 repo/app 却又拼 app/，于是 app.audit → repo/app/app/audit 恒 False，所有子模块依赖消失 —— 这正是该文件长期「全绿」的根因）；补齐 29 个模块 / 115 条真实依赖；新增 UPWARD_EXCEPTIONS（4 条带理由与 TODO(W4)）与「豁免过期即失败」；lru_cache 把该文件从 34.43s 降到 0.31s。
+- tests/test_layers.py（17 条）：API 层禁 decide( / build_action( / can_confirm_here / can_verify_here（文本 + AST 双查）、领域层禁 import planner / tools、policy 层禁 llm / planner / tools / db、白名单过期即失败。
+- tests/test_architecture.py（8 条）：文件行数上限 max(基线, 600)、新长函数失败、重名组增长失败、新缺失 id 失败、新反向依赖失败、新未登记依赖失败，另加两道防作弊门（基线被改松 / 分层清单读不出来都失败）。
+
+### 5. 测试
+
+- 新增 tests/test_money_scope.py（25 条）：classify 8 组、六个锚点与 chips、is_money_text 挡住住址与称呼、「提醒我喝水」零写入、带锚点提醒落库且 meta_json / payload_json 都带 anchor、POST /api/reminders 无锚点 400 且含边界句、记忆快路 memory_out_of_scope 且 agent_memory 零行、抽取器过滤、提示词含规则 8、SSE 无关请求 done.out_of_scope=true 且 plans / dag_runs 不增。
+- 既有用例按新口径调整：提醒示例词从「开会 / 喝水」改成资金示例（会员续费 / 房租到期），记忆示例改成「我不喜欢银行电话推销」；tests/test_memory.py 抽取样例第二条改成「常用商户备注（值超长）」让长度上限真的被测到，同时 MONEY_MARKERS 补「商户 / 商家」。
+- 全量：**1613 passed / 4 skipped / 19.93s**（基线 1560 + 新增 53 条 = money_scope 25 + layers 17 + architecture 8 + imports 3）。
+
+### 6. 前端
+
+- 提醒表单 placeholder 改「例如：每月 25 号会员续费」，卡片说明改成「提醒只记和钱有关的时间点：还款日、会员扣费、预约转账、预算、储蓄目标、额度。只提醒不动钱…」。
+- bxRenderReminders 每条卡多显示 anchor_label（这条提醒盯的是哪笔钱）。scripts/check_frontend.py 66/66；内联 script node --check 通过。
+
+### 7. 规模与文档
+
+- 规模：tests/test_*.py **100**（+3）、tests/ 下 .py 108、app 模块 **82**（+app/scope.py）、app 总行 29,566；库表 33 / 审计事件 66 / API 路径 47 / 工具 35 / 规则 13 均未变。
+- 架构基线（arch_report 首次快照）：长函数 32 个、重名顶层函数 55 组（多出 68 个定义）、跨层反向依赖 4 条（全部进豁免表，W4 清零）、未登记依赖 0、前端 id 引用 109 / 声明 126 / 缺失 0 / 动态白名单 4。
+- 文档：docs/02 登记 app/scope.py 与 tests/test_money_scope.py；docs/07 §7.5 的 POST /api/reminders 补 anchor / anchor_label 与「文案必须含资金锚点，否则 400」，§7.7 提醒卡补 anchor_label；docs/10 补业务边界必测点一行；README 与各报告数字同步到 1618 passed / 100 测试文件 / 82 模块 / 17.62s。
+
+### 9. 收口补记（同一波，收尾时发现问题并修掉）
+
+- **假选项**：`scope.anchor_choices()` 给的 6 个 chip 里有两个点了没反应——`提醒我明天上午 9 点那笔预约转账`、`提醒我生日预算花到 2000 就停` 被 `REMINDER_EXCLUDES`（生日 / 转账 / 转 / 还款…）挡掉。修法：新增 `_REMINDER_TRANSFER_RE`（金额「N 元/块/万」、「转给/汇给/打给/付给」、「给某人转/汇/打/付」），提醒判定改成「命中提醒词且不含排除词 → 提醒；否则有资金锚点且没说金额与收款人 → 仍是提醒」。6 条 chip 现在都真能建成，带钱带人的仍走转账链路。
+- **锚点没显示**：`active_reminders` 页面视图没带 `anchor` / `anchor_label`（只有 `_active_reminders` 内部视图带了），卡片上看不出这条提醒盯的是哪笔钱。已补两个字段，页面多一个「订阅扣费」标签。
+- **提示语半句话**：「已建好提醒：09:00，提醒你「会员续费」」——一次性提醒的 `repeat_label` 就是时:分，念出来像断句。改成「已建好提醒（订阅扣费）：会员续费，下一次 2026-11-25 09:00。重复规则：每月 25 号 09:00，会一直重复到你取消。」
+- 测试：`tests/test_money_scope.py` 追加 `test_every_anchor_choice_really_builds_a_reminder`（6 条 chip 逐个 detect + handle + 列表带 anchor_label + plans 条数）与 `test_reminder_words_do_not_swallow_real_transfers`（4 条不吞转账）；`tests/test_assist_fastpath.py` 的负例「提醒我还信用卡还款」按新口径换成「提醒我给张三转账 100 元」。
+- 浏览器实测（8112 真模型，硬刷新）：表单 placeholder / 卡片说明已换口径；建「每月 25 号会员续费」→ 卡片 tag「每月 1 号 09:00」「订阅扣费」；聊天「提醒我 9 点喝水」→「我只管你账上和计划里的事，这条我不接。」+ 6 条资金锚点 chip；点「订阅扣费提醒」→ 建成「视频会员扣费前一天」；「讲个笑话」→ 边界话术 + 8 条兜底 chip。截图 `tmp/shot_w1_reminder.png`。
+- 收口全量：**1618 passed, 4 skipped in 17.62s**（`tmp/pytest_w1e.log`）；arch 基线按新文件重记（长行数上限写进 `scripts/arch_baseline.json`）。
+
+### 8. 遗留（W2 起处理）
+
+1. ~~REMINDER_EXCLUDES 含「还款 / 转账 / 付款」等词，导致「提醒我…还信用卡」不进口语快路~~ —— 收口前已修：新增 `_REMINDER_TRANSFER_RE` 区分「给谁转多少」与「某时间点提醒」，6 条锚点 chip 全部能一句话建成（`tests/test_money_scope.py::test_every_anchor_choice_really_builds_a_reminder` 钉住）；带金额或「给某人转」的仍走转账链路，不被吞。
+2. 4 条反向依赖（planner.conflict / runner → handoffs、planner.ticker → birthday、plans → birthday）与 8 条领域借道（handoffs / birthday → planner、tools）留在豁免表，W4 拆包时清零。
+3. business.py 三处 can_confirm_here / can_verify_here 目前只是响应字段名，W4 视图归位时改 *_allowed。
+4. 真实短信/人脸仍是桩；提醒未接系统通知；未 push 远程。
+## v2.8.0 W2 统一底座（2026-10-26）
+
+用户指令（m04631）：「你严格按照计划全都跑完就行了」——按已确认的六波计划连续执行 W2→W6，不再逐波请示。本波目标：**同一件事只允许一个实现**，把 W1 之前各自长出来的重复件收掉，外部行为不变。
+
+### 做了什么
+
+| 收掉的重复 | 原状 | 现在 |
+|---|---|---|
+| 数据库连接 | 4 份各自实现：`app/api/routes.py` 的 `class _conn`（39 处调用）、`business.py` 的 `_conn()`（5 处）、`memory_api.py`（3 处）、`handoffs_api.py`（8 处） | `app/db.py:open_conn()` 一处（`@contextmanager`，`finally: conn.close()`），四个模块全改调它 |
+| 毫秒 → 时间串 | 7 份 `_time_text` + 1 份 `_stamp_text`，语义各不相同（有的抛错、有的空串、有的 None） | `app/timefmt.py`：`date_text` / `minute_text` / `maybe_minute_text` / `stamp_text`，脏输入给 `None` 或 `""`，不抛 |
+| 金额格式化 | `money` 里两个没人用的别名（`to_fen` / `fmt_yuan`）+ `policy/rules.py` 的 `_yuan`（12 处）+ `assist.py` 的 `_yuan_label`（1 处）+ `transfers.py` 的 `_yuan`（3 处） | 别名删除；新增 `money.yuan_label()`（带单位，话术用）与 `money.yuan_short()`（去尾零，紧凑标签用） |
+| 标签字典 | 原计划把 19 个 `*LABELS` 搬进 `app/labels.py` | **不搬**（见下），改为留在各领域模块 + 新增守卫测试 |
+
+### 一处偏离计划的决定（留档）
+
+原计划 W2 把标签字典集中到 `app/labels.py`。动手前用 ast 把 20 个 `*LABELS` 的字面量两两比对：**没有任何内容重复**。集中化只会把「状态值」与「它的中文」分到两个文件——改状态忘了改标签，编译器和测试都不会报，反而多一处漂移点。所以这批字典留在各自的领域模块，改由 `tests/test_labels.py` 钉住两件真事：值不能是空/纯空白；有权威常量的地方必须覆盖（`PLAN_STATUSES` / `KINDS` / 接管单状态 / `VERDICT_ACTIONS` / `RiskLevel`），并拿种子库真数据对渠道、产品分类、风险等级。
+
+### 顺手修掉的真缺陷
+
+`app/api/handoffs_api.py` 的 8 个端点原本写 `with _conn() as conn`——sqlite3 的 `Connection.__exit__` 只提交事务、**不关连接**，等于每个请求漏一条。这类漏连接平时看不出来（进程退出才回收），现在由 `tests/test_conn_hygiene.py` 用「请求结束后代理对象是否 closed」钉住，并禁止 `app/api/*.py` 再出现 `db.connect(` 与自建 `_conn`。
+
+### 验收
+
+- 全量 `.venv/bin/python -m pytest -q` → **1632 passed, 4 skipped, 1 warning in 18.73s**（`tmp/pytest_w2.log`；W1 基线 1618 + 12 条新守卫用例 + `test_imports` 为 `app.timefmt` 多出的 2 条参数化）
+- 架构基线重新生成：模块 82→83、测试文件 108→110、重名函数组 **55→52**、多出定义 **68→59**（删掉 `_conn`×3、`_time_text`×7、`_yuan`×2 的直接结果），跨层违规仍 4 条待 W4 清零
+- `scripts/check_frontend.py` **66/66**；内联 `<script>` 抽出后 `node --check` 通过
+- 文档数字同步：1618→1632、17.62s→18.73s、测试文件 100→102（`tests/` 下 .py 108→110）、app 模块 82→83；`docs/02` 补 `app/timefmt.py` 与两个新测试文件登记并修掉 `to_fen`/`fmt_yuan` 旧名；`docs/04` 补 `yuan_label`/`yuan_short` 分支表
+
+### 遗留（W3 起继续）
+
+- 跨层反向依赖 4 条（全在 `tests/test_imports.py` 的 `UPWARD_EXCEPTIONS`），按计划 W4 清零
+- 长函数 32 个、重名 52 组、`web/index.html` 5954 行、`app/api/routes.py` 1894 行：W4/W5 的活
+- `app/db.py`（729 行）与 `tests/test_imports.py`（896 行）已超 600 行软线并入基线；前者 W3 拆用例层时一并按职责切分
+
+---
+
+## v2.9.0 W3 写操作只有一条路径（用例层）  2026-10-26
+
+W3 的目标是「契约 + 用例」：所有写操作从「每个端点自己开事务、自己拼 SQL」收敛成 **路由 → 用例（一个事务 + 一个 Outcome）→ 领域**。做法与验收如下。
+
+### 新增的一层
+
+| 新增 | 职责 |
+|---|---|
+| `app/use_cases/base.py` | `Outcome` / `ok()` / `fail()` / `@write_case`。`write_case` 装饰后函数首参必须是 `conn`，成功与失败都返回 `Outcome`，事务边界只有这一处 |
+| `app/use_cases/{transactions,savings,reminders,subscriptions,plans,scheduled,proactive,investments,memory,handoffs,demo,confirmations}.py` | 13 个域名各一个用例模块，入口一律「名词在前」：`manual_record` / `expense_simulate` / `goal_create` / `reminder_create` / `verdict_set` / `plan_create` / `birthday_pay` / `scheduled_submit_verify` / `monitor_run` / `assessment_submit` / `memory_remember` / `handoff_claim` / `demo_reset` / `challenge_factor` 等 |
+| `app/api/http.py` | `payload(fn, *args, **kwargs)`：调一次用例，把 `Outcome` 的失败分支还原成原始 `BankError` 抛出。状态码与中文 `user_text` 一个字不变——`app/main.py` 仍是唯一映射点，翻译只做一次 |
+
+**用例只收基本类型，不许 import `app.api.schemas`**：请求体在路由里就已经拆成参数，用例层拿不到 pydantic 模型，也就不会反向依赖协议层。
+
+### 5 个豁免端点（债的登记簿，写在 `tests/test_use_cases.py` 的 `ORCHESTRATION`）
+
+`chat`（SSE 流式编排）、`confirm`（授权执行）、`recover_session`（重启续跑）、`cancel`（中途取消）、`run_scheduled`（手动触发节拍器）——它们驱动执行器、返回事件流而不是响应体。理由必须写在表里，端点删了而没同步表也会失败。
+
+### 顺手修掉的两个真缺陷
+
+- `app/use_cases/demo.py` 里 `rewind(conn)` 没跟着改名，`tests/test_api.py` 14 条直接 NameError——已改 `demo_rewind(conn)`。
+- **`database is locked` 的根因**：生日付款经线程池 `asyncio.run` 另开连接写同一份库，外层事务持着写锁不放。修法是 `plans.run_due()` 去掉 `@write_case`、自己 `with db.open_conn()` 依次跑「生日到期」与「计划到期」两段，各自提交；`handoffs.cancel/resume` 与 `birthday_pay` 同因同理。**这条别回退成 write_case**。
+
+### 测试
+
+- 新增 `tests/test_use_cases.py`(7)：写端点必须经 `payload` 且调用用例层；豁免表要真实且有理由；路由里不许出现 `conn.execute(` / `db.tx(` / `db.open_conn(` / `db.connect(`；用例层不许反向 import `app.api.*`；`@write_case` 函数首参必须是 `conn`；用例模块不许 import `app.api.schemas`。
+- `tests/test_imports.py` 体量改造：ALLOWED 表从「每格 3—7 行 frozenset 字面量」改成**一格一行** `"app.x.y": _deps("app.a app.b"),`（`_deps` 把空白分隔的名字拆成 frozenset，空串 = 只依赖标准库），每格上方保留中文「为什么允许这些依赖」注释 —— **1011 行压到 473 行**，守住 400—600 行软线上限而不拆文件。
+- `app/use_cases/transactions.py` 重构到 367 行：`_Entry` 数据类 + `_audit_payload` / `_flow_result` / `_record_same_day` / `_record_fresh`，`manual_record` 与 `expense_simulate` 共用同一条记账路径。
+
+### 验收（2026-10-26 实测）
+
+- 全量 `.venv/bin/python -m pytest -q` → **1669 passed, 4 skipped, 1 warning in 19.73s**（`tmp/pytest_w3d.log`；W2 基线 1632 + `test_use_cases` 7 条 + 用例层改造后各域的补测）
+- 规模：openapi **47 path / 53 operation**、表 **33 张**、审计事件 **66 类**、`tests/test_*.py` **103 个**、app 模块 **98 个**
+- 架构基线用 `scripts/arch_report.py --write-baseline` 重生成：重名函数组 55→**53**（多出定义 68→60），长函数 >80 行 **31** 个，跨层违规仍 4 条（W4 清零），未登记依赖 0，前端缺失 id 0
+- `scripts/check_frontend.py` **66/66**；内联 `<script>` 抽出后 `node --check` 通过
+- 文档：`docs/00` 铁律加第 11 条「写操作只有一条路径」，标题改「十一条铁律」；`docs/02` 补 `app/api/http.py`、整张 `app/use_cases/` 登记表与 5 个豁免端点，补 `tests/test_use_cases.py`(7)，`routes.py` 行的 39/44 改 **47/53**，模块登记数 77→**98**
+
+### 遗留（W4—W6）
+
+- 跨层反向依赖 4 条（`planner.conflict/runner → handoffs`、`planner.ticker → birthday`、`plans → birthday`）留 W4 清零
+- `app/api/business.py`（1377 行）的只读视图要搬 `app/views/`、`routes.py`（1320 行）按域拆分 —— W4
+- `web/index.html` 5954 行 → 壳 + js/css 模块（目标 ≤600 行）—— W5
+- 文档手抄数字 ~20 处（39 path / 44 operation 等历史口径仍在 `docs/技术文档.md`、`docs/10`、`docs/09`、`docs/架构图.mmd`）—— W6 由 `scripts/check_docs_numbers.py` 统一
+
+---
+
+## v3.0.0 W4 分层收口：跨层违规清零、路由拆 9 块、视图搬出 api（2026-10-26）
+
+### 目标（承接 v2.9.0 的遗留）
+
+W3 把写操作收到一条路径，W4 处理**依赖方向**与**文件体量**：跨层反向依赖 4 条清零、`app/api/business.py`（1377 行）的只读视图搬 `app/views/`、`app/api/routes.py`（1320 行）按「一次请求关心什么」拆开。验收口径写在 `docs/01` §1.4 的层表与 `docs/00` §0.4 第 12 条铁律里。
+
+### 后端改动
+
+- **`app/plan_hooks.py`（新，第 1 层，只依赖标准库）**：计划钩子注册表。`register_plan_updated()` / `register_due_authorized()` / `notify_plan_updated()` / `run_due_authorized()` / `registered()`。原来 `app/plans.py` 与 `app/planner/ticker.py` 都要 import `app/birthday.py`（两条反向依赖），现在低层只发通知、生日模块自己往上登记实现；单个实现抛错只记 `plan_hooks.due_authorized_failed`，不拖垮整轮节拍。
+- **`app/handoff_store.py`（新，第 2 层仓储，600 行）**：接管单的建/查/状态迁移/快照与 12 个错误类。原来 `app/handoffs.py` 既被 `planner/runner.py` 与 `planner/conflict.py` import（第 5 层反向），又要 import 执行器去恢复；现在仓储留在第 2 层，`app/handoffs.py` 只留「要动执行器的那一半」（恢复、取消、过期清扫），两条反向依赖一起消掉。
+- **`app/views/`（新包，第 5 层只读）**：`labels`（计划/预约/接管/预警四处共用的状态标签）、`money`、`queue`、`overview`、`bill`、`management`、`plans`、`executions`。`app/api/business.py` 只剩壳，每区一行 `views.<区>.build(conn, user_id)`；视图不写库、不做权限判断。
+- **`app/api/routes.py` 1320 行 → 9 块 + 60 行装配门面**：`auth`(50) `chat_state`(56) `chat_hints`(196) `chat_trace`(231) `chat_flow`(351) `chat_api`(238) `core_api`(93) `plans_api`(181) `money_api`(176)。门面只建 `router`、挂令牌依赖、`include_router` 四个分组，并把脚本与测试一直用的名字原样再导出；openapi 仍是 **47 path / 53 operation**。
+- 顺手修掉两个真问题：`_choices_for`（原 108 行）拆成 9 个槽位小函数 + `_fill_slot` 分派表；`tests/test_api.py` 的「未捕获异常不泄漏栈」用例原先把补丁打在 `routes.get_adapter`，拆分后聊天主流程在 `chat_flow`，改成打 `chat_flow.get_adapter`。
+- `tests/test_imports.py` 同步：LAYERS 补 9 个分组模块与 `plan_hooks`(1) / `handoff_store`(2)，ALLOWED 按实测依赖逐条写，`LLM_ALLOWED` 换成 `app.api.chat_flow` + `app.api.chat_state`；**`UPWARD_EXCEPTIONS` 清空为 `{}`**（4 条存量全消）。
+
+### 文档改动
+
+- `docs/00` §0.4 加第 12 条铁律「层间只能向下依赖」，标题改「十二条铁律」；`docs/01` §1.4 从一张 ASCII 箭头图改成 L0—L5 层表（把仓储、钩子注册表、视图层的位置写清）+ 约束表（反向依赖豁免必须为空）。
+- `docs/02` 登记 4 行 W4 新模块（`plan_hooks.py`、`handoff_store.py`、`views/*`、9 个 api 分组），`routes.py` 行改写为装配门面、`sse.py` 落点的 `frame()` 改到 `chat_state.py`。
+- `docs/security_sandbox.md` §4.2 按实测 13 处动态 SQL 重写整张表（行号随搬包全部更新，取数脚本 `scripts/prove_no_exec_surface.py` 的 `scan_tree`）。
+
+### 验收（2026-10-26 实测）
+
+- 全量 `.venv/bin/python -m pytest -q` → **1709 passed, 4 skipped, 1 warning in 19.02s**（`tmp/pytest_w4d.log`；W3 基线 1669 + 各轮补测）
+- 架构体检：模块 **118**、app 总行 31079、长函数(>80) **26**、重名函数组 **52 组（多出 59）**、**跨层违规 0 条**、未登记依赖 0、前端缺失 id 0、超限文件 0；基线用 `scripts/arch_report.py --write-baseline` 重生成（`app/birthday.py` 1818 行属加钩子注册代码的合理增长）
+- 规模：openapi **47 path / 53 operation**、表 **33 张**、审计事件 **66 类**、`tests/test_*.py` **103 个**
+- `scripts/check_frontend.py` **66/66**；内联 `<script>` 抽出后 `node --check` 通过
+
+### 遗留（W5—W6）
+
+- `web/index.html` **5954 行** → 壳 + js/css 模块（目标 ≤600 行）—— W5
+- 文档手抄数字（历史 39 path / 44 operation / 30 表 等口径散在 `docs/技术文档.md`、`docs/10`、`docs/09`、`docs/架构图.mmd`）—— W6 由 `scripts/check_docs_numbers.py` 统一，写不进代码的事实只留在 `release_manifest.json`
+- 最长函数仍是 `app/handoffs.py:254 resume`（286 行）、`app/birthday.py:1143 pay_item`（247 行），待后续按分支拆
+
+---
+
+## v3.1.0 前端拆分（W5）· 2026-10-26
+
+**这一轮把 5954 行的单文件前端拆成「壳 + 样式 + 模块脚本」，一行页面逻辑都没改。**
+
+### 拆法
+
+- 不用 ES module、不引打包器：继续用经典 `<script src>`，按 10→95 的文件名序加载，17 个文件共享一个全局词法作用域（顶层 `const/let` 落全局词法环境，`function` 落 window），跨文件直接引用；每个文件头 `'use strict';`。
+- `web/index.html`：**5954 → 477 行**，只留 DOM；`<head>` 一行 `<link rel="stylesheet" href="/static/app.css">`，末尾 17 行 `<script src="/static/js/xx.js">`，没有内联 `<style>` / `<script>`。
+- `web/app.css`：586 行，原 `<style>` 整段搬来；设计系统变量层仍在 `:root`。
+- `web/js/` 17 个文件共 4943 行：10-core(72) 20-dom(164) 30-chat(241) 40-confirm(426) 50-actions(272) 60-proactive-a(268) 65-proactive-b(532) 70-bx-core-a(349) 72-bx-core-b(319) 80-view-overview(389) 82-view-bill(124) 84-view-plans(186) 86-view-birthday(407) 88-view-monitor(203) 90-view-manage(481) 92-view-security(131) 95-session(379)。每个 ≤600 行，首行是块注释说明职责。
+- 保真度：拆分后去掉注释逐行比对，**4489 行代码 IDENTICAL**（`tmp/_verify_split2.py`）。
+
+### 接线与门禁
+
+- `app/main.py`：`app.mount("/static", StaticFiles(directory=WEB_DIR), name="static")`。`/static` 不走 `require_api_token`——样式与脚本里没有业务数据，带 token 反而没法被浏览器缓存。
+- `scripts/check_frontend.py` 整体重写（约 560 行）：新增 `Sources` / `load_sources`，把「一个文件」的检查改成「壳 + 样式 + 17 个脚本」的检查；新增 `check_files`（每个前端文件 ≤600 行、壳里不许内联、`app.css` 非空）与 `check_static_refs`（`src/href` 必须 `/static` 或 `#` 开头、引用的文件必须真实存在、脚本顺序必须等于 `sorted(/static/js/*.js)`）。原来那条「所有脚本包在 IIFE 里」换成「每个 js 都有块注释开头 + 不许有 `var`」。实测 **91/91 PASS**。
+- `scripts/arch_report.py`：前端统计从「只看 index.html」改成收 `web/**/*.{html,css,js}`，引用来源改 `html + js`（声明仍只认壳），`DYNAMIC_ID_WHITELIST` 四条改指向 `web/js/84-view-plans.js` 与 `web/js/90-view-manage.js`。
+- `tests/test_api.py`：首页断言从「有 api/chat」改成「引用了 `/static/app.css` 与 `/static/js/10-core.js`」；新增 `test_static_assets_are_served_without_the_api_token`（css 200 + text/css、脚本 200、不存在的 js 404、全程不带 token）。
+
+### 验收
+
+- 全量 `.venv/bin/python -m pytest -q` → **1710 passed, 4 skipped, 1 warning in 19.54s, EXIT=0**（`tmp/pytest_w5b.log`）。
+- `scripts/check_frontend.py` → **91/91 PASS**；架构体检前端 id 引用 109 / 声明 126 / 缺失 0。
+- 真浏览器（8112 真模型 + 硬刷 `Page.reload{ignoreCache:true}`）：17 个脚本全部加载、六视图全部渲染、聊天问「我有哪些提醒」回 chips、样式变量生效（`--green=#16a34a`）。截图 `tmp/shot_w5_chat.png`。
+- 文档同步：README（「为什么没有构建链」重写 + 文件表拆三行）、docs/00 铁律 9、docs/02 目录树与 web/ 登记表（新增 app.css 与 js/*.js 两行）、docs/07 §7.7 标题、docs/08 §8.9 前端规则与文件上限、docs/09 目录树、技术文档/技术方案总览/提交物对照表/设计系统/演示脚本/作品简介，以及 benchmark 三处「66/66 → 91/91」「单文件膨胀」表述。
+
+### 遗留
+
+- W6：`scripts/check_docs_numbers.py`（文档里的数字不再手抄，改为从 `release_manifest.json` 与代码实测校验）。
+- `app/birthday.py` 1818 行（超旧的 1809 上限 9 行，已随 `--write-baseline` 重生成；W5 之后最长的文件已不是它，但仍是最大的单体，留给后续拆）。
+- 前端仍是全局作用域：17 个文件之间靠文件名序与块注释约定，没有模块边界校验；若继续变大，下一步是给每个文件加「只允许读哪些前缀全局」的静态检查。
+
+---
+
+## v3.2.0 文档单一事实源（W6）· 2026-10-26
+
+### 为什么这一轮
+
+W1–W5 把「一次写操作只有一条路径」和「层间只能向下依赖」都变成了机器门禁，但**文档里的数字还是手抄的**：
+改一次代码要手工追十几个文件（README / 总纲 / 技术文档 / 提交物对照表 / PPT / benchmark 四篇），
+前几轮已经出现过「代码 1710、文档还写 1464」「表 33 张、报告写 30 张」这类漂移——靠人记迟早对不上。
+这一轮把「数字该是多少」的唯一事实源钉在 @@BT@@docs/benchmark/release_manifest.json@@BT@@ 上，并让脚本去核对。
+
+### 校验器
+
+- 新增 @@BT@@scripts/check_docs_numbers.py@@BT@@（约 250 行）：读清单拿 9 个数（pytest 通过 / 跳过、受管工具、数据库表、审计事件类、API 路径、红队、e2e、前端门禁），逐行核 README 与 @@BT@@docs/**@@BT@@ 的 @@BT@@.md@@BT@@/@@BT@@.py@@BT@@。
+- 判定口径（故意窄，宁可漏报也不要天天误报）：只认**带量词或带上下文**的写法（「47 条 API 路径」「33 张表」「66 类审计事件」「红队 43/43」），裸数字不认——子模块计数（「4 张表 + 7 工具」）、行号（@@BT@@test_x.py:68/82@@BT@@）、HTTP 状态码、像素值都不是版本事实；数字一律两位起，一位数的子模块计数天然排除。
+- 同一行只要出现过一次正确值就放行（文档经常写「本轮 1719（改造前 904）」）；带「历史 / 基线 / 改造前 / 旧值 / 作废 / 此前 / 当时 / 快照 / 降为」的行整行不看。
+- 按轮次记事的快照类文档整文件跳过：@@BT@@docs/改造实施基线.md@@BT@@、@@BT@@docs/12@@BT@@、@@BT@@docs/14@@BT@@、@@BT@@docs/已知问题处理记录.md@@BT@@、@@BT@@docs/交付/演练记录.md@@BT@@、@@BT@@docs/交付/浏览器冒烟报告.md@@BT@@、@@BT@@docs/benchmark/air_vs_banking_agent.md@@BT@@、@@BT@@docs/benchmark/browser_journey_audit.md@@BT@@、@@BT@@docs/红队失败归因.md@@BT@@、@@BT@@docs/audit/*@@BT@@、@@BT@@docs/交付/评审记录_*@@BT@@、@@BT@@docs/benchmark/ab_*@@BT@@。原则：**陈述「现在」的文档跟着清单走；记录「当时」的文档是证据，不许改。**
+- 比值用等值反查（@@BT@@(?P<n>\d{2})/(?P=n)@@BT@@）：只有「43/43」这种结论才当通过数，「39/43」这类部分通过不算，也就不会被误报成口误。
+- 前端门禁用 @@BT@@check_frontend.py@@BT@@ 现取（@@BT@@lru_cache@@BT@@），不在文档里再抄一遍。
+- @@BT@@make docs-check@@BT@@ 是它的壳；失败时逐条打印「文件:行号 + 期望值 + 该行原文」。
+
+### 第一次跑就抓到的真实漂移（4 处，全部已修）
+
+- @@BT@@docs/15_竞赛总报告.md@@BT@@ 的「改造前 vs 最终」对比表：数据表 @@BT@@30 → 33@@BT@@、审计事件 @@BT@@61 → 66@@BT@@、前端检查 @@BT@@66/66 → 91/91@@BT@@。
+- @@BT@@docs/benchmark/implementation_priorities.md@@BT@@：「改动覆盖所有工具与 @@BT@@18 张表@@BT@@」→ @@BT@@33 张表@@BT@@。
+- @@BT@@docs/02_目录结构与文件职责.md@@BT@@：「前端 66 项静态校验」→ 91 项（顺手补了脚本说明）。
+
+### 测试
+
+- 新增 @@BT@@tests/test_docs_numbers.py@@BT@@（9 条）：仓内全绿；规则集必须覆盖清单里对外公布的 9 个数（漏一条就红，防止有人图省事删规则）；塞 @@BT@@9999 passed@@BT@@ 必须被抓且期望值来自清单；@@BT@@30 张表@@BT@@ 要被抓；带历史标记的行放行；不等的比值不算结论、相等的比值写错要红；前端检查项数从门禁现取；同一行有正确值就放行。
+- 全量：@@BT@@.venv/bin/python -m pytest -q@@BT@@ → **1719 passed, 4 skipped, 1 warning in 19.89s**（旧基线 1710 + 9 条）。
+- 红队串行重跑 **43/43**（@@BT@@tmp/redteam_w6.log@@BT@@）、e2e **13/13**（@@BT@@tmp/e2e_w6.log@@BT@@）；前端 @@BT@@scripts/check_frontend.py@@BT@@ **91/91**；@@BT@@ls tests/test_*.py | wc -l@@BT@@ = **104**。
+
+### 文档
+
+- @@BT@@docs/00_总纲.md@@BT@@ §0.4 由「十二条铁律」改为**十三条**，新增第 13 条：文档里的数字只有一个来源（清单），由 @@BT@@make docs-check@@BT@@ 校验；快照类文档必须写明历史。
+- @@BT@@docs/02@@BT@@ 的 scripts 表新增 @@BT@@scripts/check_docs_numbers.py@@BT@@ 一行、tests 表新增 @@BT@@tests/test_docs_numbers.py@@BT@@(9) 一行；@@BT@@docs/10@@BT@@ §10.2 新增「文档数字单一事实源（W6）」必测点。
+- 数字批量同步：1710 → **1719**、19.54s → **19.89s**、@@BT@@tests/test_*.py@@BT@@ 103 → **104**（按行跳历史标记，PROGRESS 历史章节与快照文档保持原数字）。
+
+### 遗留
+
+- 校验器只覆盖「带量词」的高置信写法，像「前端 66」这种裸数字（已手工修掉的 docs/15:51）仍靠 review；要覆盖得给每类数补正则，容易回到误报。
+- @@BT@@app/birthday.py@@BT@@ 1818 行（端点最多、函数最长 pay_item 247 行）仍在 1800 上下，再往里加东西要先拆。
+- 前端 17 个脚本共享全局词法作用域，没有模块边界校验（@@BT@@check_frontend.py@@BT@@ 只查行数/引用/顺序）。
+- 真实短信 / 人脸仍是桩；提醒未接系统通知；未 push 远程。

@@ -311,18 +311,35 @@ def journey_red_mfa(page: Any, base_url: str, token: str, out: Path) -> dict[str
     if "2,000.00" not in card or "高" not in card:
         raise JourneyFail(f"[J2] 确认卡金额/等级不对：{card[:200]}")
     page.click(".confirm-card .btn-green")
-    page.wait_for_selector("#panel-factor input[data-challenge]", timeout=30000)
-    page.wait_for_timeout(400)
+    # 验证码是异步签发的：先等「有挑战输入框」，再等「每个输入框都被填上码」。
+    # 只等输入框会出现会和后端重新签发撞车（旧的刚画上就被新的 replaceChildren 清掉），
+    # 所以这里等的是最终态：至少两个输入框、且都有值。
+    page.wait_for_function(
+        """() => {
+            const rows = document.querySelectorAll('#panel-factor .factor-code-row');
+            if (rows.length < 2) { return false; }
+            return Array.from(rows).every((row) => {
+                const input = row.querySelector('input[data-challenge]');
+                return !!input && (input.value || '').trim().length > 0;
+            });
+        }""",
+        timeout=30000,
+    )
     rows = page.query_selector_all("#panel-factor .factor-code-row")
     codes = [row.query_selector("input").input_value() for row in rows]
     if len(rows) < 2 or any(not code for code in codes):
         raise JourneyFail(f"[J2] 挑战不足或验证码为空：{codes}")
     shot_mfa = shoot(page, out / "journey_02_red_mfa.png", full_page=True)
     page.click("#panel-factor .btn-red")
-    page.wait_for_function(
-        "() => document.querySelector('#chat-log').innerText.includes('已转出 2,000.00 元')",
-        timeout=45000,
-    )
+    try:
+        page.wait_for_function(
+            "() => document.querySelector('#chat-log').innerText.includes('已转出 2,000.00 元')",
+            timeout=45000,
+        )
+    except Exception as exc:  # noqa: BLE001  失败时把页面上的话原样带出来，别静默超时
+        chat = page.inner_text("#chat-log")[-600:].replace("\n", " / ")
+        panel = page.inner_text("#panel-factor")[-300:].replace("\n", " / ")
+        raise JourneyFail(f"[J2] 等了 45 秒没看到出账回执（{type(exc).__name__}）。对话尾部：{chat} ；面板：{panel}") from exc
     page.wait_for_timeout(800)
     after = balance_fen(base_url, token)
     if after != before - 200_000:

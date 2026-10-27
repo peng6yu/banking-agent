@@ -5,7 +5,8 @@
 > 答辩包装提交为 `803e78e`（PPT/README/文档），文档收口提交为 `6124667`；`release_manifest.json` 以 `6124667` 的干净工作区生成，其后的清单提交只重生成清单。
 > **报告生成时（2026-10-24 20:10）尚未 push 远程**；后续文档/PPT 与清单收口提交已推送至公开 GitHub（`origin/main`）。发布清单在干净工作区上生成。
 > 本报告里的每个数字都来自本次实际执行，命令见 §3；与 `release_manifest.json` 冲突时以清单为准。
-> 2026-10-24 晚间的文档/PPT 收口提交（`6124667` / `df8c2d0` 等）只改文档与 PPT，未重跑全量测试；本报告引用的 **1415 passed / 4 skipped** 是同日全量实测的最近一次结果。
+> 2026-10-24 晚间的文档/PPT 收口提交（`6124667` / `df8c2d0` 等）只改文档与 PPT，未重跑全量测试。
+> **2026-10-25 至 10-26 九轮复跑**（每一轮都是全量 `pytest -q` 实测，旧的靠前的轮次保留作历史）：19:46「快路口语轮」新增 45 条用例（assist 快路 26 / reminder_time 8 / reminder_api 11）后 **1464 passed / 4 skipped，37.50s**（`tmp/pytest_final.log`）；21:51「功能体检轮」再补 4 条（生日付款补验证 2 / 同名消歧 2）后 **1468 / 4，61.53s**（`tmp/pytest_round6.log`）；22:21「订阅定性口径修正」补 8 条后 **1476 / 4，48.76s**（`tmp/pytest_r7.log`）；23:00「逐笔核实与会话记忆轮」补三组（逐笔核实 13 / 会话记忆 13 / 手动补录 18）后 **1521 / 4，55.62s**（`tmp/pytest_r9.log`）；10-26「W1 立规矩 + 资金不变量」**1618 / 4**（`1575a18`）；「W2 统一底座」**1632 / 4**（`c9bb4d5`）；「W3 用例层」补 `tests/test_use_cases.py` 7 条并收口全表后 **1669 / 4，19.73s**（`tmp/pytest_w3d.log`）；「W4 分层收口」跨层违规清零、路由拆 9 块、视图搬 `app/views/` 后 **1709 / 4，19.02s**（`tmp/pytest_w4d.log`）；「W5 前端拆分」把 5954 行单文件拆成壳（477 行）+ 样式（586 行）+ 17 个模块脚本（4943 行）后 **1710 / 4，19.54s**（`tmp/pytest_w5b.log`）。红队 43/43、e2e 13/13、前端 95/95 在 W3 / W4 两轮各自串行复跑（前端 95/95 是 W5 重写门禁后的数），全部 exit 0。本报告 §3 的数字即最新一次复跑结果，2026-10-24 的 1415 与 10-25 早间的 1464 / 1468 / 1476 口径一律降为历史基线。
 > 历史轮次数字（1336 passed / 33 工具 / 22 表 / 29 事件 / 62 测试文件）保留在 §11，标注为**历史基线**。
 
 ---
@@ -46,9 +47,9 @@
 
 | # | 命令 | 结果 |
 |---|---|---|
-| 1 | `.venv/bin/python -m pytest -q tests/` | **1415 passed, 4 skipped, 1 warning**（196.86s，2026-10-24 20:10）；4 个 skip 是浏览器冒烟默认关闭 |
+| 1 | `.venv/bin/python -m pytest -q tests/` | **1857 passed, 4 skipped, 1 warning**（19.48s，2026-10-27 收口轮复跑，`tmp/pytest_final.log`）；4 个 skip 是浏览器冒烟默认关闭 |
 | 2 | `RUN_BROWSER_SMOKE=1 .venv/bin/python -m pytest tests/test_browser_smoke.py -q` | **4 passed**（固定模型） |
-| 3 | `.venv/bin/python scripts/check_frontend.py` | **前端检查通过：66/66** |
+| 3 | `.venv/bin/python scripts/check_frontend.py` | **前端检查通过：95/95** |
 | 4 | `.venv/bin/python -m scripts.redteam` | **43 条：PASS 43 / FAIL 0** |
 | 5 | `.venv/bin/python -m scripts.e2e --offline` | **13 步：PASS 13 / FAIL 0** |
 | 6 | `.venv/bin/python -m scripts.seed --force` | `tables=30`，320 笔流水，自检全 passed；知识库 version=`2c4fbe8d4be2906c` |
@@ -56,7 +57,7 @@
 
 本轮新增的 8 个整改测试文件单独跑：`.venv/bin/python -m pytest -q tests/test_daily_risk_tiers.py tests/test_daily_upgrade_flow.py tests/test_handoff.py tests/test_birthday_budget.py tests/test_birthday_authorization.py tests/test_birthday_api_authorization.py tests/test_no_exec_surface.py tests/test_db_migration.py` → **79 passed**（14 / 1 / 13 / 15 / 15 / 4 / 14 / 3）。
 
-补充规模数据（实测，不是文档抄写）：测试文件 **88** 个（`tests/test_*.py`；`tests/` 下 `.py` 共 93 个，含 5 个夹具/辅助）；`app/*.py` + `app/*/*.py` **75** 个；数据库表 **30** 张；工具 **35** 个；审计事件类型 **61** 类；策略规则 **13** 条；HTTP 路由 **39** 条（38 条 `/api/*` + 根路径 `/`）。
+补充规模数据（实测，不是文档抄写）：测试文件 **102** 个（`tests/test_*.py`；`tests/` 下 `.py` 共 110 个，含 8 个夹具/辅助）；`app/*.py` + `app/*/*.py` **83** 个；数据库表 **33** 张；工具 **35** 个；审计事件类型 **66** 类；策略规则 **13** 条；HTTP 路由 **47** 条（50 条 `/api/*` + 根路径 `/`）。
 
 知识层补充数据：terms 40 / entities 25 / relations 22 / intents 11 / workflows 10 / sources 34 / warnings **5**（1 superseded + 4 unverified）；verified 29 / unverified 4 / superseded 1。
 
@@ -167,7 +168,7 @@
 | 4 | `tests/eval/`（80 例、runner、报告、配对统计） | 部分实现 | 8 轮真实配对统计；方向反复，不宣称提升；未补跑 |
 | 5 | `app/proactive.py`、`app/tools/proactive.py`、7 个工具、6 个 API + 模拟支出端点、前端面板 | 部分实现 | 监测闭环完整；后台节拍单进程、默认 30 秒、只推进显式开启目标；只写提醒不动钱 |
 | 6 | `docs/14_安全回归报告.md`、`tests/test_security_*.py`、`tests/test_payment_guard.py` | 已完成并通过验证 | 红队 43/43；知识层 13 条、主动服务 11 条、guard 44 条；执行层未授权写 0 |
-| 7 | 本报告、`docs/15_竞赛总报告.md`、`docs/13_竞赛演示手册.md`、README、`docs/提交物对照表.md`、PPT | 已完成并通过验证 | 本轮重新生成；数字统一为 1415/4、43/43、13/13、7/7、30 表/35 工具/61 事件/13 规则/39 路由/88 测试文件（`tests/test_*.py`）；报告生成时未 push，后续已推送公开仓库 |
+| 7 | 本报告、`docs/15_竞赛总报告.md`、`docs/13_竞赛演示手册.md`、README、`docs/提交物对照表.md`、PPT | 已完成并通过验证 | 本轮重新生成；数字统一为 1669/4、43/43、13/13、7/7、33 表/35 工具/66 事件/13 规则/47 路由/103 测试文件（`tests/test_*.py`）；报告生成时未 push，后续已推送公开仓库 |
 
 ### 六大赛场验收
 
@@ -263,7 +264,7 @@ python3.12 -m uvicorn app.main:app --port 8000
 
 ```bash
 make test                                    # 通过/失败/跳过数见 release_manifest.json
-python3.12 scripts/check_frontend.py         # 66/66
+python3.12 scripts/check_frontend.py         # 95/95
 python3.12 -m scripts.redteam                # 43/43
 python3.12 -m scripts.e2e                    # 13/13（会删库重建，跑完 make reseed）
 python3.12 scripts/ui_journeys.py            # 7/7（真浏览器；需已起服务）
@@ -292,14 +293,14 @@ python3.12 scripts/ab_stats.py --results tests/eval/results --iters 10000 --seed
 
 ## 11. 历史基线（保留，不再作为当前事实）
 
-| 指标 | 历史基线（2026-10-23 / 上一轮） | 本轮实测（2026-10-24） |
+| 指标 | 历史基线（2026-10-23 / 上一轮） | 本轮实测（2026-10-25） |
 |---|---|---|
-| pytest | 1336 passed / 4 skipped | **1415 passed / 4 skipped** |
+| pytest | 1336 passed / 4 skipped | **1857 passed / 4 skipped** |
 | 工具 | 33 | **35** |
 | 数据表 | 22 | **30** |
 | 审计事件类型 | 29 | **61** |
 | 策略规则 | 12 | **13** |
-| 测试文件 | 62 | **88**（`tests/test_*.py`；`tests/` 下 `.py` 共 93，含夹具/辅助） |
+| 测试文件 | 62 | **88**（`tests/test_*.py`；`tests/` 下 `.py` 共 100，含夹具/辅助） |
 | HTTP 路由 | 18 | **39**（含根路径） |
 | 浏览器旅程 | 5 条（后补到 7 条） | **7 条，单次运行 7/7** |
 

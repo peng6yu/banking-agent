@@ -214,29 +214,26 @@ def _call(method: str, url: str, payload: dict[str, Any] | None = None) -> httpx
     return asyncio.run(run())
 
 
-def test_http_get_exposes_the_questions_when_nothing_is_assessed(seeded: Path) -> None:
-    """没测评时前端要能直接渲染题目，所以 GET 必须把 5 道题和选项一起给。"""
-    res = _call("GET", "/api/investment/suitability")
-    assert res.status_code == 200
-    data = res.json()
-    assert data["assessed"] is False
-    assert data["profile"] is None
-    assert {q["id"] for q in data["questions"]} == {
-        "q_horizon", "q_experience", "q_loss", "q_goal", "q_share",
-    }
-    assert all(q["options"] for q in data["questions"])
-    assert "不是监管口径" in data["disclaimer"]
+def test_http_post_saves_the_profile_for_the_page_to_read(seeded: Path) -> None:
+    """测评只剩 POST 一条 HTTP 入口。
 
-
-def test_http_post_saves_the_profile_and_get_reads_it_back(seeded: Path) -> None:
+    题目与画像由 /api/business/management 下发；原来那个只读的
+    GET /api/investment/suitability 没人调用，还会把 score 与等级分档表
+    直接吐给任何拿到令牌的人，已删。这里改成落盘后直接查库确认。
+    """
     res = _call("POST", "/api/investment/suitability", {"answers": _answers()})
     assert res.status_code == 200
     profile = res.json()["profile"]
     assert profile["level"] == "C3"
     assert profile["capacity"] == 3
-    again = _call("GET", "/api/investment/suitability").json()
-    assert again["assessed"] is True
-    assert again["profile"]["level"] == "C3"
+    conn = db.connect()
+    try:
+        # 种子库的用户是演示用户，不是 tool_fixtures 里的那个 id，直接读落盘的那一行。
+        row = conn.execute("SELECT * FROM investor_profiles").fetchone()
+    finally:
+        conn.close()
+    assert row is not None, "POST 说成功了，库里必须有画像"
+    assert str(row["level"]) == "C3"
 
 
 def test_http_post_rejects_an_incomplete_questionnaire(seeded: Path) -> None:

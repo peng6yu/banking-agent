@@ -1,10 +1,10 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-10-24T23:34:56+08:00",
+  "generated_at": "2026-10-27T23:03:12+08:00",
   "git": {
-    "head": "6124667eef19d4093768421c0e4256d67789578e",
-    "head_short": "6124667",
-    "subject": "fix(docs): 最后一轮文档收口——AA/沙箱/生日授权/AIR 状态/A-B 预检",
+    "head": "aa1b088e21800927651eb69b10d7f9fada55c110",
+    "head_short": "aa1b088",
+    "subject": "冷启动可跑与评委一页纸：make run 支持 PORT/HOST、A4 单页提纲",
     "branch": "main",
     "dirty": false,
     "changed_paths": 0
@@ -52,7 +52,7 @@
         "assess_suitability"
       ]
     },
-    "db_tables": 30,
+    "db_tables": 37,
     "db_table_names": [
       "users",
       "accounts",
@@ -74,6 +74,7 @@
       "fund_holdings",
       "scheduled_transfers",
       "savings_goals",
+      "savings_deposits",
       "monitor_rules",
       "proactive_alerts",
       "monitor_runs",
@@ -83,13 +84,19 @@
       "plan_steps",
       "plan_budgets",
       "plan_authorizations",
-      "handoffs"
+      "handoffs",
+      "subscription_verdicts",
+      "chat_turns",
+      "agent_memory",
+      "messages",
+      "message_insight_state",
+      "anomaly_acks"
     ],
-    "audit_event_types": 61,
-    "api_paths": 39,
+    "audit_event_types": 73,
+    "api_paths": 59,
     "policy_rules": 13,
     "intent_templates": 9,
-    "test_files": 88,
+    "test_files": 110,
     "knowledge": {
       "version": "2c4fbe8d4be2906c",
       "terms": 40,
@@ -103,10 +110,10 @@
   },
   "tests": {
     "command": ".venv/bin/python -m pytest -q",
-    "passed": 1415,
+    "passed": 1857,
     "failed": 0,
     "skipped": 4,
-    "duration_s": 196.86,
+    "duration_s": 18.95,
     "log": "tmp/pytest_final.log",
     "parsed": true
   },

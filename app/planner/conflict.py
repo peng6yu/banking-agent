@@ -15,10 +15,9 @@
 from __future__ import annotations
 
 import sqlite3
-from datetime import datetime
 from typing import Any, Final
 
-from app import audit, clock, db
+from app import audit, clock, db, timefmt
 from app.models import Dag
 from app.tools.registry import WRITE_TOOL_NAMES
 
@@ -28,10 +27,6 @@ UNFINISHED_RUN_STATES: Final[tuple[str, ...]] = ("running", "waiting")
 BUSY_NODE_STATES: Final[tuple[str, ...]] = ("pending", "running", "waiting_confirm", "waiting_factor")
 CONFLICT_CODE: Final[str] = "SESSION_RUN_CONFLICT"
 MAX_REPORTED_RUNS: Final[int] = 5
-
-
-def _time_text(ms: int) -> str:
-    return datetime.fromtimestamp(int(ms) / 1000).strftime("%Y-%m-%d %H:%M")
 
 
 def new_write_tools(dag: Dag) -> list[str]:
@@ -71,7 +66,7 @@ def _run_detail(conn: sqlite3.Connection, row: Any, now_ms: int) -> dict[str, An
         "run_id": str(row["id"]),
         "status": str(row["status"]),
         "created_ms": int(row["created_ms"]),
-        "created_text": _time_text(int(row["created_ms"])),
+        "created_text": timefmt.minute_text(int(row["created_ms"])),
         "pending_confirmations": pending,
         "write_nodes": busy,
     }
@@ -185,7 +180,7 @@ def supersede_answered_clarifications(
                 # 问题答完了，这一轮就不再需要人接手：把挂在它上面的活跃接管单一起收掉，
                 # 免得队列里留一张 run 已经关闭、操作员领了也没法恢复的旧单。
                 # 延迟导入：handoffs → runner，放在模块顶部会绕进 executor 的导入环。
-                from app import handoffs as handoffs_mod
+                from app import handoff_store as handoffs_mod
 
                 handoffs_mod.close_for_run(
                     target,

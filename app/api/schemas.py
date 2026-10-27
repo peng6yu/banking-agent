@@ -15,6 +15,8 @@ from app.models import FactorProof
 #: 目标金额上限与工具层同一条线：1 亿元。超出就不是储蓄目标是资产迁移了。
 MAX_TARGET_FEN: int = 100_000_000_00
 TARGET_DATE_PATTERN = r"^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+#: 储蓄计划一期最多划 5,000 元（与 app/savings.MAX_PERIOD_FEN 同一条线）
+MAX_PERIOD_FEN: int = 500_000
 
 
 class CancelRequest(BaseModel):
@@ -46,6 +48,36 @@ class SavingsGoalCreate(BaseModel):
     budget_fen: int | None = Field(default=None, ge=1, le=MAX_TARGET_FEN)
     progress_tolerance: int | None = Field(default=None, ge=1, le=100)
     period: Literal["monthly", "weekly"] = "monthly"
+    # 给了卡 + 节奏就当场授权「每期自动划款」；不给就是只算数不动钱的计划
+    account_id: str | None = Field(default=None, max_length=40)
+    cadence: Literal["monthly", "weekly"] | None = None
+    auto_fen: int = Field(default=0, ge=0, le=MAX_PERIOD_FEN)
+
+
+class SavingsAuthorizeRequest(BaseModel):
+    """POST /api/savings/goals/{id}/authorize 的入参：授权每期自动划款。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    account_id: str = Field(min_length=1, max_length=40)
+    cadence: Literal["monthly", "weekly"] = "monthly"
+    auto_fen: int = Field(default=0, ge=0, le=MAX_PERIOD_FEN)
+
+
+class SavingsDepositRequest(BaseModel):
+    """POST /api/savings/goals/{id}/deposit 的入参；金额不传就按缺口自动算这一期。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    amount_fen: int | None = Field(default=None, ge=100, le=MAX_PERIOD_FEN)
+
+
+class SavingsRefundRequest(BaseModel):
+    """POST /api/savings/goals/{id}/refund 的入参：取消计划，钱原路划回。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    reason: str = Field(default="", max_length=60)
 
 
 class SavingsGoalUpdate(BaseModel):
@@ -160,6 +192,20 @@ class PlanCreate(BaseModel):
     meta: dict = Field(default_factory=dict)
 
 
+class ReminderCreate(BaseModel):
+    """POST /api/reminders 的入参：一条独立提醒，可一次性也可循环。"""
+
+    model_config = ConfigDict(extra="forbid", title="新建提醒")
+
+    text: str = Field(min_length=1, max_length=40)
+    due_ms: int | None = Field(default=None, ge=0)
+    repeat: Literal["none", "daily", "weekly", "monthly"] = "none"
+    hour: int = Field(default=9, ge=0, le=23)
+    minute: int = Field(default=0, ge=0, le=59)
+    day: int | None = Field(default=None, ge=1, le=31)
+    weekday: int | None = Field(default=None, ge=0, le=6)
+
+
 class PlanUpdate(BaseModel):
     """PATCH /api/plans/{plan_id} 的入参：只改传了的字段。"""
 
@@ -241,12 +287,99 @@ class ScheduledVerifyRequest(BaseModel):
     proofs: list[FactorProof] | None = None
 
 
+class ManualTransactionRequest(BaseModel):
+    """POST /api/transactions/manual 的入参：用户自己补一笔流水。
+
+    为什么要有这个入口：演示环境（和多数真实部署）接不到银行的官方 API，
+    账单里到底有没有那笔消费只能由人补进来。补的是他自己的账，不是替谁下单，
+    所以：只写本行流水、只改演示余额、落一条 transaction.manual 审计，
+    不触发任何外部支付。
+    """
+
+    model_config = ConfigDict(extra="forbid", title="手动补录一笔流水")
+
+    merchant: str = Field(min_length=1, max_length=40)
+    amount_fen: int = Field(ge=1, le=100_000_000)
+    #: 支出记 'out'，收入记 'in'；默认支出，因为补的多数是「我买了什么」。
+    direction: Literal["out", "in"] = "out"
+    category: str = Field(default="其他", min_length=1, max_length=12)
+    note: str = Field(default="", max_length=80)
+    #: 记到哪张卡/哪个账户；不传就是工资储蓄卡（演示环境的主账户）。
+    #: 信用卡消费只占这张卡的可用额度，不动储蓄卡余额。
+    account_id: str | None = Field(default=None, max_length=40)
+    #: 这笔实际发生的时间（毫秒）。不传＝现在；只接受最近 90 天内、且不在未来。
+    ts_ms: int | None = Field(default=None, ge=0)
+    #: 客户端幂等键：同一次提交重试带同一个值只记一笔，换一笔就换一个值。
+    #: 不传时不做幂等（每次都是一笔新的）。
+    client_nonce: str | None = Field(default=None, max_length=64)
+
+
+class AnomalyAckRequest(BaseModel):
+    """POST /api/bill/anomalies/ack 的入参：用户看过这一组流水，确认没问题。
+
+    只做「以后别再提醒我这一组」这一件事：不写钱、不改流水、不认欺诈。
+    tx_ids 是卡片上看得到的证据流水号；服务端会校验它们确实属于这张卡。
+    """
+
+    model_config = ConfigDict(extra="forbid", title="核实一组账单异常")
+
+    kind: str = Field(min_length=1, max_length=40)
+    #: 哪张卡上的异常；不传就是主储蓄卡（演示环境的主账户）。
+    account_id: str | None = Field(default=None, max_length=40)
+    tx_ids: list[str] = Field(min_length=1, max_length=20)
+    note: str = Field(default="", max_length=200)
+    #: mine=我自己刷的，not_mine=不是我刷的。两档都要落库：后者是冻结卡与争议的起点。
+    verdict: str = Field(default="mine", min_length=4, max_length=8)
+
+
+class AnomalyUnackRequest(BaseModel):
+    """POST /api/bill/anomalies/unack 的入参：撤销核实，让这一组重新待核实。
+
+    只删「已核实」这一条记录；流水、余额、审计都不会被改写（审计另记一条撤销）。
+    """
+
+    model_config = ConfigDict(extra="forbid", title="撤销账单异常核实")
+
+    kind: str = Field(min_length=1, max_length=40)
+    account_id: str | None = Field(default=None, max_length=40)
+    tx_ids: list[str] = Field(min_length=1, max_length=20)
+
+
+class SubscriptionVerdictClearRequest(BaseModel):
+    """POST /api/subscriptions/verdict/clear 的入参：撤掉之前的定性。
+
+    撤掉之后这条商户重新按流水推断，若仍满足周期性条件就回到「疑似订阅」待办。
+    """
+
+    model_config = ConfigDict(extra="forbid", title="撤回疑似订阅定性")
+
+    merchant: str = Field(min_length=1, max_length=60)
+
+
+class SubscriptionVerdictRequest(BaseModel):
+    """POST /api/subscriptions/verdict 的入参：用户对一条疑似订阅定性。
+
+    两种结论都算「处理完了」：不是我订的（误报）/ 确实是我订的（确认）。两种
+    都会让这条从待办里消失——继续挂着只会让列表永远清不掉。确认不等于银行侧
+    代扣，推断永远不自动改写这个结论；点错了可以调 clear 撤掉重来。
+    """
+
+    model_config = ConfigDict(extra="forbid", title="疑似订阅定性")
+
+    merchant: str = Field(min_length=1, max_length=60)
+    verdict: Literal["not_subscription", "confirmed"]
+    note: str = Field(default="", max_length=200)
+
+
 __all__ = [
     "AlertResolveRequest",
+    "AnomalyAckRequest",
+    "AnomalyUnackRequest",
     "BirthdayItemIn",
     "BirthdayPayRequest",
     "BirthdayPlanCreate",
     "CancelRequest",
+    "ManualTransactionRequest",
     "MonitorRunRequest",
     "PlanCreate",
     "PlanRunRequest",
@@ -260,5 +393,7 @@ __all__ = [
     "SavingsGoalCreate",
     "SavingsGoalUpdate",
     "SimulatedExpenseRequest",
+    "SubscriptionVerdictClearRequest",
+    "SubscriptionVerdictRequest",
     "SuitabilityAssessRequest",
 ]

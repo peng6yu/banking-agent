@@ -16,6 +16,14 @@ from app.clock import ValidationError
 # 单笔上限 100 万元（docs/04 4.3 分支表）
 MAX_SINGLE_FEN: Final[int] = 100_000_000
 
+# 账户互转（本人名下卡之间、亲属卡）与理财申购赎回是「钱还在自己口袋里」，收支统计一律排除。
+# 对外转账（转给张三这种）不是内部搬运：钱真的离开了净资产，必须算支出——所以它不在这个元组里。
+# 口径只写这一份：主动洞察（app/proactive.py）与账单工具（app/tools/bill.py）都从这里取，
+# 否则「总览结余 3,476」和「账单净结余 -1,311」就是两套定义各说各话。
+# 储蓄计划每期划进目标的那笔钱也不是支出：钱从储蓄卡进了自己的目标，净资产没变。
+# 同理取消目标划回时也不算收入。分类固定写「储蓄」，由 app/savings.py 落流水。
+INTERNAL_CATEGORIES: Final[tuple[str, ...]] = ("账户互转", "理财", "储蓄")
+
 # 「全部 / 所有钱」不给数字，由调用方替换成余额；money 层不许查库
 UNKNOWN_AMOUNT_FEN: Final[int] = -1
 
@@ -68,6 +76,21 @@ def fen_to_yuan_str(fen: int) -> str:
     return f"{sign}{yuan:,}.{cent:02d}"
 
 
+def yuan_label(fen: int) -> str:
+    """带单位的展示金额：1_000_00 -> '1,000.00 元'。确认卡、决策理由、摘要用它。"""
+    return f"{fen_to_yuan_str(fen)} 元"
+
+
+def yuan_short(fen: int) -> str:
+    """口语里的短金额：100000 -> '1000'、150050 -> '1500.5'（不要千分位、不补零）。
+
+    只用于「预算 1000 元」「还差 500 元」这类句子；账务数字一律 fen_to_yuan_str，
+    因为那里必须两位小数、必须带千分位，不能两种写法混着出现。
+    """
+    text = f"{int(fen) / 100:.2f}".rstrip("0").rstrip(".")
+    return text or "0"
+
+
 def parse_amount(text: str, *, strict: bool = False) -> int:
     """自然语言金额 -> 分。
 
@@ -89,8 +112,6 @@ def parse_amount(text: str, *, strict: bool = False) -> int:
 
 
 # docs/04 4.3/4.4 与 docs/08 8.5 给了两套函数名，两个都留着，别让下游 import 不到
-to_fen = yuan_to_fen
-fmt_yuan = fen_to_yuan_str
 
 
 def _unknown_amount(strict: bool) -> int:
@@ -173,7 +194,7 @@ __all__ = [
     "UNKNOWN_AMOUNT_FEN",
     "yuan_to_fen",
     "fen_to_yuan_str",
+    "yuan_label",
+    "yuan_short",
     "parse_amount",
-    "to_fen",
-    "fmt_yuan",
 ]

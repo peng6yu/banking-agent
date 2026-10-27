@@ -20,9 +20,10 @@ from pptx.oxml.ns import qn
 from pptx.util import Inches, Pt
 
 BASE = Path(__file__).resolve().parent
-IMG = BASE / "截图" / "信息架构"
+IMG = BASE / "截图" / "四入口_2026-10-27"   # 四入口版（2026-10-27 重拍）
+IMG_LEGACY = BASE / "截图" / "信息架构"       # 六视图旧版，仅作历史对照
 OUT = BASE / "答辩PPT.pptx"
-TOTAL = 12
+TOTAL = 14
 
 NAVY = RGBColor(0x0F, 0x29, 0x42)
 INK = RGBColor(0x1F, 0x29, 0x37)
@@ -89,13 +90,17 @@ def header(slide, title, index):
 def footer(slide, spec, index):
     para(box(slide, 0.6, 6.9, 12.13, 0.42), spec.get("src", ""), 8.5, False, MUTED, 0)
     rect(slide, 0.6, 6.86, 12.13, 0.015, RGBColor(0xD1, 0xD5, 0xDB))
-    para(box(slide, 0.6, 7.08, 6.4, 0.3), "第 %d / %d 页 · 累计 %s / 10:00" % (index, TOTAL, spec["cum"]), 10, False, MUTED, 0)
+    footer = ("第 %d / %d 页 · %s" % (index, TOTAL, spec["cum"])) if str(spec["cum"]).startswith("附录") \
+        else ("第 %d / %d 页 · 累计 %s / 10:00" % (index, TOTAL, spec["cum"]))
+    para(box(slide, 0.6, 7.08, 6.4, 0.3), footer, 10, False, MUTED, 0)
     para(box(slide, 6.6, 7.08, 6.13, 0.3), "banking-agent · 2026 金融科技大赛人工智能赛道", 10, False, MUTED, 0, PP_ALIGN.RIGHT)
 
 
 def fit_picture(slide, name, left, top, max_w, max_h):
     """按比例把截图放进一个矩形区域，返回 (x, y, w, h)。"""
     path = IMG / name
+    if not path.exists():
+        path = IMG_LEGACY / name
     with Image.open(path) as im:
         iw, ih = im.size
     scale = min(max_w / iw, max_h / ih)
@@ -217,7 +222,7 @@ SLIDES = [
             (0, "效率：传统手机银行 3+ 步 → 本系统 1 句 + 1 次确认", "g"),
             (1, "脚本桩到确认卡 7–8ms；真模型意图解析约 1.5–3s/次（历史实测，非本次复跑）", "m"),
         ],
-        "chips": [("6 / 6", "赛题场景有真实后端"), ("35", "受管工具"), ("1415", "自动化测试通过"), ("43 / 43", "红队用例通过")],
+        "chips": [("6 / 6", "赛题场景有真实后端"), ("35", "受管工具"), ("1857", "自动化测试通过"), ("43 / 43", "红队用例通过")],
         "talk": "只做到第一件就是玩具；三件一起成立，银行才敢在模拟账本里把动钱权限交给它。",
         "cum": "0:55",
         "src": "评审权重 40/30/30 见赛题 §4；场景覆盖与边界见 docs/提交物对照表.md §三。",
@@ -258,15 +263,16 @@ SLIDES = [
         "items": [
             (0, "左栏说话，右栏五块同屏：意图 / DAG / 三色 / 因子 / 审计", "i"),
             (0, "SSE 流式：start / intent / trace / confirm / factor / tool / done / error", "m"),
-            (0, "零依赖单文件前端：无 CDN / 无框架 / 无构建；断网也能演", "g"),
-            (1, "静态合规检查 66/66；7 条浏览器旅程逐条断言 DOM + 服务端状态", "m"),
+            (0, "零依赖零构建前端：壳 + 样式 + 21 个模块脚本；断网也能演", "g"),
+            (1, "五块默认常驻不折叠；确认卡三档动作（确认/改一下再发/拒绝）+ 授权绑定摘要 + 超时视为拒绝", "g"),
+            (1, "静态合规检查 95/95（21 个脚本）；7 条浏览器旅程逐条断言 DOM + 服务端状态", "m"),
             (0, "同名收款人：两个「张三」必须停下来问，模型无权替用户选", "y"),
         ],
-        "img": "main_02_confirm_card.png",
-        "cap": "确认卡与决策剧场：金额 500.00、收款人尾号 6620、有效期 120 秒（本机实拍）",
+        "img": "1_助手.png",
+        "cap": "助手默认页：一句话之后右栏五块同屏；空态给绿/黄/红三句示例（2026-10-27 本机实拍）",
         "talk": "评委不用翻日志，就看它凭什么。",
         "cum": "3:30",
-        "src": "出处：web/index.html；66/66 为 scripts/check_frontend.py 实测；旅程见 docs/交付/browser_journeys.json。",
+        "src": "出处：web/index.html；95/95 为 scripts/check_frontend.py 实测；旅程见 docs/交付/browser_journeys.json。",
     },
     {
         "layout": "split",
@@ -278,8 +284,8 @@ SLIDES = [
             (1, "日累计按「用户」而非账户：999.99 黄 / 1000.00 黄 / 1000.01 红", "m"),
             (1, "越线不是拒绝线：红色强验证通过后真实出账；绝对上限 R13 默认关闭", "m"),
         ],
-        "img": "main_04_red_mfa.png",
-        "cap": "红灯：服务端签发两个挑战，验过才出账（本机实拍）",
+        "img": "red_factor_fresh.png",
+        "cap": "红灯实拍：挂失银行卡 → R09 判定「需要多因子」，人脸+短信+动态口令，依据与理由都写在面板上",
         "talk": "颜色不是模型给的，是裁决区的纯函数给的。",
         "cum": "4:20",
         "src": "出处：app/policy/rules.py（R01–R13，R13 默认 None）；tests/test_daily_risk_tiers.py（14 条）。",
@@ -306,13 +312,13 @@ SLIDES = [
             (0, "每条：seq / ts / session / event / payload / prev_hash / hash", "i"),
             (0, "hash = sha256(prev_hash + ts + event + payload)；触发器禁 UPDATE/DELETE", "g"),
             (0, "一条转账 11 个事件全链可回放；/api/audit/verify 返回 ok=true", "i"),
-            (1, "61 类事件闭集：写不进白名单的名字会被拒绝", "m"),
+            (1, "66 类事件闭集：写不进白名单的名字会被拒绝", "m"),
         ],
         "img": "security_desktop.png",
         "cap": "执行记录与安全：审计链可逐条展开（本机实拍）",
         "talk": "安全不是「挡住了多少」，是「失败时往哪边倒、事后能不能查」。",
         "cum": "5:50",
-        "src": "出处：app/audit.py（哈希链与只增不改触发器）；tests/test_audit.py；61 类见 EVENT_TYPES。",
+        "src": "出处：app/audit.py（哈希链与只增不改触发器）；tests/test_audit.py；66 类见 EVENT_TYPES。",
     },
     {
         "layout": "split",
@@ -366,22 +372,38 @@ SLIDES = [
         "t": "红队 43 条与证据链：不靠一张嘴",
         "items": [
             (0, "43 条五类：诱导转账 10 / 越权 10 / 注入 10 / 信息套取 8 / 异常与稳定性 5", "i"),
-            (0, "PASS 43 / FAIL 0（2026-10-24 复跑；离线 ScriptedAdapter，约 12 秒，自动判定七列表）", "g"),
+            (0, "PASS 43 / FAIL 0（2026-10-25 复跑；离线 ScriptedAdapter，约 12 秒，自动判定七列表）", "g"),
             (1, "历史 14 条 FAIL 已逐条归因：0 产品缺陷 / 8 夹具口径 / 6 设计取舍；must_not 全过、资金零变动", "m"),
-            (0, "1415 passed / 4 skipped ｜ e2e 13/13 ｜ 浏览器旅程 7/7 ｜ 前端 66/66", "i"),
+            (0, "1857 passed / 4 skipped ｜ e2e 13/13 ｜ 浏览器旅程 7/7 ｜ 前端 95/95", "i"),
             (0, "异常熔断：5 分钟窗口 3 次安全拒绝 → 锁定 60 秒，半开只放行一次试探", "i"),
             (0, "审计链篡改当场被数据库触发器拒绝；verify 仍返回 ok=true", "i"),
         ],
-        "chips": [("43 / 43", "红队用例 PASS"), ("1415", "pytest passed"), ("7 / 7", "浏览器旅程"), ("13 / 13", "e2e 步数")],
+        "chips": [("43 / 43", "红队用例 PASS"), ("1719", "pytest passed"), ("7 / 7", "浏览器旅程"), ("13 / 13", "e2e 步数")],
         "talk": "安全不是「我们挡住了多少攻击」，是「攻击面在哪一层、失败时系统往哪边倒」。",
         "cum": "8:10",
-        "src": "出处：tests/redteam/cases.yaml（43 条）、scripts/redteam*；pytest 2026-10-24 终测；旅程 docs/交付/browser_journeys.json。",
+        "src": "出处：tests/redteam/cases.yaml（43 条）、scripts/redteam*；pytest 2026-10-26 终测；旅程 docs/交付/browser_journeys.json。",
+    },
+    {
+        "layout": "split",
+        "t": "出事之后：链能验、单能接",
+        "items": [
+            (0, "审计链逐行重算：改一条历史记录 → 校验立刻报「没通过」，并给出条目数与链头", "r"),
+            (0, "实测：拆掉 append-only 触发器改 payload_json，再点「校验」→ 条目 43、链头 e814c683，界面直接说「从断点往前都不能再当证据」", "i"),
+            (0, "人工接管：工单队列按状态给动作（我来处理 / 拒绝 / 继续跑 / 需要补充 / 取消），并发只有一个 claim 成功", "g"),
+            (1, "四类拒绝都留痕：越权、注入、熔断、令牌不符，各有中文标签，进入拒绝列表与审计", "m"),
+            (1, "校验结果写回审计面板本身，不只落在对话里 —— 在哪一页点都看得见", "m"),
+        ],
+        "img": "audit_tamper_detected.png",
+        "cap": "篡改实测：改一条历史记录后点「校验」，面板红字报链断（2026-10-27 本机实拍）",
+        "talk": "安全做不到「事后可验」，前面所有拦截都只是自说自话。",
+        "cum": "8:20",
+        "src": "出处：app/audit.py:185 verify_chain；app/db.py:638 append-only 触发器；队列截图见 截图/四入口_2026-10-27/handoff_queue_actions.png。",
     },
     {
         "layout": "items",
         "t": "指标、不足与收尾：先把丑话说完",
         "items": [
-            (0, "指标：35 工具 ｜ 13 规则 ｜ 30 表 ｜ 61 审计事件 ｜ 39 路由 ｜ 6 场景 ｜ 1415 测试 ｜ 43 红队 ｜ 7 旅程", "g"),
+            (0, "指标：35 工具 ｜ 13 规则 ｜ 37 表 ｜ 73 审计事件 ｜ 59 路由 ｜ 6 场景 ｜ 1857 测试 ｜ 43 红队 ｜ 13 e2e ｜ 7 旅程", "g"),
             (1, "模型：DeepSeek 主脑 + 离线脚本桩；provider_check 4/4；A/B 8 轮 80 例单次采样，方向翻转不宣称提升", "m"),
             (0, "不足（照实说）：真实短信/人脸未接（演示桩）；只有 Web，无独立 App/IM", "r"),
             (1, "规划是模板 DAG，不是开放域；单用户、无 RBAC；不可宣称已对齐生产银行", "r"),
@@ -392,8 +414,23 @@ SLIDES = [
             (0, "收尾：它知道自己还不能做什么，也知道自己为什么不能 —— 这两件事比多几个功能重要。", "r"),
         ],
         "talk": "欢迎现场追问：七步校验、43 条红队、审计链，我们都能当场跑。",
-        "cum": "8:55",
+        "cum": "9:20",
         "src": "出处：README「已知限制」与「数字台账」；安全自评报告 R-01～R-20；manifest 见 docs/benchmark/release_manifest.json。",
+    },
+    {
+        "layout": "items",
+        "t": "附录（不计时）：现场怎么证明",
+        "items": [
+            (0, "make test → 1857 passed / 4 skipped（约 23 秒）", "g"),
+            (0, "make redteam → 43/43 PASS（约 30 秒，七列判定表逐条打印）", "g"),
+            (0, "make journeys → 7 条旅程失败 0（3–5 分钟，真浏览器点给你看）", "m"),
+            (1, "红队按赛题点名四类分组：诱导转账 10 / 越权 10 / 注入 10 / 套取 8 / 异常 5", "i"),
+            (1, "每条用例同时验两件事：拦得住（期望色 vs 实际色）＋ 留得下（审计事件）", "i"),
+            (1, "对照表：docs/交付/红队与赛题对照表.md（脚本读 cases.yaml 生成，不手抄）", "i"),
+        ],
+        "talk": "这三条命令现场就能跑，不用回放录像。",
+        "cum": "附录·不计时",
+        "src": "出处：scripts/redteam.py 判定表；tests/redteam/cases.yaml 43 条；实测 29.47 秒。",
     },
 ]
 

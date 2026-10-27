@@ -24,7 +24,7 @@ from app.tools.base import (
 )
 
 CATEGORIES: Final[tuple[str, ...]] = (
-    "餐饮", "交通", "购物", "生活缴费", "娱乐", "医疗", "工资", "理财", "转账", "订阅",
+    "餐饮", "交通", "购物", "生活缴费", "娱乐", "医疗", "工资", "理财", "转账", "账户互转", "订阅",
 )
 DEFAULT_DAYS: Final[int] = 30
 MAX_DAYS: Final[int] = 365
@@ -128,6 +128,7 @@ def _account_view(row: sqlite3.Row) -> dict[str, Any]:
         "balance_fen": balance_fen,
         "balance_yuan": fen_to_yuan_str(balance_fen),
         "credit_limit_fen": int(row["credit_limit_fen"]),
+        "credit_limit_yuan": fen_to_yuan_str(int(row["credit_limit_fen"])),
     }
 
 
@@ -143,7 +144,7 @@ def _tx_view(row: sqlite3.Row) -> dict[str, Any]:
         "note": str(row["note"]),
         "channel": str(row["channel"]),
         "ts_ms": int(row["ts_ms"]),
-        "time_text": time.strftime("%Y-%m-%d %H:%M", time.localtime(int(row["ts_ms"]) / 1000)),
+        "ts_text": time.strftime("%Y-%m-%d %H:%M", time.localtime(int(row["ts_ms"]) / 1000)),
     }
 
 

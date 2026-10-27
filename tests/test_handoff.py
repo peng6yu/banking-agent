@@ -699,8 +699,8 @@ def test_handoff_api_is_protected_and_lists_pending(
     listed = client.get("/api/handoffs?status=pending", headers=headers)
     assert listed.status_code == 200
     body = listed.json()
-    assert body["count"] == 1
-    assert body["handoffs"][0]["id"] == handoff_id
+    assert body["count"] == 1 and body["total"] >= 1
+    assert body["handoffs"][0]["handoff_id"] == handoff_id and "dag" not in body["handoffs"][0]
 
     claimed = client.post(
         f"/api/handoffs/{handoff_id}/claim", json={"operator": "api_op"}, headers=headers

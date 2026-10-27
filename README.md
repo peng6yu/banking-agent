@@ -6,7 +6,7 @@
 
 ![决策剧场：左栏说话，右栏是它凭什么](docs/交付/截图/信息架构/main_02_confirm_card.png)
 
-> **评委 3 分钟路径**：看上面这张图 → `make setup && make run` → 输入「给张三转 500 元」，看它停下来让你选尾号 → 打开 `/api/audit/verify` 看哈希链。完整材料：[答辩 PPT（12 页 / 8:55）](docs/交付/答辩PPT.pptx) · [技术文档](docs/技术文档.md) · [安全自评报告](docs/安全自评报告.md) · [提交物对照表](docs/提交物对照表.md) · [演示脚本](docs/交付/比赛演示方案.md)。
+> **评委 3 分钟路径**：看上面这张图 → `make setup && make run` → 输入「给张三转 500 元」，看它停下来让你选尾号 → 打开 `/api/audit/verify` 看哈希链。完整材料：[答辩 PPT（14 页，主线 9:20 + 附录）](docs/交付/答辩PPT.pptx) · [答辩脚本](docs/交付/答辩脚本.md) · [技术文档](docs/技术文档.md) · [安全自评报告](docs/安全自评报告.md) · [红队对照表](docs/交付/红队与赛题对照表.md) · [提交物对照表](docs/提交物对照表.md)。
 
 ## 30 秒看懂
 
@@ -15,7 +15,7 @@
 ```bash
 git clone https://github.com/peng6yu/banking-agent.git && cd banking-agent
 make setup   # 没装 make 就 bash scripts/setup.sh
-make run     # 启动日志会打印一条带 #token= 的地址，打开那一条
+make run     # 启动日志会打印一条带 #token= 的地址，打开那一条（端口被占就 make run PORT=8010）
 ```
 
 `make setup` 依次做：找解释器（3.12 优先）→ 建 `.venv` → 装依赖（自动绕开本机 pip.conf 里解析不了的索引）→ 生成 `.env`（权限 600，不入库）→ 定模型来源 → 建库 + 种子 → 真模型时再跑一遍协议自检。模型来源它自己判断：环境或 `.env` 里已有 key 就用云端，本机 Ollama 在跑就用 Ollama，都没有才退回离线协作桩（`MOCK_MODE=script`，零网络也能演查余额与转账）。可以点名：`make setup ARGS="--ollama"` / `ARGS="--mock"` / `ARGS="--dry-run"`（只打印计划不动文件）。**仓库里没有任何人的 API key**，换厂商只改 `.env` 三行，见下面「模型配置」。
@@ -45,24 +45,28 @@ make run     # 启动日志会打印一条带 #token= 的地址，打开那一�
 
 系统不会顺着你的口吻行事——它只认参数，认不出收款人就会反问；认出来了还要过日累计线，5000 元直接进红色多因子。
 
-## 产品界面：六个区域（2026-10 重构）
+## 产品界面：一条对话主线 + 四入口（2026-10-27 重构）
 
-![财务总览：余额 / 收支 / 异常 / 计划全部来自后端](docs/交付/截图/信息架构/overview_desktop.png)
+![AI 助手：左边办事、右边当场说清它在干什么](docs/交付/截图/四入口_2026-10-27/1_助手.png)
 
-打开页面默认落在**财务总览**，不是聊天框。六个区域各回答一个问题，数字全部来自后端只读接口 /api/business/*；取不到就显示「暂不可用」或空状态，**不拿示例数据垫**。
+打开页面默认落在 **AI 助手**，不是财务总览：这个产品的主动作是「说一句话办事」，其余三页是旁证。
+布局是三段——左边对话（会话主线）、右栏「这一轮的裁决」五块常驻（意图解析 / 任务计划 / 权限裁决 / 多因子验证 / 审计链），
+顶部只留四个入口。数字全部来自后端只读接口，取不到就写「暂不可用」或空状态，**不拿示例数据垫**。
 
-| 区域 | 职责（回答哪个问题） | 数据来源 | 现在到哪一步 |
+| 入口 | 职责（回答哪个问题） | 数据来源 | 现在到哪一步 |
 |---|---|---|---|
-| 财务总览 | 我现在有多少钱？这个月钱往哪走？有什么等我处理？ | GET /api/business/overview | ✅ 余额、收支、支出类别、待核实异常、待处理授权、储蓄目标、提醒、AI 快捷入口都来自后端 |
-| AI 助手 | 用一句话办事：补参数、选收款人、看计划、确认、看真实执行结果 | /api/chat(SSE) + /api/confirm + /api/session/{id} | ✅ 同名收款人选择器、交易确认卡、九态任务状态、断流后可恢复 |
-| 账单分析 | 钱花在哪？哪几笔值得核实？依据是什么？ | GET /api/business/bill | ✅ 三类异常都带规则编号、命中流水、误报可能、可执行动作 |
-| 计划与提醒 | 哪些是计划、哪些真的会到点执行？ | GET /api/business/plans + /api/savings/goals + /api/proactive/* + /api/plans | ✅ 区分「计划已保存 / 任务已安排 / 任务正在执行 / 任务已完成」；预约转账、开启监测的目标、到点的计划步骤都由后台节拍推进；**默认只提醒 + 待确认，只有用户显式给出与计划版本/项目/金额绑定的一次性授权、且到点重判仍为合法黄色时才自动执行，风险升级为红色必须重新强验证** |
-| 业务管理 | 卡、订阅、理财、转账各自能做到什么？不能做到什么？ | GET /api/business/management | ✅ 每个能力都写明边界（例如只能停银行侧代扣、不能注销商户会员） |
-| 执行记录与安全 | 这一轮到底发生了什么？谁授权的？ | GET /api/business/executions + /api/audit | ✅ 默认只给业务状态与风险说明，意图/DAG/令牌/审计按需展开 |
+| AI 助手（默认） | 能不能办？用一句话交代要办什么，补参数、选收款人、看计划、确认、看真实执行结果 | /api/chat（SSE 八事件）+ /api/confirm + /api/cancel + /api/factor/challenge + /api/session/{id} + /api/session/{id}/recover | ✅ 五块常驻不折叠、规则号与人话双读、确认卡三档动作（本次确认 / 改措辞 / 拒绝）+ 绑定摘要 + 「超时视为拒绝」 |
+| 账务 | 我的钱现在什么状态？钱花在哪？哪几笔值得核实？卡、订阅、理财各自能做到什么、不能做到什么 | GET /api/business/overview、/bill、/management + /api/transactions | ✅ 账单三类异常带规则编号与可执行动作；订阅与卡的能力边界写死在界面上 |
+| 计划 | 以后的事：计划、提醒、预约、主动预警；哪些真会到点执行 | GET /api/business/plans + /api/savings/goals + /api/proactive/alerts + POST /api/plans + POST /api/savings/run | ✅ 区分「计划已保存 / 任务已安排」；计划页可手动建一步计划、可手动跑一次到期储蓄 |
+| 治理 | 凭什么放行？这一轮到底发生了什么？现场这台机器是真的吗？ | GET /api/business/executions、/api/audit、/api/audit/verify + /api/health + /api/handoffs + POST /api/demo/reset | ✅ 审计链同屏可校验、系统自检、演示台（按字确认才重置）、人工接管队列 |
 
-设计系统在 web/index.html 顶部统一定义（品牌色、背景、卡片、主次文字、成功/警告/危险、字号、间距、圆角、阴影、按钮与输入高度、焦点与禁用态），组件按「余额卡 / 收支卡 / 异常卡 / 计划卡 / 状态标签 / AI 消息 / 补信息表单 / 收款人候选 / 确认卡 / 风险提示 / 多因子状态 / 执行进度 / 错误 / 空状态 / 加载 / 审计详情」分区实现。
+本版四入口的截图在 `docs/交付/截图/四入口_2026-10-27/`（助手 / 账务 / 计划 / 治理各一张，2026-10-27 重拍）；`docs/交付/截图/信息架构/` 那一套是六页版旧图，只作历史对照。
 
-> 为什么还是单文件：这是仓库自带的合规门禁 scripts/check_frontend.py 的要求——不允许任何外链脚本/样式、不允许 EventSource、不允许 var，66 项全过才算过。引入框架要先说清部署与离线成本，本轮没做这个交换。
+设计系统在 `web/index.html` 顶部统一定义（品牌色、背景、卡片、主次文字、成功/警告/危险、字号、间距、圆角、阴影、按钮与输入高度、焦点与禁用态），
+组件按「余额卡 / 收支卡 / 异常卡 / 计划卡 / 状态标签 / AI 消息 / 补信息表单 / 确认卡 / 裁决栏」分别落在 `web/css` 与 `web/js` 的对应文件里。
+不可撤销的动作一律走 `45-modal.js` 的强确认弹窗（后果清单 + 按字确认 + 明说不能撤销），不再用原生 `confirm`。
+
+> 为什么没有构建链：`web/index.html` 只是壳（596 行，纯 DOM，有 600 行上限），样式在 `web/app.css`，脚本是 `web/js/` 下 21 个经典脚本按文件名序加载、共享一个全局词法作用域。仓库自带的合规门禁 `scripts/check_frontend.py` 会挡住行数超限、内联脚本、脚本序错乱与令牌缺失。
 
 ## 2026-10-24 上一轮补了什么（业务语义与安全边界；其中日累计/生日预算两条已被下文审计整改轮修正）
 
@@ -98,7 +102,7 @@ make run     # 启动日志会打印一条带 #token= 的地址，打开那一�
 | 26 | **同一会话只允许一轮未完成资金写**（`app/planner/conflict.py` + `run.conflict` 事件） | 后一轮会静默覆盖前一轮的 `RUNS`，用户以为还在等确认的那笔其实已经被顶掉 | `tests/test_run_conflict.py` 8 条（第二笔被拒并告诉你是哪一轮挡路、只读请求不拦、重启后仍能检测、列出全部未完成轮、取消上一轮后解锁、过期卡不会静默解锁、已完成轮不算冲突且不重复扣款、恢复已完成轮不重跑资金节点） |
 | 27 | **真实渠道闸门 + 模拟数据自报家门** | 关掉演示回显后没有真实短信/人脸渠道时会静默发不出码；理财的期限/流动性/费率三家都没数据 | `FACTOR_PROVIDER` 未声明真实渠道时 `issue()` 抛 `SystemBusy`（不落挑战、不写 `factor.challenge_issued`，HTTP 503）；理财每项 `duration_days/liquidity/fee = null` + `data_source: contest_simulation` + `comparison.supported: false`；`tests/test_real_channels.py` 6 条 |
 | 28 | **浏览器高风险旅程**（`scripts/ui_journeys.py`，真浏览器 + 真模型） | 六区截图只证明页面能打开，不证明任务能走完 | `docs/交付/browser_journeys.json`：7/7 pass——小额转账确认、高额双因子出账、AA 同名候选被阻止、生日计划建立+刷新恢复、储蓄提醒处理后落库、J6 点候选、J7 点拒绝；`demo_db_unchanged: true`（测试库与演示库隔离） |
-| 29 | **单一事实源 `docs/benchmark/release_manifest.json`** | README / 进度文件 / 验收报告 / PPT 各写一套数字，改一处忘一处 | `scripts/release_manifest.py` 直接从代码与运行结果取数（当时为历史基线：tools 35、tables 27、events 49、API 30；本轮整改后为 tools 35、tables 30、events 61、API 39）；文档与 PPT 一律引用它 |
+| 29 | **单一事实源 `docs/benchmark/release_manifest.json`** | README / 进度文件 / 验收报告 / PPT 各写一套数字，改一处忘一处 | `scripts/release_manifest.py` 直接从代码与运行结果取数（当时为历史基线：tools 35、tables 27、events 49、API 30；本轮整改后为 tools 35、tables 31、events 63、API 41）；文档与 PPT 一律引用它 |
 | 30 | **多进程抢同一批预约转账的压测** | 租约以前只有单进程测试：两个 uvicorn worker 同时到点会不会各扣一次，没有证据 | `tests/lease_worker.py` + `tests/test_multiprocess_lease.py` 3 条：4 进程抢 1 行只出一次账、2 进程各跑一轮 ticker 也只出一次、3 进程抢 5 行正好 5 笔 |
 | 31 | **点击级旅程 J6/J7** | 之前 5 条旅程是流程级：直接调接口，没证明「页面上真点一下」也会同步改服务端 | J6 点候选列表里尾号 6620 那一位，断言确认卡与服务端 pending 卡片的 payee.card_tail 都是 6620、金额 500、余额未动；J7 点拒绝，断言 confirm.rejected、无 transfer.initiated、转账节点不是 done、余额不变；整套 7 条全 pass |
 | 32 | **回答澄清时正式结束提问那一轮**（`supersede_answered_clarifications` + `run.superseded` 事件） | J6 首跑就撞上：点了候选、后端也把原句拼回来了，却被自己的冲突闸门拦成 SESSION_RUN_CONFLICT——提问中的那一轮把下一句当成「第二轮资金写」 | 只在**没有待签确认卡**的轮次上生效（等签字不等于等澄清，不能替用户取消），把 busy 节点标 skipped、run 标 cancelled、写 run.superseded；`tests/test_run_conflict.py` 9 条 |
@@ -117,9 +121,9 @@ make run     # 启动日志会打印一条带 #token= 的地址，打开那一�
 | 4 | **生日计划一次性预约授权**（P1） | 新增 `plan_authorizations`：绑定 `plan_version` + 账户 + 项目 + 金额，创建计划时用户显式勾选才保存；到点执行前重判，仅**仍合法的黄色**可用预授权自动执行，升级为红色或参数变化必须暂停并要求强验证/用户确认；取消计划即撤销授权，后台不再启动付款 | `tests/test_birthday_authorization.py`、`tests/test_birthday_api_authorization.py`（4 条：预留改变 available 不改 balance、授权行绑定计划版本、到期窗口前后、红日不自动扣） |
 | 5 | **沙箱条款的合规说明**（P1） | 审查完整调用链后确认主 Agent **不执行任意模型生成代码**（无 `eval`/`exec`，模型输出只进结构化参数）；`scripts/prove_no_exec_surface.py` 实测 75 文件 / 25,383 行、代码执行面 0 命中、出网 3 处（仅 `app/llm.py`）、动态 SQL 13 处逐条人工复核、离线 `subprocess` 9 处全部在测试/脚本侧；这是「消除执行面」的替代设计，**不是已部署的容器沙箱**，未宣称已实现沙箱 | `docs/security_sandbox.md`（149 行，含逐跳调用链 file:line 与剩余风险）、`tests/test_no_exec_surface.py`（14 条） |
 | 6 | **A/B 配对统计与浏览器回归**（P1） | 8 轮完整真实 80 例（mock=false）做配对统计：逐轮 intent B−A 为 −1.25 / +2.50 / 0 / +2.50 / +5.00（MiniMax）与 +5.00 / −2.50 / +8.75（DeepSeek），**符号翻转**；同配置 A 组复跑极差 6.25pp / 11.25pp；仅一轮的 +8.75pp 配对 bootstrap CI[+2.50,+16.25] 不含 0，但属单轮单次采样；**稳定成立的是知识引用（B 41–42/51 vs A=0），不宣称知识层稳定提升准确率** | `docs/benchmark/ab_paired_stats.md`、`scripts/ab_stats.py`；浏览器 7 条旅程由当前 `scripts/ui_journeys.py` 实际执行、失败 0（j3 单独用真模型后端，J4/J5 为 API 驱动流程级），见 `docs/交付/browser_journeys.json` 与 `docs/benchmark/browser_journey_audit.md` |
-| 7 | **交付材料统一** | 重新生成 `docs/benchmark/release_manifest.json`（从代码与运行日志取数），README / 验收报告 / 优先级 / 提交物对照表 / PPT 大纲 / 演示方案 / PROGRESS 全部引用同一份事实；旧数字一律标「历史基线」不删除 | 本轮最终验证：**pytest 1415 passed / 4 skipped**、红队 **43/43**、e2e **13/13**、浏览器旅程 **7/7**（全部 exit 0） |
+| 7 | **交付材料统一** | 重新生成 `docs/benchmark/release_manifest.json`（从代码与运行日志取数），README / 验收报告 / 优先级 / 提交物对照表 / PPT 大纲 / 演示方案 / PROGRESS 全部引用同一份事实；旧数字一律标「历史基线」不删除 | 本轮最终验证：**pytest 1710 passed / 4 skipped**、红队 **43/43**、e2e **13/13**、浏览器旅程 **7/7**（全部 exit 0） |
 
-本轮规模（实测）：测试文件 **88**（`tests/test_*.py`；`tests/` 下 `.py` 文件共 93 个，含 5 个夹具/辅助文件）、数据库表 **30**、工具 **35**（只读 13 / 写 22）、审计事件 **61**、权限规则 **13**、API 路径 **39**。
+本轮规模（实测）：测试文件 **102**（`tests/test_*.py`；`tests/` 下 `.py` 文件共 110 个，含 8 个夹具/辅助文件）、数据库表 **33**、工具 **35**（只读 13 / 写 22）、审计事件 **66**、权限规则 **13**、API 路径 **47**。
 
 **必须主动交代的限制**：真实短信/人脸渠道尚未接入（未声明 `FACTOR_PROVIDER` 时 `issue()` 直接 503，不落挑战）；人工接管是本地操作员队列，`operator` 仅为审计字符串、无 RBAC、不对接坐席系统；沙箱是「不执行生成代码」的架构选择而非容器隔离；A/B 每轮单次采样，配对 bootstrap 只估计样本层面差值，不能替代重复采样方差。
 ## 快速开始（评委复现路径）
@@ -134,6 +138,7 @@ make run     # 启动日志会打印一条带 #token= 的地址，打开那一�
 | 3. 不配模型也要演 | `make setup ARGS="--mock"` | `MOCK_MODE=script` 离线协作桩：查余额、转账两种业务照演，其余照实反问 |
 | 4. 演示跑脏了复原 | `make reseed`（等价 `python3.12 -m scripts.seed --force`） | 删库重建初始态，末行 `seed.ok random_seed=… tables=30 window_days=180` |
 | 5. 换模型 / 换厂商 | 改 `.env` 三行 → `make smoke` | 4/4 PASS 才算配好，见下一节「模型配置」 |
+| 6. 满数据演示库 | `make demo-db` → `make demo-run` | 生成 `data/demo_full.db`（储蓄目标 / 3 个计划 / 2 条提醒 / 1 张待接管单 / 1 条预算提醒 / 3 条助手提醒）并在 8000 端口起服务；真库 `data/bank.db` 不动。也可以只造库：`BANK_DB_PATH=data/demo_full.db python3.12 -m uvicorn app.main:app --port 8000` |
 
 依赖清单在 `requirements.txt`（fastapi / uvicorn / pydantic / httpx / pyyaml），`make setup` 会装进 `.venv`；系统 `python3.12` 已装好依赖时也可以直接跑，两条路都实测过。
 
@@ -181,8 +186,9 @@ python3.12 -m app.smoke               # 自检：4/4 PASS 才算配好（会打�
 | ② 账单分析 | 月度统计、分类占比、三类异常识别（拆单、凌晨境外、订阅涨价） | ✅ 「看下我上个月的账单流水」实测返回 20,849.00 元 |
 | ③ 理财操作 | 风险测评问卷（5 题 → C1–C5）、产品列表、适当性校验、申购与赎回（R10 红灯：人脸 + 动态口令） | ✅ 没测评 / 超风险等级一律拒买；问卷是演示用简化版，不是监管口径 |
 | ④ 卡片管理 | 查卡（名下所有卡）、申请虚拟卡、调限额、冻结、解冻、挂失 | ✅ 五件套真模型实测：黄灯开卡、红灯冻结均落库 |
-| ⑤ 订阅代扣 | 列出代扣、**从流水推断疑似订阅**（带把握度与依据流水）、近 7 天可能扣费、按名字唯一匹配后一键取消（黄灯确认） | ✅ 「把视频会员自动续费关掉」走通；推断项不给取消按钮，界面写明「只能停银行侧代扣、不能注销商户会员」 |
+| ⑤ 订阅代扣 | 列出代扣、**从流水推断疑似订阅**（带把握度与依据流水、可逐笔核对）、近 7 天可能扣费、按名字唯一匹配后一键取消（黄灯确认） | ✅ 「把视频会员自动续费关掉」走通；确认卡会写出**商户 / 每期金额 / 下次扣费 / 边界句**；停掉后该商户立刻离开「疑似订阅」待办、转到「已停止银行侧代扣」；推断项不给取消按钮 |
 | ⑥ 跨场景联动 | 「下周三我妈生日帮我准备」→ 查人 → 查余额 → 锁预算 → 下单鲜花 | ✅ 真模型实跑：首轮反问补收款人 → 四节点走通，余额 1286050 → 1256050 |
+| ⑧ 长期记忆 | 助手把用户说过的稳定偏好与事实（「记账喜欢按周看」「习惯用招商银行的卡」）自己记下来，跨会话、刷新后仍在，并在后续问句里当默认值用；可在业务管理页查看/手写/忘掉 | ✅ 真模型实测：说一句偏好 → 后台抽出事实并落 `agent_memory`；「你记得我什么」逐条列并给「忘掉」chips；金额/账户/收款人一律以当次原话为准 |
 | ⑦ 持久计划 | 跨天/跨会话的多步计划：条件检查、提醒、资金动作；落库、可暂停、可取消、重启后继续 | ◐ 检查与提醒由后台节拍推进；**通用计划的资金动作不后台执行**，到期只生成待确认提醒；**生日计划**若保存一次性授权，匹配且重判绿/黄才自动付款，红/变更暂停 |
 
 ## 核心设计：三段论
@@ -331,18 +337,33 @@ curl -s http://127.0.0.1:8000/api/audit/verify
 ### 单元与集成测试（实测全绿，用例数持续增补）
 
 ```bash
-python3.12 -m pytest -q tests/            # 1415 passed, 4 skipped（2026-10-24 整改轮终测；历史基线为 1336 passed / 4 skipped）
+make test                                 # 1857 passed, 4 skipped（2026-10-27 复跑；等价于 .venv/bin/python -m pytest -q tests/）
 ```
 
 > **数字口径**：本 README 里的工具数、表数、审计事件数、测试通过数与 A/B 轮次，
 > 一律以 [`docs/benchmark/release_manifest.json`](docs/benchmark/release_manifest.json) 为准（2026-10-24 生成）。
 > 该文件由 `scripts/release_manifest.py` 从代码与运行日志里读出来，不手抄。
 
-### 前端合规自检（实测 66 项全过）
+### 前端合规自检（实测 95 项全过）
 
 ```bash
-python3.12 scripts/check_frontend.py      # 实测「前端检查通过：66/66 项全部达标」
+python3.12 scripts/check_frontend.py      # 实测「前端检查通过：95/95 项全部达标」
 ```
+
+### 七条浏览器旅程（真 Chromium + 真后端，实测 7/7 PASS）
+
+比冒烟更硬的一层：每条旅程同时断言「页面上的文案」和「服务端的钱与状态」，只满足一半就算失败。
+七条覆盖：小额转账黄灯、高额红灯多因子、同名候选拦截（真模型）、生日计划建立/刷新/恢复、
+储蓄提醒处理、候选点击改参数、明确拒绝记 `confirm.rejected`。
+
+```bash
+make journeys                      # = /home/peng/.local/bin/python3.12 scripts/ui_journeys.py
+make journeys ARGS="--only j1,j2"  # 只跑指定几条；ARGS="--headed" 可以看着它点
+```
+
+> playwright 装在系统 python3.12（`/home/peng/.local/bin/python3.12`），**不在 `.venv` 里**，所以这个目标单列了一个解释器探测；
+> 报告与截图：`docs/交付/browser_journeys.json`、`docs/交付/截图/信息架构/journey_0*.png`。
+> j3 走真模型，其余六条用 `MOCK_MODE=script` 桩；没有模型 key 时只能跑六条。
 
 ### 浏览器级冒烟（真 Chromium，实测 PASS + 3 张截图）
 
@@ -405,9 +426,11 @@ python3.12 -m app.smoke                    # 实测 4/4 PASS，主脑延迟约 1
 | `app/policy/` | 裁决引擎与 13 条规则 R01–R13（纯函数，无网络无模型；R13 为可选的绝对日上限，默认不启用） |
 | `app/security/` | 入口访问令牌、能力令牌、签名信封、注入扫描、熔断器 |
 | `app/tools/` | 35 个工具：查人、查余额、账单、卡片、订阅、转账、资金冻结 + 7 个主动财务（只读/需确认，无动钱语义） |
-| `app/api/` | 会话/确认/审计等 39 条 API 路径（38 条 `/api/*` + 根路径 `/`），含人工接管队列 `handoffs_api.py`；另有只读业务视图 `business.py`（overview / bill / management / plans / executions 五个 GET，六个区域的唯一数据来源） |
-| `web/index.html` | 单文件前端（原生 JS，无框架、无 CDN、零外链） |
-| `tests/` | pytest 用例集（**1415 passed / 4 skipped**，2026-10-24 整改轮终测；历史基线 1336）+ 43 条红队 YAML + `tests/eval/` 80 例 A/B 评估集（10-24 共 8 轮真实结果已入库，统计见 `docs/benchmark/ab_paired_stats.md`） |
+| `app/api/` | 会话/确认/审计等 59 条 API 路径（58 条 `/api/*` + 根路径 `/`），含人工接管队列 `handoffs_api.py`；另有只读业务视图 `business.py` 5 条（overview / bill / management / plans / executions 五个 GET，四个入口里「账务」页的唯一数据来源） |
+| `web/index.html` | 前端壳：只放 DOM（原生 JS，无框架、无 CDN、零外链） |
+| `web/app.css` | 全站唯一样式表（设计系统变量层在 `:root`） |
+| `web/js/*.js` | 18 个模块脚本，按 10→95 的文件名序加载，共享全局作用域（83-view-ledger.js 是流水明细） |
+| `tests/` | pytest 用例集（**1857 passed / 4 skipped**，2026-10-27 储蓄计划真动钱轮复跑；历史基线 1336）+ 43 条红队 YAML + `tests/eval/` 80 例 A/B 评估集（10-24 共 8 轮真实结果已入库，统计见 `docs/benchmark/ab_paired_stats.md`） |
 | `scripts/` | 种子脚本、前端合规检查器、真实 Chromium 冒烟(`browser_smoke.py`)、六区+主线截图(`ui_screenshots.py`) |
 | `docs/` | 交接规格书 00—10（改造前基线，写代码前必读）+ 11—15 改造设计与验收 + 答辩与演示交付件 |
 | `规划/` | 前期选型与模型实测记录 |
@@ -421,7 +444,7 @@ python3.12 -m app.smoke                    # 实测 4/4 PASS，主脑延迟约 1
 | `make setup` | 一键配置新电脑（.venv + 依赖 + .env + 选模型 + 建库 + 自检） | ✅ 幂等；`ARGS="--dry-run"` 可预演 |
 | `make run` | 启动服务（--reload） | ✅ |
 | `make seed` | 建库 + 种子（幂等） | ✅ |
-| `make test` | pytest 全跑 | ✅ 全绿（1415 passed / 4 skipped，2026-10-24 整改轮实测；历史基线 1336） |
+| `make test` | pytest 全跑 | ✅ 全绿（1710 passed / 4 skipped，2026-10-26 W5 前端拆分轮实测；历史基线 1336） |
 | `make smoke` | 模型连通性自检 | ✅ 4/4 |
 | `make cov` | 覆盖率（未装 pytest-cov 时自动退回纯跑） | ✅ |
 | `make reset` | `POST /api/demo/reset` 演示前清场 | ✅ |
@@ -484,14 +507,14 @@ python3.12 -m app.smoke                    # 实测 4/4 PASS，主脑延迟约 1
 **按这个顺序读，不要跳**：
 
 ```
-docs/00_总纲.md                  ← 十条铁律 + 里程碑 DoD
+docs/00_总纲.md                  ← 十二条铁律 + 里程碑 DoD
 docs/01_架构与数据流.md           ← 三段论与不变量
 docs/02_目录结构与文件职责.md     ← 每个文件干什么
-docs/03_数据库与种子数据.md       ← 30 张表 DDL（改造前 27 + 本轮 3：daily_user_limits / plan_authorizations / handoffs；以 app/db.py 的 TABLE_NAMES 为准）
+docs/03_数据库与种子数据.md       ← 33 张表 DDL（改造前 27 + 本轮 3：daily_user_limits / plan_authorizations / handoffs；以 app/db.py 的 TABLE_NAMES 为准）
 docs/04_核心模块实现规格.md       ← 逐函数分支表
 docs/05_安全层实现规格.md         ← 12 条规则 R01–R12 + 令牌七步 ★最重要（历史规格；现 13 条，见 rules.py）
 docs/06_工具层与场景实现规格.md   ← 历史规格 19 工具；当前 35 个，以 /api/tools 为准
-docs/07_规划器_API与前端规格.md   ← 历史规格 10 端点；当前 39 个 API 路径
+docs/07_规划器_API与前端规格.md   ← 历史规格 10 端点；当前 47 个 API 路径
 docs/08_编码规范.md               ← 硬性编码要求
 docs/09_工作区与Git规范.md        ← 分支/提交/推送
 docs/10_测试与验收清单.md         ← 43 条红队 + 里程碑验收
@@ -511,7 +534,7 @@ docs/10_测试与验收清单.md         ← 43 条红队 + 里程碑验收
 | 不用 LangGraph / 多 Agent 框架 | 审计链要逐字段可控；金融场景要单点可追溯，多 Agent 会糊掉责任边界 |
 | 结构化输出只走 tool_calls | 实测 MiniMax 的 `response_format: json_object` 不被遵守；两家都按 tool_calls 解析 |
 | SQLite + 标准库 | 零运维，评审可一键复现；审计表用触发器禁改 |
-| 单文件前端 | 断网也能演示；SSE 用 fetch + ReadableStream 手工解析，不引任何框架 |
+| 零构建前端 | 断网也能演示；壳 + 样式 + 17 个经典脚本，SSE 用 fetch + ReadableStream 手工解析，不引任何框架 |
 
 ## 安全声明
 

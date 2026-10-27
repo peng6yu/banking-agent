@@ -16,14 +16,13 @@ from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, Field
 
 from app import db, handoffs
+from app.api.http import payload
 from app.api.routes import require_api_token
+from app.use_cases import handoffs as handoff_cases
+from app.views.queue import handoff_detail_view, handoff_list_view
 
 router = APIRouter(prefix="/api/handoffs", tags=["handoffs"],
                    dependencies=[Depends(require_api_token)])
-
-
-def _conn() -> Any:
-    return db.connect()
 
 
 class OperatorBody(BaseModel):
@@ -59,66 +58,55 @@ def api_list(
     limit: int = Query(50, ge=1, le=handoffs.MAX_LIST),
 ) -> dict[str, Any]:
     """按状态列工单（新单在前）；不带 status 就是全量最近 N 张。"""
-    with _conn() as conn:
-        rows = handoffs.list_handoffs(conn, status=status, limit=limit)
-    return {"handoffs": rows, "count": len(rows)}
+    with db.open_conn() as conn:
+        return handoff_list_view(conn, status=status, limit=limit)
 
 
 @router.get("/{handoff_id}")
 def api_get(handoff_id: str) -> dict[str, Any]:
     """单张工单：原请求、DAG、已完成/失败节点、裁决、授权与备注都在里面。"""
-    with _conn() as conn:
-        return {"handoff": handoffs.get(conn, handoff_id)}
+    with db.open_conn() as conn:
+        return handoff_detail_view(conn, handoff_id)
 
 
 @router.post("")
 def api_create(body: CreateBody) -> dict[str, Any]:
     """手动建单（幂等）：同一轮已有活跃单时返回原单，不会重复挂单。"""
-    with _conn() as conn:
-        row = handoffs.create(
-            conn,
-            run_id=body.run_id,
-            reason=body.reason,
-            note=body.note,
-            request_text=body.request_text,
-            account_id=body.account_id,
-        )
-    return {"handoff": row}
+    return payload(handoff_cases.handoff_create(**body.model_dump()))
 
 
 @router.post("/{handoff_id}/claim")
 def api_claim(handoff_id: str, body: OperatorBody) -> dict[str, Any]:
     """领取一张 pending 单；并发领取只有一个成功，另一个拿到 HANDOFF_ALREADY_CLAIMED。"""
-    with _conn() as conn:
-        return {"handoff": handoffs.claim(conn, handoff_id, body.operator)}
+    return payload(handoff_cases.handoff_claim(handoff_id, operator=body.operator))
 
 
 @router.post("/{handoff_id}/reject")
 def api_reject(handoff_id: str, body: NoteBody) -> dict[str, Any]:
     """拒绝这张单：不执行、不动钱，只关闭队列项。"""
-    with _conn() as conn:
-        return {"handoff": handoffs.reject(conn, handoff_id, body.operator, body.note)}
+    return payload(handoff_cases.handoff_reject(handoff_id, operator=body.operator, note=body.note))
 
 
 @router.post("/{handoff_id}/need-info")
 def api_need_info(handoff_id: str, body: NoteBody) -> dict[str, Any]:
     """要求补充信息：必须写清楚缺什么（note 空会被拒）。"""
-    with _conn() as conn:
-        return {"handoff": handoffs.need_info(conn, handoff_id, body.operator, body.note)}
+    return payload(handoff_cases.handoff_need_info(handoff_id, operator=body.operator, note=body.note))
 
 
 @router.post("/{handoff_id}/cancel")
 async def api_cancel(handoff_id: str, body: CancelBody) -> dict[str, Any]:
     """取消工单，并顺带取消还卡着的那一轮执行（释放 hold）。"""
-    with _conn() as conn:
-        return {"handoff": await handoffs.cancel(conn, handoff_id, body.operator, body.reason)}
+    return payload(
+        await handoff_cases.handoff_cancel(handoff_id, operator=body.operator, reason=body.reason)
+    )
 
 
 @router.post("/{handoff_id}/resume")
 async def api_resume(handoff_id: str, body: NoteBody) -> dict[str, Any]:
     """恢复：先复核实时业务状态，再按原 DAG 续跑；失败会落 failed + 审计。"""
-    with _conn() as conn:
-        return await handoffs.resume(conn, handoff_id, operator=body.operator, note=body.note)
+    return payload(
+        await handoff_cases.handoff_resume(handoff_id, operator=body.operator, note=body.note)
+    )
 
 
 __all__ = ["router"]

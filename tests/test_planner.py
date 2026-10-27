@@ -167,7 +167,9 @@ def _doc_blocks() -> list[str]:
 def test_system_prompt_is_verbatim_from_docs() -> None:
     blocks = _doc_blocks()
     assert any(block == intent.SYSTEM_PROMPT for block in blocks), "SYSTEM_PROMPT 必须逐字等于 docs/07 7.1 原文"
-    assert intent.SYSTEM_PROMPT.endswith("不要输出英文错误码或堆栈。\n")
+    # 最后一条是业务边界（只处理钱的事）：与 docs/07 7.1 的末行一起钉住，
+    # 防止有人只在代码里加规则、忘了同步文档。
+    assert intent.SYSTEM_PROMPT.endswith("再给出最接近的资金动作。\n")
 
 
 # ---------------------------------------------------------------- 7.2 emit_intent
@@ -460,6 +462,10 @@ def test_confirmation_timeout_voids_the_step(bank: Path) -> None:
     assert payload(events, "error")["code"] == "CONFIRM_TIMEOUT"
     conn = db.connect()
     assert balance(conn) == 1_286_050
+    # 文案不许虚报退款：只有真挂过预授权（released>0）才能说钱退回去了。
+    row = conn.execute("SELECT payload_json FROM audit_log WHERE event_type='confirm.expired' ORDER BY seq DESC LIMIT 1").fetchone()
+    released = json.loads(row[0])["released_holds"]
+    assert ("退回" in payload(events, "error")["user_text"]) is (released > 0)
     conn.close()
 
 
@@ -531,7 +537,7 @@ def test_cancel_releases_every_hold_and_skips_the_rest(bank: Path) -> None:
     built = planner_dag.build({"intent": "birthday_plan", "slots": {"payee_name": "李静", "amount_fen": 20_000}})
     events = drive("s_can", built, answers=[{"approve": True}], cancel_at=1, confirm_timeout_ms=5000)
     assert "factor" not in names(events)
-    assert names(events)[-1] in {"confirm", "tool", "error", "done"}
+    assert names(events)[-1] == "done" and events[-1][1]["ended"] == "cancelled" and events[-1][1]["summary"]  # 取消也要有终帧
     conn = db.connect()
     holds = conn.execute(
         "SELECT status FROM holds WHERE session_id='s_can' AND payee_id='p_system'"

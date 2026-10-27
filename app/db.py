@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+import os
 import sqlite3
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -18,7 +19,12 @@ from app import audit
 from app.clock import SystemBusy, now_ms
 
 ROOT: Final[Path] = Path(__file__).resolve().parent.parent
-DEFAULT_DB_PATH: Final[Path] = ROOT / "data" / "bank.db"
+#: 演示库/隔离库可以靠环境变量换路径（scripts/make_demo_db.py、make run-demo 用）；
+#: 不设就是仓库自带的 data/bank.db，测试仍然各自传 path，不读这个默认值。
+_ENV_DB_PATH: Final[str] = os.environ.get("BANK_DB_PATH", "").strip()
+DEFAULT_DB_PATH: Final[Path] = (
+    Path(_ENV_DB_PATH).expanduser() if _ENV_DB_PATH else ROOT / "data" / "bank.db"
+)
 
 PRAGMAS: Final[tuple[str, ...]] = (
     "PRAGMA journal_mode=WAL;",
@@ -26,8 +32,10 @@ PRAGMAS: Final[tuple[str, ...]] = (
     "PRAGMA busy_timeout=5000;",
 )
 
-# 30 张表（改造前 27 + 本轮 3：用户维度日累计 daily_user_limits、计划一次性授权
-# plan_authorizations、人工接管队列 handoffs；订阅推断字段在 subs、运行元数据在 dag_runs）
+# 35 张表（改造前 27 + 用户维度日累计 daily_user_limits、计划一次性授权
+# plan_authorizations、人工接管队列 handoffs、会话记忆 chat_turns、长期记忆 agent_memory、
+# 主动提醒 messages/message_insight_state；
+# 订阅推断字段在 subs、运行元数据在 dag_runs）
 TABLE_NAMES: Final[tuple[str, ...]] = (
     "users",
     "accounts",
@@ -49,6 +57,7 @@ TABLE_NAMES: Final[tuple[str, ...]] = (
     "fund_holdings",
     "scheduled_transfers",
     "savings_goals",
+    "savings_deposits",
     "monitor_rules",
     "proactive_alerts",
     "monitor_runs",
@@ -59,6 +68,12 @@ TABLE_NAMES: Final[tuple[str, ...]] = (
     "plan_budgets",
     "plan_authorizations",
     "handoffs",
+    "subscription_verdicts",
+    "chat_turns",
+    "agent_memory",
+    "messages",
+    "message_insight_state",
+    "anomaly_acks",
 )
 
 SCHEMA_SQL: Final[str] = """
@@ -135,7 +150,10 @@ CREATE TABLE IF NOT EXISTS transactions (
   hold_id           TEXT REFERENCES holds(id),
   channel           TEXT NOT NULL DEFAULT 'app',
   reversal_of       TEXT,
-  reversed_by       TEXT
+  reversed_by       TEXT,
+  -- 客户端幂等键：手动补录重试时带同一个值只记一笔；换一笔就换一个值。
+  -- 其它写路径（转账/种子/模拟）不传，保持 NULL。
+  client_nonce      TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_tx_account_ts ON transactions(account_id, ts_ms DESC);
 CREATE INDEX IF NOT EXISTS idx_tx_category ON transactions(category);
@@ -297,9 +315,12 @@ CREATE TABLE IF NOT EXISTS scheduled_transfers (
 CREATE INDEX IF NOT EXISTS idx_sched_due ON scheduled_transfers(status, due_ms);
 CREATE INDEX IF NOT EXISTS idx_sched_user ON scheduled_transfers(user_id, status);
 
--- 阶段 5 主动财务管理：目标 → 监测规则 → 提醒 → 监测运行记录。
--- 这四张表只存「计划与提醒」，不碰 accounts/transactions 的余额：主动服务可以算、
--- 可以提醒，但转账/申购/扣款一律不在这里发生。
+-- 阶段 5 主动财务管理：目标 → 每期划款 → 监测规则 → 提醒 → 监测运行记录。
+-- 「每期划款」是这一版才有的：储蓄目标不再只是算术，cadence 不为空且用户给过
+-- 一次性授权（authorized_ms）时，节拍器每期真的从储蓄卡划一笔进这个目标——
+-- 余额减少、saved_fen 增加、transactions 记一条 category='储蓄'（内部搬运，
+-- 不计支出）。取消目标把这笔钱原路划回，并写反向流水。流水与 deposits 同一事务，
+-- 任一步失败整体回滚，不会出现「余额少了但目标没加」。
 -- 金额仍用 INTEGER 分；target_date 是「日期」不是时刻，按本地日历日存 YYYY-MM-DD，
 -- 避免把一个 12-31 的截止日按 UTC 推成 1-1。
 CREATE TABLE IF NOT EXISTS savings_goals (
@@ -310,20 +331,62 @@ CREATE TABLE IF NOT EXISTS savings_goals (
   target_date TEXT NOT NULL,
   saved_fen   INTEGER NOT NULL DEFAULT 0 CHECK (saved_fen >= 0),
   status      TEXT NOT NULL CHECK (status IN ('active','achieved','cancelled')),
+  -- 每期自动划款的节奏；空串 = 不自动划（老目标与「只算不划」的目标）
+  cadence     TEXT NOT NULL DEFAULT '' CHECK (cadence IN ('', 'monthly', 'weekly')),
+  -- 从哪张卡划钱（只有借记卡能划）；空串 = 还没选卡，这时候绝不会自动划
+  account_id  TEXT NOT NULL DEFAULT '',
+  -- 每期固定金额（分）；0 = 按「缺口 ÷ 剩余期数」自动算
+  auto_fen    INTEGER NOT NULL DEFAULT 0 CHECK (auto_fen >= 0),
+  next_due_ms INTEGER NOT NULL DEFAULT 0,
+  -- 用户建计划时勾过「授权每期自动划款」的时刻；0 = 没授权，后台绝不自动划
+  authorized_ms INTEGER NOT NULL DEFAULT 0,
+  -- 空串 = 正常；'user' = 用户暂停；'insufficient' = 余额不够这期，已顺延
+  paused_reason TEXT NOT NULL DEFAULT '',
+  last_run_ms   INTEGER NOT NULL DEFAULT 0,
+  last_result   TEXT NOT NULL DEFAULT '',
+  refunded_fen  INTEGER NOT NULL DEFAULT 0 CHECK (refunded_fen >= 0),
+  closed_ms     INTEGER NOT NULL DEFAULT 0,
   created_ms  INTEGER NOT NULL,
   updated_ms  INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_savings_goals_user ON savings_goals(user_id, status);
+-- 每一期划款一行：既做幂等（goal_id + due_ms 唯一），也做「取出了哪几笔」的追溯。
+-- 目标上的 saved_fen 是这几行的和；取消时逐行标 refunded 并写反向流水。
+CREATE TABLE IF NOT EXISTS savings_deposits (
+  id           TEXT PRIMARY KEY,
+  goal_id      TEXT NOT NULL REFERENCES savings_goals(id),
+  account_id   TEXT NOT NULL REFERENCES accounts(id),
+  amount_fen   INTEGER NOT NULL CHECK (amount_fen > 0),
+  tx_id        TEXT NOT NULL REFERENCES transactions(id),
+  due_ms       INTEGER NOT NULL,
+  created_ms   INTEGER NOT NULL,
+  status       TEXT NOT NULL CHECK (status IN ('deposited','refunded')),
+  -- cycle = 每期自动划（同 (goal_id, due_ms) 只能一行，幂等靠它）；
+  -- manual = 用户自己点「现在存一笔」，同一天点三次就是三笔，不该被去重
+  source       TEXT NOT NULL DEFAULT 'cycle' CHECK (source IN ('cycle','manual')),
+  refund_tx_id TEXT,
+  refunded_ms  INTEGER NOT NULL DEFAULT 0
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_savings_dep_cycle
+  ON savings_deposits(goal_id, due_ms) WHERE source = 'cycle';
+CREATE INDEX IF NOT EXISTS idx_savings_dep_goal ON savings_deposits(goal_id, created_ms DESC);
+CREATE INDEX IF NOT EXISTS idx_savings_dep_open ON savings_deposits(goal_id, status);
 
 CREATE TABLE IF NOT EXISTS monitor_rules (
   id          TEXT PRIMARY KEY,
   goal_id     TEXT NOT NULL REFERENCES savings_goals(id),
   kind        TEXT NOT NULL CHECK (kind IN ('progress','budget')),
-  -- progress：允许落后计划的百分点；budget：本期支出上限（分）
-  threshold   INTEGER NOT NULL CHECK (threshold > 0),
+  -- 两个阈值分列存：budget 用 threshold_fen（分），progress 用 threshold_pp
+  -- （百分点）。以前挤在同一列 threshold 里，读到的人必须先看 kind 才敢换算。
+  threshold_fen INTEGER CHECK (threshold_fen IS NULL OR threshold_fen > 0),
+  threshold_pp  INTEGER CHECK (threshold_pp IS NULL OR threshold_pp > 0),
   period      TEXT NOT NULL CHECK (period IN ('monthly','weekly')),
   enabled     INTEGER NOT NULL DEFAULT 1 CHECK (enabled IN (0,1)),
-  created_ms  INTEGER NOT NULL
+  created_ms  INTEGER NOT NULL,
+  CHECK (
+    (kind = 'budget' AND threshold_fen IS NOT NULL AND threshold_pp IS NULL)
+    OR (kind = 'progress' AND threshold_pp IS NOT NULL AND threshold_fen IS NULL)
+  )
 );
 CREATE INDEX IF NOT EXISTS idx_monitor_rules_goal ON monitor_rules(goal_id, enabled);
 
@@ -484,6 +547,93 @@ CREATE INDEX IF NOT EXISTS idx_handoffs_status ON handoffs(status, created_ms);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_handoffs_active_run
   ON handoffs(run_id) WHERE status IN ('pending','claimed','need_info');
 
+-- 疑似订阅的核对结论：流水推断出来的「疑似订阅」只能由用户自己定性。
+-- 说「这不是订阅」之后要能记住，否则每次打开页面同一条又冒出来，
+-- 用户既不能转正也不能排除，那这块就只是块只读广告。
+CREATE TABLE IF NOT EXISTS subscription_verdicts (
+  user_id     TEXT NOT NULL,
+  merchant    TEXT NOT NULL,
+  verdict     TEXT NOT NULL CHECK (verdict IN ('not_subscription','confirmed')),
+  note        TEXT NOT NULL DEFAULT '',
+  created_ms  INTEGER NOT NULL,
+  updated_ms  INTEGER NOT NULL,
+  PRIMARY KEY (user_id, merchant)
+);
+
+-- 会话记忆：每一轮对话按会话落库，服务重启也接得上。
+-- 为什么不用 dag_nodes 代替：一个会话里多数轮次根本不会建 DAG（查余额、问提醒、
+-- 定性订阅都是直答），只记 DAG 就等于只记住了「执行过的那几句」。
+CREATE TABLE IF NOT EXISTS chat_turns (
+  session_id TEXT NOT NULL,
+  seq        INTEGER NOT NULL,
+  role       TEXT NOT NULL CHECK (role IN ('user','assistant')),
+  content    TEXT NOT NULL,
+  ts_ms      INTEGER NOT NULL,
+  PRIMARY KEY (session_id, seq)
+);
+CREATE INDEX IF NOT EXISTS idx_chat_turns_time ON chat_turns(session_id, ts_ms);
+
+-- 长期记忆：用户偏好与事实跨会话持久化，下次对话直接当默认值用。
+-- 与会话记忆（chat_turns）分工：那张表记「这次说过什么」，这张表记「这个人是谁」；
+-- 所以它不绑 session_id，重启、换会话都还在。kind 是闭集，写错当场被库拦下。
+-- 记忆只作默认值，不能作为动钱依据：金额/账户/收款人一律以本次原话与账务表为准。
+CREATE TABLE IF NOT EXISTS agent_memory (
+  user_id    TEXT NOT NULL,
+  mem_key    TEXT NOT NULL,
+  mem_value  TEXT NOT NULL,
+  kind       TEXT NOT NULL DEFAULT 'fact' CHECK (kind IN ('fact','preference','profile')),
+  source     TEXT NOT NULL DEFAULT '',
+  updated_ms INTEGER NOT NULL,
+  PRIMARY KEY (user_id, mem_key)
+);
+
+-- 助手主动提醒（消息）：一条提醒 = 一个事实 + 一句建议 + 一组可选动作。
+-- dedupe_key 是「同类事实的指纹」：同一商户同一个月只留一条，重复生成被
+-- UNIQUE 直接挡掉——没有它，涨价提醒会每天准点出现，用户很快学会无视全部提醒。
+CREATE TABLE IF NOT EXISTS messages (
+  id           TEXT PRIMARY KEY,
+  user_id      TEXT NOT NULL,
+  insight_id   TEXT NOT NULL,
+  dedupe_key   TEXT NOT NULL,
+  severity     TEXT NOT NULL DEFAULT 'info' CHECK (severity IN ('info','warning')),
+  title        TEXT NOT NULL,
+  body         TEXT NOT NULL,
+  facts_json   TEXT NOT NULL DEFAULT '{}',
+  actions_json TEXT NOT NULL DEFAULT '[]',
+  status       TEXT NOT NULL DEFAULT 'new' CHECK (status IN ('new','adopted','dismissed')),
+  created_ms   INTEGER NOT NULL,
+  expires_ms   INTEGER,
+  UNIQUE (user_id, dedupe_key)
+);
+CREATE INDEX IF NOT EXISTS idx_messages_user_time ON messages(user_id, created_ms DESC);
+
+
+-- 每一类洞察的静默状态：忽略 3 次或点「不再提醒」后，这一类长期不再打扰。
+-- 单独一张表而不是塞进 messages：静默是「以后」的规则，不是某条消息的属性。
+CREATE TABLE IF NOT EXISTS message_insight_state (
+  user_id      TEXT NOT NULL,
+  insight_id   TEXT NOT NULL,
+  ignore_count INTEGER NOT NULL DEFAULT 0,
+  muted_ms     INTEGER,
+  last_ms      INTEGER NOT NULL,
+  PRIMARY KEY (user_id, insight_id)
+);
+
+-- 异常核实：用户看过这一组流水、确认没问题之后，按「账户 + 规则 + 单笔流水」记一条。
+-- 不按异常组存：同一组以后又添了新的一笔，那笔没被核实过，这条异常就该重新出现。
+CREATE TABLE IF NOT EXISTS anomaly_acks (
+  user_id    TEXT NOT NULL,
+  account_id TEXT NOT NULL,
+  kind       TEXT NOT NULL,
+  tx_id      TEXT NOT NULL,
+  note       TEXT NOT NULL DEFAULT '',
+  -- 用户看过的结论：自己刷的 / 不是我刷的。后者是冻结卡、找银行争议的起点。
+  verdict    TEXT NOT NULL DEFAULT 'mine' CHECK (verdict IN ('mine', 'not_mine')),
+  created_ms INTEGER NOT NULL,
+  PRIMARY KEY (user_id, account_id, kind, tx_id)
+);
+CREATE INDEX IF NOT EXISTS idx_anomaly_acks_lookup ON anomaly_acks(account_id, kind);
+
 -- 审计只增不改：UPDATE/DELETE 一律由 SQLite 层拦掉（docs/03 3.2 第 7 张表）
 CREATE TRIGGER IF NOT EXISTS audit_no_update BEFORE UPDATE ON audit_log
 BEGIN SELECT RAISE(ABORT, 'audit_log is append-only'); END;
@@ -503,6 +653,26 @@ def connect(path: str | Path | None = None) -> sqlite3.Connection:
     for pragma_sql in PRAGMAS:
         conn.execute(pragma_sql)
     return conn
+
+
+@contextmanager
+def open_conn(path: str | Path | None = None) -> Iterator[sqlite3.Connection]:
+    """一次请求一条连接，退出时**一定关掉**。
+
+    为什么不用 `with connect() as conn`：sqlite3 的 Connection 确实是上下文管理器，
+    但它的 `__exit__` 只提交事务、不关连接。HTTP 端点统一走这一个入口之后，
+    「漏关」就不可能是某个模块写错了，只可能是没用这个函数（有守卫测试盯着）。
+    """
+    conn = connect(path)
+    try:
+        yield conn
+    finally:
+        conn.close()
+
+
+def has_accounts(conn: sqlite3.Connection) -> bool:
+    """探活用：库里是否已经有账户行。SQL 留在数据层，接口层只读结论。"""
+    return conn.execute("SELECT 1 FROM accounts LIMIT 1").fetchone() is not None
 
 
 #: SQLite 的「写锁没抢到」措辞；都在 OperationalError 里，靠文本来分类。
@@ -558,6 +728,8 @@ _ADDED_COLUMNS: Final[tuple[tuple[str, str, str], ...]] = (
     ("payees", "phone", "TEXT"),
     ("transactions", "reversal_of", "TEXT"),
     ("transactions", "reversed_by", "TEXT"),
+    # 手动补录的客户端幂等键（老库补列；新库在 SCHEMA_SQL 里就有）
+    ("transactions", "client_nonce", "TEXT"),
     ("scheduled_transfers", "factor_verified_ms", "INTEGER NOT NULL DEFAULT 0"),
     ("scheduled_transfers", "defer_count", "INTEGER NOT NULL DEFAULT 0"),
     # 领取租约：多进程同时 tick 时，只有抢到租约的那一个执行（不是靠「谁先读到」）
@@ -570,19 +742,28 @@ _ADDED_COLUMNS: Final[tuple[tuple[str, str, str], ...]] = (
     ("accounts", "status", "TEXT NOT NULL DEFAULT 'active'"),
     # hold 建卡时的裁决等级：commit 据此决定能不能跨过日累计风险阈值（见 SCHEMA_SQL 注释）
     ("holds", "risk_level", "TEXT NOT NULL DEFAULT 'yellow'"),
-    # 订阅来源：recorded=银行代扣记录，inferred=从流水推断（必须带证据与置信度）
-    ("subs", "source", "TEXT NOT NULL DEFAULT 'recorded'"),
-    ("subs", "confidence", "REAL NOT NULL DEFAULT 1.0"),
-    ("subs", "evidence_json", "TEXT NOT NULL DEFAULT '{}'"),
     # 运行元数据：重建 RunState 需要 account_id / user_text
     ("dag_runs", "meta_json", "TEXT NOT NULL DEFAULT '{}'"),
     # 自动监测的节流时间：同一时间窗内不重复跑，重启后也不会重复
     ("savings_goals", "last_monitored_ms", "INTEGER NOT NULL DEFAULT 0"),
+    # 每期自动划款（老库补列；新库在 SCHEMA_SQL 里带 CHECK）
+    ("savings_goals", "cadence", "TEXT NOT NULL DEFAULT ''"),
+    ("savings_goals", "account_id", "TEXT NOT NULL DEFAULT ''"),
+    ("savings_goals", "auto_fen", "INTEGER NOT NULL DEFAULT 0"),
+    ("savings_goals", "next_due_ms", "INTEGER NOT NULL DEFAULT 0"),
+    ("savings_goals", "authorized_ms", "INTEGER NOT NULL DEFAULT 0"),
+    ("savings_goals", "paused_reason", "TEXT NOT NULL DEFAULT ''"),
+    ("savings_goals", "last_run_ms", "INTEGER NOT NULL DEFAULT 0"),
+    ("savings_goals", "last_result", "TEXT NOT NULL DEFAULT ''"),
+    ("savings_goals", "refunded_fen", "INTEGER NOT NULL DEFAULT 0"),
+    ("savings_goals", "closed_ms", "INTEGER NOT NULL DEFAULT 0"),
     # 这次监测是谁触发的：manual=用户点按钮，scheduler=后台节拍器
     ("monitor_runs", "trigger", "TEXT NOT NULL DEFAULT 'manual'"),
     # 提醒的归属：储蓄目标提醒由 goal_id 推出用户；跨场景计划的提醒没有 goal_id，
     # 必须自己带 user_id，否则按用户查提醒时会整条看不见。
     ("proactive_alerts", "user_id", "TEXT NOT NULL DEFAULT ''"),
+    # 异常核实的结论（老库补列；新库在 SCHEMA_SQL 里就有，并带 CHECK）
+    ("anomaly_acks", "verdict", "TEXT NOT NULL DEFAULT 'mine'"),
 )
 
 
@@ -594,6 +775,86 @@ def _ensure_columns(conn: sqlite3.Connection) -> None:
             continue
         if column not in {str(row["name"]) for row in rows}:
             conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {ddl}")
+
+
+def _migrate_monitor_rules(conn: sqlite3.Connection) -> None:
+    """老库的 monitor_rules 只有一列 threshold：按 kind 拆到两列。
+
+    SQLite 不能把带 CHECK 的列直接改名/换语义，只能重建表。重建期间先关外键：
+    proactive_alerts.rule_id 指着这张表，DROP 老表时打开外键会被拒绝。
+    """
+    columns = {
+        str(row["name"]) for row in conn.execute("PRAGMA table_info(monitor_rules)").fetchall()
+    }
+    if not columns or "threshold" not in columns or "threshold_fen" in columns:
+        return
+    conn.execute("PRAGMA foreign_keys = OFF")
+    try:
+        conn.executescript(
+            """
+            CREATE TABLE monitor_rules_new (
+              id            TEXT PRIMARY KEY,
+              goal_id       TEXT NOT NULL REFERENCES savings_goals(id),
+              kind          TEXT NOT NULL CHECK (kind IN ('progress','budget')),
+              threshold_fen INTEGER CHECK (threshold_fen IS NULL OR threshold_fen > 0),
+              threshold_pp  INTEGER CHECK (threshold_pp IS NULL OR threshold_pp > 0),
+              period        TEXT NOT NULL CHECK (period IN ('monthly','weekly')),
+              enabled       INTEGER NOT NULL DEFAULT 1 CHECK (enabled IN (0,1)),
+              created_ms    INTEGER NOT NULL,
+              CHECK (
+                (kind = 'budget' AND threshold_fen IS NOT NULL AND threshold_pp IS NULL)
+                OR (kind = 'progress' AND threshold_pp IS NOT NULL AND threshold_fen IS NULL)
+              )
+            );
+            INSERT INTO monitor_rules_new
+              (id, goal_id, kind, threshold_fen, threshold_pp, period, enabled, created_ms)
+            SELECT id, goal_id, kind,
+                   CASE WHEN kind = 'budget' THEN threshold END,
+                   CASE WHEN kind = 'progress' THEN threshold END,
+                   period, enabled, created_ms
+            FROM monitor_rules;
+            DROP TABLE monitor_rules;
+            ALTER TABLE monitor_rules_new RENAME TO monitor_rules;
+            CREATE INDEX IF NOT EXISTS idx_monitor_rules_goal
+              ON monitor_rules(goal_id, enabled);
+            """
+        )
+    finally:
+        conn.execute("PRAGMA foreign_keys = ON")
+
+
+def _migrate_transfer_category(conn: sqlite3.Connection) -> None:
+    """把老库里「亲属卡互转」这类内部搬运从 `转账` 改名成 `账户互转`（幂等）。
+
+    原来只有一个 `转账` 分类，把「转给别人的钱」和「转到自己另一张卡」混在一起，
+    结果收支统计只能整类排除——对外转账因此从「本月支出」里消失。
+    拆开后：对外转账 = 支出，账户互转 = 内部搬运（继续排除）。
+    历史行靠对手方名识别，只有种子/演示数据里的「亲属卡互转」属于内部搬运。
+    """
+    conn.execute(
+        "UPDATE transactions SET category = '账户互转' WHERE category = '转账' AND counterparty = '亲属卡互转'"
+    )
+
+
+def _drop_legacy(conn: sqlite3.Connection) -> None:
+    """删掉后来被证明是多余的结构（只跑一次，重复执行无副作用）。
+
+    - message_feedback：反馈动作与备注已经完整写在 audit_log（message.feedback），
+      messages.status 也记得当前状态；再存一张表就是同一事实两份，且全仓没有读点。
+    - subs.source / confidence / evidence_json：加列时打算区分「银行代扣」与
+      「流水推断」，后来推断结果只在内存里算（app/subscriptions.py），三列从未被
+      写入或读取。
+    """
+    conn.execute("DROP TABLE IF EXISTS message_feedback")
+    subs_columns = {
+        str(row["name"]) for row in conn.execute("PRAGMA table_info(subs)").fetchall()
+    }
+    for column in ("source", "confidence", "evidence_json"):
+        if column in subs_columns:
+            try:
+                conn.execute(f"ALTER TABLE subs DROP COLUMN {column}")
+            except sqlite3.OperationalError:  # SQLite < 3.35 不支持 DROP COLUMN
+                pass
 
 
 def ensure_columns(conn: sqlite3.Connection) -> None:
@@ -621,6 +882,14 @@ def init_db(conn: sqlite3.Connection) -> None:
     _ensure_columns(conn)
     conn.executescript(SCHEMA_SQL)
     _ensure_columns(conn)
+    # 幂等键唯一索引必须放在补列之后：老库执行 SCHEMA_SQL 时还没有 client_nonce 列。
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_tx_client_nonce"
+        " ON transactions(client_nonce) WHERE client_nonce IS NOT NULL"
+    )
+    _migrate_monitor_rules(conn)
+    _migrate_transfer_category(conn)
+    _drop_legacy(conn)
 
 
 def sweep_expired_holds(conn: sqlite3.Connection) -> int:
@@ -663,6 +932,7 @@ __all__ = [
     "connect",
     "ensure_columns",
     "init_db",
+    "open_conn",
     "sweep_expired_holds",
     "table_names",
     "tx",

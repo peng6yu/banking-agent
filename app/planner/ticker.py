@@ -1,6 +1,6 @@
-"""后台节拍器：同一拍里推进三类到点任务。
+"""后台节拍器：同一拍里推进四类到点任务。
 
-三类任务（各自独立，失败互不牵连）：
+四类任务（各自独立，失败互不牵连）：
 1. **预约转账**（app/tools/scheduled.execute_due）——到点真的出账，走确认/令牌/
    因子保质期；抢不到租约就跳过，避免多进程重复扣款。
 2. **主动财务监测**（app/proactive.run_due_monitors）——只碰用户显式打开监测开关
@@ -10,6 +10,10 @@
    性授权（plan_authorizations）：生日到点后先跑 birthday.run_due_authorized，
    按最新日累计重新裁决，只有绿/黄灯且计划参数与授权完全一致才自动付；红灯、
    额度不够、参数被改都只把计划暂停成待确认，绝不先扣了再说。
+
+4. **储蓄计划的每期划款**（app.savings.run_due_goals）——只碰用户勾过「每期自动划」
+   并且填了储蓄卡的计划：到点真的从储蓄卡划一笔进目标，余额与流水都变；
+   余额不够就顺延一期并留 skipped 审计，绝不"悄悄没攒上"。
 
 两种触发方式共用同一批函数：
 - 后台节拍：app/main.py 的 lifespan 启动时 start()，关闭时 stop()；
@@ -30,7 +34,7 @@ import logging
 import os
 from typing import Any, Final
 
-from app import birthday, db, plans, proactive
+from app import db, plan_hooks, plans, proactive, savings
 from app.tools import scheduled
 
 log = logging.getLogger(__name__)
@@ -82,19 +86,35 @@ def run_monitor_once(now: int | None = None) -> dict[str, Any]:
 def run_plans_once(now: int | None = None) -> dict[str, Any]:
     """按一次节拍推进跨场景计划（check / reminder 自动走，action 交回用户）。
 
-    顺序：先跑已授权的生日付款，再跑通用计划推进。先付的好处是通用推进里
-    「到今天该提醒了」那一步看到的是付款后的真实状态，不会刚提醒完又自动付。
-    和上面两个也分开：计划推进失败不该把预约转账或目标监测一起带停。
+    顺序：先跑已授权的到点付款（生日计划等），再跑通用计划推进。先付的好处是
+    通用推进里「到今天该提醒了」那一步看到的是付款后的真实状态，不会刚提醒完又
+    自动付。和上面两个也分开：计划推进失败不该把预约转账或目标监测一起带停。
+
+    已授权付款走 app/plan_hooks.py 的注册表：ticker 在第 4 层，生日计划在第 5 层，
+    直连就是反向依赖。没有登记任何实现时返回的是全零报告，不是 None。
 
     返回 plans.run_due 的 {executed, count}，另加 authorized 子报告，
     保持既有调用方（tests 里断言 count）不受影响。
     """
     conn = db.connect()
     try:
-        authorized = birthday.run_due_authorized(conn, now_ms=now)
+        authorized = plan_hooks.run_due_hooks(conn, now_ms=now)
         result = plans.run_due(conn, now=now)
         result["authorized"] = authorized
         return result
+    finally:
+        conn.close()
+
+
+def run_savings_once(now: int | None = None) -> dict[str, Any]:
+    """按一次节拍执行到期的储蓄计划划款（真的动钱，所以单独一段、单独兜异常）。
+
+    和另外三类分开的理由一样：划款失败不能让预约转账或监测跟着停；反过来，
+    监测炸了也不该耽误用户这个月的储蓄计划。
+    """
+    conn = db.connect()
+    try:
+        return savings.run_due_goals(conn, now=now)
     finally:
         conn.close()
 
@@ -115,6 +135,10 @@ async def tick_forever(interval_ms: int) -> None:
             await asyncio.to_thread(run_plans_once)
         except Exception:
             log.exception("ticker.plans_failed")
+        try:
+            await asyncio.to_thread(run_savings_once)
+        except Exception:
+            log.exception("ticker.savings_failed")
 
 
 #: 当前后台节拍任务。保存它只为一件事：让 /api/business/plans 能如实回答
@@ -166,6 +190,7 @@ __all__ = [
     "run_due_once",
     "run_monitor_once",
     "run_plans_once",
+    "run_savings_once",
     "start",
     "stop",
     "tick_forever",
