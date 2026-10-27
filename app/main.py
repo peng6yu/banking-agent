@@ -20,6 +20,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app import db
 from app.api import business, handoffs_api, memory_api, messages_api, routes
+from app.money import fen_to_yuan_str
 from app.clock import BankError
 from app.llm import LLMError
 from app.planner import ticker
@@ -35,6 +36,16 @@ MODEL_CODE = "MODEL_UNAVAILABLE"
 MODEL_TEXT = "模型暂时没响应，请稍后再试一次。"
 VALIDATION_CODE = "VALIDATION"
 VALIDATION_TEXT = "请求参数不对，我没法理解你发的内容。"
+#: 参数越界时能指名道姓的字段。用户填了 999999 每期金额，回「我没法理解你发的内容」
+#: 等于把责任推给他：他知道自己填了什么，只是不知道上限是多少。
+FIELD_LABELS = {
+    "amount_fen": "金额",
+    "target_fen": "目标金额",
+    "auto_fen": "每期金额",
+    "saved_fen": "已存金额",
+    "budget_fen": "预算",
+    "name": "名字",
+}
 HTTP_CODE = "HTTP_ERROR"
 HTTP_TEXT = "这个请求我没找到对应的处理方式。"
 
@@ -131,10 +142,40 @@ async def _llm_error(_request: Request, exc: LLMError) -> JSONResponse:
     return JSONResponse(status_code=503, content={"code": MODEL_CODE, "user_text": MODEL_TEXT})
 
 
+def _validation_text(exc: RequestValidationError) -> str:
+    """把「超出上限」翻成人话：说清哪个数、上限多少、他填了多少。
+
+    只翻金额类字段与名字长度，其余仍走通用那句话——宁可不解释，
+    也不编一条看不懂的字段名出来。
+    """
+    for err in exc.errors():
+        loc = [part for part in err.get("loc", ()) if isinstance(part, str)]
+        label = FIELD_LABELS.get(loc[-1]) if loc else None
+        if not label:
+            continue
+        kind = str(err.get("type", ""))
+        ctx = err.get("ctx") or {}
+        if kind == "less_than_equal":
+            limit = ctx.get("le")
+            got = err.get("input")
+            if isinstance(limit, int) and str(loc[-1]).endswith("_fen"):
+                text = label + "最多 " + fen_to_yuan_str(limit) + " 元"
+                if isinstance(got, int):
+                    text += "，你填的是 " + fen_to_yuan_str(got) + " 元"
+                return text + "。"
+            return label + "最多 " + str(limit) + "。"
+        if kind in ("greater_than_equal", "greater_than") and isinstance(ctx.get("ge"), int):
+            return label + "不能小于 " + fen_to_yuan_str(ctx["ge"]) + " 元。"
+        if kind in ("string_too_long", "too_long"):
+            return label + "太长了，短一点再试。"
+    return VALIDATION_TEXT
+
+
 @app.exception_handler(RequestValidationError)
-async def _validation_error(_request: Request, _exc: RequestValidationError) -> JSONResponse:
+async def _validation_error(_request: Request, exc: RequestValidationError) -> JSONResponse:
     """入参不合法回 400；不把 pydantic 的英文字段名回传给浏览器。"""
-    return JSONResponse(status_code=400, content={"code": VALIDATION_CODE, "user_text": VALIDATION_TEXT})
+    text = _validation_text(exc)
+    return JSONResponse(status_code=400, content={"code": VALIDATION_CODE, "user_text": text})
 
 
 @app.exception_handler(StarletteHTTPException)

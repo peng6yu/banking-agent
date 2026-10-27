@@ -28,75 +28,9 @@ function bxRenderPlans(data) {
     }
   }
 
-  const goalHost = $('plan-goals');
-  const savings = bxIsObj(data.saved_plans) ? data.saved_plans : {};
-  const goals = bxArr(savings.items);
-  setText($('plan-goal-tag'), bxCount(savings.count, ' 个'));
-  if (goalHost) {
-    goalHost.replaceChildren();
-    if (!goals.length) {
-      bxEmpty(goalHost, '还没有保存的计划', textOf(savings.empty_reason));
-    } else {
-      goals.forEach(function (goal) {
-        const plan = bxIsObj(goal.plan) ? goal.plan : null;
-        const box = el('div', 'anomaly');
-        const head = el('div', 'anomaly-head');
-        head.appendChild(el('span', 'anomaly-title', textOf(goal.name)));
-        head.appendChild(el('span', 'tag ' + (textOf(goal.status) === 'achieved' ? 'ok' : (textOf(goal.status) === 'cancelled' ? 'bad' : 'info')), BX_GOAL_STATUS[textOf(goal.status)] || textOf(goal.status)));
-        box.appendChild(head);
-        box.appendChild(el('div', 'card-note',
-          '目标 ' + textOf(goal.target_yuan) + ' 元 · 已存 ' + textOf(goal.saved_yuan) + ' 元 · 目标日 ' + textOf(goal.target_date)));
-        if (plan) {
-          box.appendChild(bxBar(plan.progress_pct, bxNum(plan.progress_pct) >= 100 ? 'ok' : ''));
-          const unitText = BX_PERIOD_UNIT[textOf(plan.period_unit)] || textOf(plan.period_unit);
-          box.appendChild(kvRow('每期需要', bxMoney(plan, 'required_per_period') + '（' + unitText + ' × ' + bxCount(plan.periods_remaining) + ' 期）', true));
-          box.appendChild(kvRow('每期结余', bxMoney(plan, 'period_surplus')));
-          box.appendChild(kvRow('缺口', bxMoney(plan, 'total_gap')));
-          box.appendChild(kvRow('可行性', BX_FEASIBILITY[textOf(plan.feasibility)] || textOf(plan.feasibility)));
-          /* assumptions 是后端给的字符串数组，原来整段 JSON 直接糊在页面上，
-             用户看到的是一堆方括号和引号；这里拆成列表逐条渲染，并默认收起——
-             它回答「这个数是怎么算的」，不是第一眼要看的结论。 */
-          const assumptions = bxArr(plan.assumptions);
-          if (assumptions.length) {
-            const fold = el('details', 'goal-why');
-            fold.appendChild(el('summary', 'caps-title', '这个数是怎么算的（' + assumptions.length + ' 条假设）'));
-            const ul = el('ul', 'assumptions');
-            assumptions.forEach(function (line) { ul.appendChild(el('li', '', textOf(line))); });
-            fold.appendChild(ul);
-            box.appendChild(fold);
-          }
-          bxArr(plan.warnings).forEach(function (warn) {
-            box.appendChild(el('div', 'notice warn', textOf(warn)));
-          });
-        } else if (goal.plan_error) {
-          box.appendChild(el('div', 'notice bad', textOf(goal.plan_error)));
-        } else {
-          box.appendChild(el('div', 'card-note', '后端没有返回计划计算结果。'));
-        }
-        const edit = el('button', 'btn btn-mini', '修改');
-        edit.type = 'button';
-        edit.addEventListener('click', function () {
-          const panel = $('panel-proactive');
-          if (panel) { panel.open = true; }
-          pfStartEdit(goal);
-        });
-        const cancel = el('button', 'btn btn-mini', '停止计划');
-        cancel.type = 'button';
-        cancel.addEventListener('click', function () { bxCancelGoal(goal.goal_id, cancel); });
-        const monitorOn = goal.monitor_enabled === true;
-        const monitor = el('button', 'btn btn-mini' + (monitorOn ? '' : ' btn-green'),
-          monitorOn ? '关闭后台监测' : '开启后台监测');
-        monitor.type = 'button';
-        monitor.title = '打开后，节拍器会按固定间隔检查这个目标并生成提醒；只写提醒，不动钱。';
-        monitor.addEventListener('click', function () { bxToggleMonitor(goal.goal_id, !monitorOn, monitor); });
-        box.appendChild(bxMore('改目标 / 停止 / 后台监测', [edit, cancel, monitor],
-          monitorOn
-            ? '后台监测：已开启。节拍器会按间隔检查这个目标，提醒写进「提醒」，不会动钱。'
-            : '后台监测：未开启。保存目标不会让它自动跑；需要持续监测时在上面打开。'));
-        goalHost.appendChild(box);
-      });
-    }
-  }
+  /* 储蓄计划整块搬去 85-view-savings.js：它要回答「钱真的动了没有」，
+     跟下面这些只看状态的块不是一回事。 */
+  if (typeof bxRenderSavings === 'function') { bxRenderSavings(data); }
 
   const taskHost = $('plan-tasks');
   const scheduled = bxIsObj(data.scheduled_tasks) ? data.scheduled_tasks : {};

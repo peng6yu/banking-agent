@@ -10,7 +10,7 @@ import datetime as dt
 import hashlib
 import sqlite3
 from dataclasses import dataclass
-from typing import Final
+from typing import Any, Final
 
 from app import audit, channels
 from app.clock import (
@@ -655,8 +655,13 @@ def _post_leg(
     note: str,
     hold_id: str | None,
     stamp_ms: int,
+    tx_id: str | None = None,
 ) -> int:
-    """记一笔资金变动：改余额 + 写一条流水，返回变动后的余额。出账要校验余额够不够。"""
+    """记一笔资金变动：改余额 + 写一条流水，返回变动后的余额。出账要校验余额够不够。
+
+    tx_id 一般由这里自己生成；储蓄计划那张表要存「这笔划款对应哪条流水」，
+    所以允许调用方先取号再传进来，省掉「插完再回查最后一条」那种脆弱写法。
+    """
     if direction == "out":
         cursor = conn.execute(
             "UPDATE accounts SET balance_fen = balance_fen - ? WHERE id = ? AND balance_fen >= ?",
@@ -672,10 +677,49 @@ def _post_leg(
         "INSERT INTO transactions (id, account_id, direction, amount_fen, counterparty,"
         " category, note, ts_ms, balance_after_fen, hold_id, channel)"
         " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'app')",
-        (new_id("t"), account_id, direction, amount_fen, counterparty, category,
+        (tx_id or new_id("t"), account_id, direction, amount_fen, counterparty, category,
          note, stamp_ms, balance_after_fen, hold_id),
     )
     return balance_after_fen
+
+
+def post_internal_leg(
+    conn: sqlite3.Connection,
+    *,
+    account_id: str,
+    direction: str,
+    amount_fen: int,
+    counterparty: str,
+    category: str,
+    note: str,
+    stamp_ms: int,
+) -> dict[str, Any]:
+    """记一笔「钱还在自己口袋里」的内部搬动（储蓄目标划入/划回）。
+
+    返回 {"tx_id", "balance_after_fen"}：储蓄计划要存下这条流水的号，取消时才好
+    对着它写反向的一笔，用户点开流水能一路追到「这笔是什么时候从哪划走的」。
+
+    和转账走同一条流水通道，但刻意不建 hold、不动日累计、不核卡状态：
+    目标是用户自己的，内部搬动既不占对外支付额度，也不该出现在「今天花了多少」里。
+    调用方负责包事务——这里只做两件事：改余额、写一条流水。
+
+    direction='out' 时余额不够会抛 InsufficientFunds，和普通出账同一套语义，
+    上层直接把这条消息给用户看，不会出现半截状态。
+    """
+    tx_id = new_id("t")
+    balance_after_fen = _post_leg(
+        conn,
+        account_id=account_id,
+        direction=direction,
+        amount_fen=amount_fen,
+        counterparty=counterparty,
+        category=category,
+        note=note,
+        hold_id=None,
+        stamp_ms=stamp_ms,
+        tx_id=tx_id,
+    )
+    return {"tx_id": tx_id, "balance_after_fen": balance_after_fen}
 
 
 def _balance_after(conn: sqlite3.Connection, account_id: str) -> int:
@@ -787,5 +831,5 @@ __all__ = [
     "HOLD_TTL_MS", "IDEMPOTENCY_KEY_LEN", "SYSTEM_PAYEE_ID",
     "CommitOutcome", "Hold", "HoldOutcome", "ReleaseOutcome",
     "commit", "day_of", "fetch_hold", "idempotency_key_for",
-    "initiate", "redeem", "release", "spent_today_fen",
+    "initiate", "post_internal_leg", "redeem", "release", "spent_today_fen",
 ]

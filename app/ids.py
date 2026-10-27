@@ -23,6 +23,8 @@ ID_PREFIXES: Final[frozenset[str]] = frozenset(
         "fc", "pl", "ps",
         # 生日计划的项目预算占用（不是 hold）
         "pb",
+        # 储蓄计划的每一期划款（savings_deposits）：每行要对得上一条流水
+        "sd",
         # 人工接管单（handoff）：不用 "h"，那个前缀已经是资金 hold
         "ho",
         # 助手主动提醒（message）：用户能逐条采纳/忽略，必须有个能贴进对话的短 id

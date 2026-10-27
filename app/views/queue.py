@@ -13,6 +13,7 @@ from typing import Any, Final
 
 from app import proactive
 from app import handoffs
+from app import savings_view
 from app import timefmt
 from app.planner import ticker
 from app.tools import scheduled as scheduled_mod
@@ -27,10 +28,39 @@ from app.views.labels import (
 )
 
 
+def _funding_accounts(conn: sqlite3.Connection, user_id: str) -> list[dict[str, Any]]:
+    """能用来划储蓄计划的卡：只有正常状态的储蓄卡。
+
+    信用卡的钱是银行的，不能拿来「攒」；冻结/挂失的卡也划不动。列表照样下发
+    can_save=False 的卡，前端才能解释「为什么只剩一张可选」。
+    """
+    rows = conn.execute(
+        "SELECT id, name, tail, type, status, balance_fen FROM accounts"
+        " WHERE user_id = ? ORDER BY type = 'debit' DESC, tail",
+        (user_id,),
+    ).fetchall()
+    out: list[dict[str, Any]] = []
+    for row in rows:
+        kind = str(row["type"])
+        out.append({
+            "account_id": str(row["id"]),
+            "label": str(row["name"]) + " 尾号 " + str(row["tail"]),
+            "type": kind,
+            "can_save": kind == "debit" and str(row["status"]) == "active",
+            "balance_fen": int(row["balance_fen"]),
+            "balance_yuan": fen_to_yuan_str(int(row["balance_fen"])),
+        })
+    return out
+
+
 def _savings_goals(
     conn: sqlite3.Connection, user_id: str, *, limit: int = 5, with_plan: bool = True
 ) -> list[dict[str, Any]]:
-    """储蓄目标 + 可解释的计划（每期要存多少、缺口在哪、凭什么这么算）。"""
+    """储蓄计划 + 可解释的计划（每期划多少、下次什么时候、已经划了几笔）。
+
+    金额与状态全部来自 app/savings_view.savings_goal_view：这一页要回答的是「钱真的动了没有」，
+    所以视图不能自己拼一份「看起来对」的数字。
+    """
     rows = conn.execute(
         "SELECT * FROM savings_goals WHERE user_id = ? AND status != 'cancelled'"
         " ORDER BY created_ms DESC LIMIT ?",
@@ -47,37 +77,18 @@ def _savings_goals(
             " WHERE a.user_id = ? ORDER BY t.ts_ms DESC LIMIT 500",
             (user_id,),
         ).fetchall()
+    labels = {
+        str(row["id"]): str(row["name"]) + " 尾号 " + str(row["tail"])
+        for row in conn.execute(
+            "SELECT id, name, tail FROM accounts WHERE user_id = ?", (user_id,)
+        ).fetchall()
+    }
     out: list[dict[str, Any]] = []
     for row in rows:
+        goal = savings_view.savings_goal_view(conn, row)
+        goal["account_label"] = labels.get(goal["account_id"], "")
         rule_rows = proactive.rules_for_goal(conn, str(row["id"]))
-        goal = {
-            "goal_id": str(row["id"]),
-            "name": str(row["name"]),
-            "target_fen": int(row["target_fen"]),
-            "target_yuan": fen_to_yuan_str(int(row["target_fen"])),
-            "target_date": str(row["target_date"]),
-            "saved_fen": int(row["saved_fen"]),
-            "saved_yuan": fen_to_yuan_str(int(row["saved_fen"])),
-            "status": str(row["status"]),
-            "created_ms": int(row["created_ms"]),
-            "updated_ms": int(row["updated_ms"]),
-            # 监测开关由 monitor_rules.enabled 决定：后台节拍器只唤醒开了开关的目标，
-            # 所以界面必须把这个状态如实摆出来，不能让用户以为"存了就会自动盯"。
-            "monitor_rules": [
-                {
-                    "rule_id": str(rule["id"]),
-                    "kind": str(rule["kind"]),
-                    # 分成两列下发：前端画「预算 3000 元」还是「容差 5 个百分点」，
-                    # 不用再按 kind 猜单位。
-                    "threshold_fen": rule["threshold_fen"],
-                    "threshold_pp": rule["threshold_pp"],
-                    "period": str(rule["period"]),
-                    "enabled": bool(int(rule["enabled"])),
-                }
-                for rule in rule_rows
-            ],
-            "monitor_enabled": any(bool(int(rule["enabled"])) for rule in rule_rows),
-        }
+        goal["monitor_enabled"] = any(bool(int(rule["enabled"])) for rule in rule_rows)
         if with_plan:
             try:
                 goal["plan"] = proactive.compute_savings_plan(

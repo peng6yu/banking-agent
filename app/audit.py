@@ -70,6 +70,12 @@ EVENT_TYPES: Final[frozenset[str]] = frozenset(
         # 阶段 5 主动财务管理：目标、监测运行、提醒的生命周期
         "savings_goal.created",
         "savings_goal.updated",
+        # 每期真的从储蓄卡划一笔进目标（余额变了），以及取消时原路划回：
+        # 这是本项目里第一条「后台自动动钱」的路径，必须和预约转账一样逐笔可查。
+        "savings.deposited",
+        "savings.refunded",
+        # 到点但没划成（余额不够）：钱没动，可「为什么这期没攒上」必须留痕
+        "savings.skipped",
         "proactive.monitor_run",
         "proactive.alert_created",
         "proactive.alert_resolved",

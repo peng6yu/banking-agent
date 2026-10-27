@@ -15,6 +15,8 @@ from app.models import FactorProof
 #: 目标金额上限与工具层同一条线：1 亿元。超出就不是储蓄目标是资产迁移了。
 MAX_TARGET_FEN: int = 100_000_000_00
 TARGET_DATE_PATTERN = r"^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+#: 储蓄计划一期最多划 5,000 元（与 app/savings.MAX_PERIOD_FEN 同一条线）
+MAX_PERIOD_FEN: int = 500_000
 
 
 class CancelRequest(BaseModel):
@@ -46,6 +48,36 @@ class SavingsGoalCreate(BaseModel):
     budget_fen: int | None = Field(default=None, ge=1, le=MAX_TARGET_FEN)
     progress_tolerance: int | None = Field(default=None, ge=1, le=100)
     period: Literal["monthly", "weekly"] = "monthly"
+    # 给了卡 + 节奏就当场授权「每期自动划款」；不给就是只算数不动钱的计划
+    account_id: str | None = Field(default=None, max_length=40)
+    cadence: Literal["monthly", "weekly"] | None = None
+    auto_fen: int = Field(default=0, ge=0, le=MAX_PERIOD_FEN)
+
+
+class SavingsAuthorizeRequest(BaseModel):
+    """POST /api/savings/goals/{id}/authorize 的入参：授权每期自动划款。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    account_id: str = Field(min_length=1, max_length=40)
+    cadence: Literal["monthly", "weekly"] = "monthly"
+    auto_fen: int = Field(default=0, ge=0, le=MAX_PERIOD_FEN)
+
+
+class SavingsDepositRequest(BaseModel):
+    """POST /api/savings/goals/{id}/deposit 的入参；金额不传就按缺口自动算这一期。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    amount_fen: int | None = Field(default=None, ge=100, le=MAX_PERIOD_FEN)
+
+
+class SavingsRefundRequest(BaseModel):
+    """POST /api/savings/goals/{id}/refund 的入参：取消计划，钱原路划回。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    reason: str = Field(default="", max_length=60)
 
 
 class SavingsGoalUpdate(BaseModel):

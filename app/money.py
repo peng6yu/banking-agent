@@ -20,7 +20,9 @@ MAX_SINGLE_FEN: Final[int] = 100_000_000
 # 对外转账（转给张三这种）不是内部搬运：钱真的离开了净资产，必须算支出——所以它不在这个元组里。
 # 口径只写这一份：主动洞察（app/proactive.py）与账单工具（app/tools/bill.py）都从这里取，
 # 否则「总览结余 3,476」和「账单净结余 -1,311」就是两套定义各说各话。
-INTERNAL_CATEGORIES: Final[tuple[str, ...]] = ("账户互转", "理财")
+# 储蓄计划每期划进目标的那笔钱也不是支出：钱从储蓄卡进了自己的目标，净资产没变。
+# 同理取消目标划回时也不算收入。分类固定写「储蓄」，由 app/savings.py 落流水。
+INTERNAL_CATEGORIES: Final[tuple[str, ...]] = ("账户互转", "理财", "储蓄")
 
 # 「全部 / 所有钱」不给数字，由调用方替换成余额；money 层不许查库
 UNKNOWN_AMOUNT_FEN: Final[int] = -1

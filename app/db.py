@@ -57,6 +57,7 @@ TABLE_NAMES: Final[tuple[str, ...]] = (
     "fund_holdings",
     "scheduled_transfers",
     "savings_goals",
+    "savings_deposits",
     "monitor_rules",
     "proactive_alerts",
     "monitor_runs",
@@ -314,9 +315,12 @@ CREATE TABLE IF NOT EXISTS scheduled_transfers (
 CREATE INDEX IF NOT EXISTS idx_sched_due ON scheduled_transfers(status, due_ms);
 CREATE INDEX IF NOT EXISTS idx_sched_user ON scheduled_transfers(user_id, status);
 
--- 阶段 5 主动财务管理：目标 → 监测规则 → 提醒 → 监测运行记录。
--- 这四张表只存「计划与提醒」，不碰 accounts/transactions 的余额：主动服务可以算、
--- 可以提醒，但转账/申购/扣款一律不在这里发生。
+-- 阶段 5 主动财务管理：目标 → 每期划款 → 监测规则 → 提醒 → 监测运行记录。
+-- 「每期划款」是这一版才有的：储蓄目标不再只是算术，cadence 不为空且用户给过
+-- 一次性授权（authorized_ms）时，节拍器每期真的从储蓄卡划一笔进这个目标——
+-- 余额减少、saved_fen 增加、transactions 记一条 category='储蓄'（内部搬运，
+-- 不计支出）。取消目标把这笔钱原路划回，并写反向流水。流水与 deposits 同一事务，
+-- 任一步失败整体回滚，不会出现「余额少了但目标没加」。
 -- 金额仍用 INTEGER 分；target_date 是「日期」不是时刻，按本地日历日存 YYYY-MM-DD，
 -- 避免把一个 12-31 的截止日按 UTC 推成 1-1。
 CREATE TABLE IF NOT EXISTS savings_goals (
@@ -327,10 +331,46 @@ CREATE TABLE IF NOT EXISTS savings_goals (
   target_date TEXT NOT NULL,
   saved_fen   INTEGER NOT NULL DEFAULT 0 CHECK (saved_fen >= 0),
   status      TEXT NOT NULL CHECK (status IN ('active','achieved','cancelled')),
+  -- 每期自动划款的节奏；空串 = 不自动划（老目标与「只算不划」的目标）
+  cadence     TEXT NOT NULL DEFAULT '' CHECK (cadence IN ('', 'monthly', 'weekly')),
+  -- 从哪张卡划钱（只有借记卡能划）；空串 = 还没选卡，这时候绝不会自动划
+  account_id  TEXT NOT NULL DEFAULT '',
+  -- 每期固定金额（分）；0 = 按「缺口 ÷ 剩余期数」自动算
+  auto_fen    INTEGER NOT NULL DEFAULT 0 CHECK (auto_fen >= 0),
+  next_due_ms INTEGER NOT NULL DEFAULT 0,
+  -- 用户建计划时勾过「授权每期自动划款」的时刻；0 = 没授权，后台绝不自动划
+  authorized_ms INTEGER NOT NULL DEFAULT 0,
+  -- 空串 = 正常；'user' = 用户暂停；'insufficient' = 余额不够这期，已顺延
+  paused_reason TEXT NOT NULL DEFAULT '',
+  last_run_ms   INTEGER NOT NULL DEFAULT 0,
+  last_result   TEXT NOT NULL DEFAULT '',
+  refunded_fen  INTEGER NOT NULL DEFAULT 0 CHECK (refunded_fen >= 0),
+  closed_ms     INTEGER NOT NULL DEFAULT 0,
   created_ms  INTEGER NOT NULL,
   updated_ms  INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_savings_goals_user ON savings_goals(user_id, status);
+-- 每一期划款一行：既做幂等（goal_id + due_ms 唯一），也做「取出了哪几笔」的追溯。
+-- 目标上的 saved_fen 是这几行的和；取消时逐行标 refunded 并写反向流水。
+CREATE TABLE IF NOT EXISTS savings_deposits (
+  id           TEXT PRIMARY KEY,
+  goal_id      TEXT NOT NULL REFERENCES savings_goals(id),
+  account_id   TEXT NOT NULL REFERENCES accounts(id),
+  amount_fen   INTEGER NOT NULL CHECK (amount_fen > 0),
+  tx_id        TEXT NOT NULL REFERENCES transactions(id),
+  due_ms       INTEGER NOT NULL,
+  created_ms   INTEGER NOT NULL,
+  status       TEXT NOT NULL CHECK (status IN ('deposited','refunded')),
+  -- cycle = 每期自动划（同 (goal_id, due_ms) 只能一行，幂等靠它）；
+  -- manual = 用户自己点「现在存一笔」，同一天点三次就是三笔，不该被去重
+  source       TEXT NOT NULL DEFAULT 'cycle' CHECK (source IN ('cycle','manual')),
+  refund_tx_id TEXT,
+  refunded_ms  INTEGER NOT NULL DEFAULT 0
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_savings_dep_cycle
+  ON savings_deposits(goal_id, due_ms) WHERE source = 'cycle';
+CREATE INDEX IF NOT EXISTS idx_savings_dep_goal ON savings_deposits(goal_id, created_ms DESC);
+CREATE INDEX IF NOT EXISTS idx_savings_dep_open ON savings_deposits(goal_id, status);
 
 CREATE TABLE IF NOT EXISTS monitor_rules (
   id          TEXT PRIMARY KEY,
@@ -706,6 +746,17 @@ _ADDED_COLUMNS: Final[tuple[tuple[str, str, str], ...]] = (
     ("dag_runs", "meta_json", "TEXT NOT NULL DEFAULT '{}'"),
     # 自动监测的节流时间：同一时间窗内不重复跑，重启后也不会重复
     ("savings_goals", "last_monitored_ms", "INTEGER NOT NULL DEFAULT 0"),
+    # 每期自动划款（老库补列；新库在 SCHEMA_SQL 里带 CHECK）
+    ("savings_goals", "cadence", "TEXT NOT NULL DEFAULT ''"),
+    ("savings_goals", "account_id", "TEXT NOT NULL DEFAULT ''"),
+    ("savings_goals", "auto_fen", "INTEGER NOT NULL DEFAULT 0"),
+    ("savings_goals", "next_due_ms", "INTEGER NOT NULL DEFAULT 0"),
+    ("savings_goals", "authorized_ms", "INTEGER NOT NULL DEFAULT 0"),
+    ("savings_goals", "paused_reason", "TEXT NOT NULL DEFAULT ''"),
+    ("savings_goals", "last_run_ms", "INTEGER NOT NULL DEFAULT 0"),
+    ("savings_goals", "last_result", "TEXT NOT NULL DEFAULT ''"),
+    ("savings_goals", "refunded_fen", "INTEGER NOT NULL DEFAULT 0"),
+    ("savings_goals", "closed_ms", "INTEGER NOT NULL DEFAULT 0"),
     # 这次监测是谁触发的：manual=用户点按钮，scheduler=后台节拍器
     ("monitor_runs", "trigger", "TEXT NOT NULL DEFAULT 'manual'"),
     # 提醒的归属：储蓄目标提醒由 goal_id 推出用户；跨场景计划的提醒没有 goal_id，

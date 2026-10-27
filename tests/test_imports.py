@@ -55,6 +55,10 @@ LAYERS: dict[str, int] = {
     # 多因子挑战：服务端签发 + 校验 + 一次性，只依赖数据层
     "app.security.factors": 1,
     "app.funds": 2,
+    # 储蓄计划（每期真的划钱）：在 funds 之上只做"哪期划多少、划了记哪"，钱仍由 funds 改
+    "app.savings": 2,
+    # 储蓄计划的读模型（状态/该划多少/划款记录）：只读库，不写一行，供视图与 API 共用
+    "app.savings_view": 2,
     # 账户/卡通道闸门：出账前最后一道，只读 accounts/cards
     "app.channels": 2,
     # 主动财务管理（阶段 5）：确定性计算 + 目标/规则/提醒仓储，只依赖数据层
@@ -257,7 +261,7 @@ ALLOWED: dict[str, frozenset[str]] = {
     # 计划端点：计划/生日/预约/提醒，写操作只经用例层
     "app.api.plans_api": _deps("app.api.http app.api.schemas app.audit app.birthday app.clock app.db app.planner app.planner.assist app.planner.executor app.planner.intent app.planner.payment_guard app.planner.recover app.planner.ticker app.plans app.proactive app.use_cases"),
     # 钱端点：储蓄/订阅/理财/预警/手动记账/重置，写操作只经用例层
-    "app.api.money_api": _deps("app.api.chat_state app.api.http app.api.schemas app.audit app.clock app.db app.proactive app.use_cases app.views.transactions"),
+    "app.api.money_api": _deps("app.api.chat_state app.api.http app.api.schemas app.audit app.clock app.db app.proactive app.savings app.use_cases app.views.transactions"),
     # W4 之后 business.py 只剩路由：鉴权 + 开只读连接 + 调 app.views
     "app.api.business": _deps("app.api.routes app.db app.proactive app.views app.views.labels"),
     # 视图包本身只有再导出，不认识业务
@@ -267,7 +271,7 @@ ALLOWED: dict[str, frozenset[str]] = {
     # 金额与流水积木：账户、账单、趋势。读工具层的只读查询，不执行任何动作
     "app.views.money": _deps("app.funds app.money app.proactive app.subscriptions app.timefmt app.tools app.tools.base app.tools.bill app.tools.queries app.views.labels"),
     # 待办与队列积木：待确认卡、接管单、预约、提醒、监测。只读既有事实，不产生新裁决
-    "app.views.queue": _deps("app.clock app.handoffs app.money app.planner app.planner.ticker app.proactive app.timefmt app.tools app.tools.scheduled app.views.labels"),
+    "app.views.queue": _deps("app.clock app.handoffs app.money app.planner app.planner.ticker app.proactive app.savings_view app.timefmt app.tools app.tools.scheduled app.views.labels"),
     "app.views.overview": _deps("app.clock app.planner app.planner.assist app.proactive app.timefmt app.tools.base app.views.labels app.views.money app.views.queue"),
     "app.views.bill": _deps("app.clock app.proactive app.subscriptions app.timefmt app.tools app.tools.base app.tools.bill app.tools.bill_acks app.tools.queries app.views.labels app.views.money"),
     "app.views.management": _deps("app.clock app.memory app.money app.proactive app.subscriptions app.suitability app.timefmt app.tools.base app.views.money app.views.queue"),
@@ -305,13 +309,13 @@ ALLOWED: dict[str, frozenset[str]] = {
     "app.knowledge.retrieve": _deps("app.knowledge.models"),
     "app.llm": _deps("app.log app.script_mode"),
     "app.log": _deps("app.clock"),
-    "app.main": _deps("app.api app.api.business app.api.handoffs_api app.api.memory_api app.api.messages_api app.api.routes app.clock app.db app.llm app.planner app.planner.ticker app.security app.security.api_auth"),
+    "app.main": _deps("app.api app.api.business app.api.handoffs_api app.api.memory_api app.api.messages_api app.api.routes app.clock app.db app.llm app.planner app.planner.ticker app.security app.security.api_auth app.money"),
     "app.models": _deps(""),
     "app.money": _deps("app.clock"),
     "app.planner": _deps(""),
     "app.planner.due": _deps("app.clock"),
     "app.planner.split_plan": _deps("app.clock app.ids app.models"),
-    "app.planner.ticker": _deps("app.db app.plan_hooks app.plans app.proactive app.tools app.tools.scheduled"),
+    "app.planner.ticker": _deps("app.db app.plan_hooks app.plans app.proactive app.savings app.tools app.tools.scheduled"),
     "app.planner.dag": _deps("app.audit app.clock app.db app.ids app.models app.planner.card_actions app.planner.due app.planner.intent app.planner.refusal app.planner.split_plan app.planner.subscription app.tools.base app.tools.registry"),
     "app.planner.events": _deps("app.models app.money app.planner.state app.policy.engine app.subscriptions"),
     "app.planner.executor": _deps("app.audit app.clock app.db app.funds app.models app.money app.planner app.planner.conflict app.planner.dag app.planner.events app.planner.recover app.planner.runner app.planner.state app.policy.engine app.policy.rules app.security app.security.breaker app.security.factors app.security.injection app.tools app.tools.base"),
@@ -334,6 +338,9 @@ ALLOWED: dict[str, frozenset[str]] = {
     "app.planner.subscription": _deps("app.clock app.planner.intent_schema"),
     "app.policy": _deps("app.policy.engine app.policy.rules"),
     "app.proactive": _deps("app.audit app.clock app.db app.ids app.log app.money app.timefmt"),
+    # 储蓄计划：周期/金额纯算 + 借 funds 出账，不碰模型、不碰策略层
+    "app.savings": _deps("app.audit app.clock app.db app.funds app.ids app.money app.savings_view"),
+    "app.savings_view": _deps("app.clock app.money app.timefmt"),
     "app.policy.engine": _deps("app.clock app.models app.money app.policy.rules"),
     "app.policy.rules": _deps("app.models app.money"),
     # 提醒时间：纯函数，没有 app 内依赖
@@ -400,7 +407,7 @@ ALLOWED: dict[str, frozenset[str]] = {
     "app.use_cases.plans": _deps("app.birthday app.clock app.db app.messages app.plans app.proactive app.use_cases.base"),
     "app.use_cases.proactive": _deps("app.clock app.proactive app.use_cases.base"),
     "app.use_cases.reminders": _deps("app.messages app.planner app.planner.assist app.proactive app.use_cases.base"),
-    "app.use_cases.savings": _deps("app.clock app.messages app.proactive app.use_cases.base"),
+    "app.use_cases.savings": _deps("app.clock app.messages app.proactive app.savings app.use_cases.base"),
     "app.use_cases.scheduled": _deps("app.tools.scheduled app.use_cases.base"),
     "app.use_cases.subscriptions": _deps("app.proactive app.subscriptions app.use_cases.base"),
     "app.use_cases.transactions": _deps("app.audit app.clock app.ids app.messages app.money app.proactive app.tools app.tools.bill app.use_cases.base"),

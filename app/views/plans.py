@@ -17,6 +17,7 @@ from app.tools.base import primary_account
 
 from app.views.queue import (
     _alerts,
+    _funding_accounts,
     _monitor_runs,
     _pending_confirmations,
     _savings_goals,
@@ -58,6 +59,8 @@ def plans_view(conn: sqlite3.Connection) -> dict[str, Any]:
             {"state": "done", "label": "任务已完成", "meaning": "有明确的执行结果和审计记录。"},
             {"state": "failed", "label": "已失败/已取消", "meaning": "失败或取消都留痕，可以重试或重新发起。"},
         ],
+        # 新建/授权储蓄计划时要选一张卡：只列用户自己的卡，前端按 can_save 过滤。
+        "funding_accounts": _funding_accounts(conn, user_id),
         "saved_plans": {
             "items": goals,
             "count": len(goals),

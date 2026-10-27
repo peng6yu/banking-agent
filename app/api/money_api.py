@@ -20,7 +20,10 @@ from app.api.schemas import (
     PlanUpdate,
     ReminderCreate,
     ResetRequest,
+    SavingsAuthorizeRequest,
+    SavingsDepositRequest,
     SavingsGoalCreate,
+    SavingsRefundRequest,
     ScheduledChallengeRequest,
     ScheduledVerifyRequest,
     SavingsGoalUpdate,
@@ -33,6 +36,7 @@ from app.clock import BankError, NotFound, ValidationError
 from app import audit, clock, db
 from app.api.http import payload
 import app.proactive as proactive
+import app.savings as savings
 import app.use_cases as use_cases
 from app.views.transactions import transactions_view
 
@@ -58,6 +62,61 @@ async def reset_demo(request: ResetRequest | None = None) -> dict[str, Any]:
 async def create_savings_goal(request: SavingsGoalCreate) -> dict[str, Any]:
     """建储蓄目标：同时落一条进度监测规则，给了预算再加预算规则。写审计。"""
     return payload(use_cases.savings.goal_create(**request.model_dump()))
+
+
+@router.get("/api/savings/goals/{goal_id}")
+async def get_savings_goal(goal_id: str) -> dict[str, Any]:
+    """单个计划的全貌：状态、节奏、这一期划多少、下次什么时候、已经划了几笔。"""
+    with db.open_conn() as conn:
+        row = conn.execute("SELECT * FROM savings_goals WHERE id = ?", (str(goal_id),)).fetchone()
+        if row is None or str(row["user_id"]) != proactive.default_user_id(conn):
+            raise NotFound()
+        goal = savings.savings_goal_view(conn, row)
+    return {"ok": True, "goal": goal}
+
+
+@router.post("/api/savings/goals/{goal_id}/authorize")
+async def authorize_savings_goal(
+    goal_id: str, request: SavingsAuthorizeRequest
+) -> dict[str, Any]:
+    """授权每期自动划款：从哪张储蓄卡、什么节奏、每期多少（0 = 按缺口自动算）。"""
+    return payload(use_cases.savings.goal_authorize(goal_id, **request.model_dump()))
+
+
+@router.post("/api/savings/goals/{goal_id}/deposit")
+async def deposit_savings_goal(
+    goal_id: str, request: SavingsDepositRequest | None = None
+) -> dict[str, Any]:
+    """现在存一笔：真的从储蓄卡划走，流水里留一条「内部搬运 · 目标名」。"""
+    amount = request.amount_fen if request is not None else None
+    return payload(use_cases.savings.goal_deposit(goal_id, amount_fen=amount))
+
+
+@router.post("/api/savings/goals/{goal_id}/refund")
+async def refund_savings_goal(
+    goal_id: str, request: SavingsRefundRequest | None = None
+) -> dict[str, Any]:
+    """取消计划：把划过的钱一次性原路划回储蓄卡，然后关掉这个计划。"""
+    reason = request.reason if request is not None else ""
+    return payload(use_cases.savings.goal_refund(goal_id, reason=reason))
+
+
+@router.post("/api/savings/goals/{goal_id}/pause")
+async def pause_savings_goal(goal_id: str) -> dict[str, Any]:
+    """暂停：不再按周期划，已经划进去的钱原地留着。"""
+    return payload(use_cases.savings.goal_pause(goal_id))
+
+
+@router.post("/api/savings/goals/{goal_id}/resume")
+async def resume_savings_goal(goal_id: str) -> dict[str, Any]:
+    """继续：下一期照旧划，不补停掉的那几期。"""
+    return payload(use_cases.savings.goal_resume(goal_id))
+
+
+@router.post("/api/savings/run")
+async def run_savings_cycle() -> dict[str, Any]:
+    """手动把到期的计划跑一遍（后台节拍器进不动时用这个验证）。"""
+    return payload(use_cases.savings.run_due_now())
 
 
 @router.get("/api/savings/goals")

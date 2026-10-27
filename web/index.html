@@ -232,7 +232,7 @@
       <div class="card">
         <div class="card-head"><h3>你的计划</h3><span class="spacer"></span><span class="tag" id="plan-goal-tag">—</span></div>
         <div class="pf-block">
-          <div class="pf-title">储蓄目标 <span class="pf-sub">后端持久化，可跨天推进</span></div>
+          <div class="pf-title">我的储蓄计划 <span class="pf-sub">每期真的从卡里划一笔；取消就把划过的钱原路退回</span></div>
           <div id="plan-goals"></div>
         </div>
         <div class="pf-block">
@@ -250,6 +250,47 @@
           <div class="card-note">按账单记录里的下次扣费日期推算，只算已持久化的订阅；打开开关才会自动跑。</div>
         </div>
       </div>
+
+      <details class="panel" id="panel-new-savings">
+        <summary class="panel-head"><h2>+ 新建储蓄计划</h2><span class="spacer"></span>
+          <span class="panel-badge">每期真的划钱</span>
+        </summary>
+        <div class="panel-body">
+          <form id="plan-savings-form" class="pf-form" autocomplete="off">
+            <div class="pf-row">
+              <label class="pf-field"><span class="field-label">计划名</span>
+                <input id="plan-savings-name" class="pf-in" type="text" maxlength="40" placeholder="例如：换一台相机" />
+              </label>
+              <label class="pf-field"><span class="field-label">目标金额（元）</span>
+                <input id="plan-savings-target" class="pf-in" type="text" inputmode="decimal" placeholder="6000" />
+              </label>
+              <label class="pf-field"><span class="field-label">目标日期</span>
+                <input id="plan-savings-date" class="pf-in" type="date" />
+              </label>
+            </div>
+            <div class="pf-row">
+              <label class="pf-field"><span class="field-label">从哪张卡划</span>
+                <select id="plan-savings-account" class="pf-in"></select>
+              </label>
+              <label class="pf-field"><span class="field-label">节奏</span>
+                <select id="plan-savings-cadence" class="pf-in">
+                  <option value="monthly">每月</option>
+                  <option value="weekly">每周</option>
+                </select>
+              </label>
+              <label class="pf-field"><span class="field-label">每期划多少（元，留空=自动算）</span>
+                <input id="plan-savings-auto" class="pf-in" type="text" inputmode="decimal" placeholder="自动" />
+              </label>
+            </div>
+            <label class="pf-check"><input id="plan-savings-auth" type="checkbox" checked /> 授权每期自动从这张卡划走（不勾就先只存计划，不划钱）</label>
+            <div class="pf-row">
+              <button id="plan-savings-submit" class="btn btn-green" type="submit">建这个计划</button>
+            </div>
+            <div class="pf-hint" id="plan-savings-hint"></div>
+            <div class="card-note">勾了授权，每期（每月按 30 天、每周按 7 天）就从这张储蓄卡真的划走一笔：余额减少、目标里增加、流水里留一条「储蓄计划 · 计划名」，不算支出。取消计划时把划过的钱一次性原路退回。一期最多 5,000 元。</div>
+          </form>
+        </div>
+      </details>
 
       <div class="card">
         <div class="card-head"><h3>提醒</h3><span class="spacer"></span><span class="tag" id="plan-alert-tag">—</span></div>
@@ -353,7 +394,7 @@
 
       <!-- 演练台默认折叠：它是演示与排障用的，不该和「你的计划」抢同一屏。 -->
       <details class="panel lv-unknown" id="panel-proactive">
-        <summary class="panel-head"><h2>主动财务演练（模拟数据，演示用）</h2><span class="spacer"></span>
+        <summary class="panel-head"><h2>目标明细与演练台（改目标在这里，模拟数据只在最下面）</h2><span class="spacer"></span>
           <span class="panel-badge" data-role="badge">未加载</span>
         </summary>
         <div class="panel-body" data-role="body">
@@ -361,7 +402,7 @@
             <button id="btn-pf-refresh" class="btn btn-mini" type="button">刷新</button>
             <button id="btn-pf-monitor" class="btn btn-mini btn-green" type="button">立即运行监测（手动触发）</button>
           </div>
-          <div class="pf-note">所有数字都来自后端接口：金额在后端用整数分计算，模型只做解释，这里只做展示换算。后台节拍器只会推进你打开了监测开关的目标（默认 6 小时一次，只写提醒、不动钱）；没打开开关的目标只能在这里手动跑。</div>
+          <div class="pf-note">所有数字都来自后端接口：金额在后端用整数分计算，模型只做解释，这里只做展示换算。「已存起点」只在你手工记账时用；真的要往里加钱，点储蓄卡上的「现在存一笔」，那笔会从卡里划走并留流水。后台节拍器只会推进你打开了监测开关的目标（默认 6 小时一次，只写提醒、不动钱）；没打开开关的目标只能在这里手动跑。</div>
 
           <div class="pf-block">
             <div class="pf-title">储蓄目标 <span class="pf-sub">元为单位输入，提交时用整数运算换算成分</span></div>
@@ -373,7 +414,7 @@
                 <label class="pf-field"><span class="field-label">目标金额（元）</span>
                   <input id="pf-target-yuan" class="pf-in" type="text" inputmode="decimal" placeholder="30000.00" />
                 </label>
-                <label class="pf-field"><span class="field-label">已存（元）</span>
+                <label class="pf-field"><span class="field-label">已存起点（元，不是划款）</span>
                   <input id="pf-saved-yuan" class="pf-in" type="text" inputmode="decimal" placeholder="5000.00" />
                 </label>
                 <label class="pf-field"><span class="field-label">目标日期</span>
@@ -527,6 +568,7 @@
   <script src="/static/js/82-view-bill.js"></script>
   <script src="/static/js/83-view-ledger.js"></script>
   <script src="/static/js/84-view-plans.js"></script>
+  <script src="/static/js/85-view-savings.js"></script>
   <script src="/static/js/86-view-birthday.js"></script>
   <script src="/static/js/88-view-monitor.js"></script>
   <script src="/static/js/90-view-manage.js"></script>
