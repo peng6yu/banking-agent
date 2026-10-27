@@ -1,10 +1,10 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-10-27T10:23:33+08:00",
+  "generated_at": "2026-10-27T10:32:15+08:00",
   "git": {
-    "head": "81ec8dd506a0c468f0ca31c1569e5f792fd97f4c",
-    "head_short": "81ec8dd",
-    "subject": "refactor(web): 一行只留主路径，其余动作收进这一行的「操作」",
+    "head": "a62bf8e3646e8e390ae517769641d4fa6db0a09c",
+    "head_short": "a62bf8e",
+    "subject": "fix(web): 给疑似订阅定性后，在业务管理页当场说一句",
     "branch": "main",
     "dirty": false,
     "changed_paths": 0
@@ -111,7 +111,7 @@
     "passed": 1811,
     "failed": 0,
     "skipped": 4,
-    "duration_s": 20.77,
+    "duration_s": 20.83,
     "log": "tmp/pytest_final.log",
     "parsed": true
   },
