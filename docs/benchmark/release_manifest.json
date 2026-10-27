@@ -1,10 +1,10 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-10-27T13:50:12+08:00",
+  "generated_at": "2026-10-27T23:03:12+08:00",
   "git": {
-    "head": "a6c5823dc16e060d525e1d431811c1a49e1f35f3",
-    "head_short": "a6c5823",
-    "subject": "feat(savings): 计划每期真的从卡里划钱，取消原路划回",
+    "head": "aa1b088e21800927651eb69b10d7f9fada55c110",
+    "head_short": "aa1b088",
+    "subject": "冷启动可跑与评委一页纸：make run 支持 PORT/HOST、A4 单页提纲",
     "branch": "main",
     "dirty": false,
     "changed_paths": 0
@@ -113,7 +113,7 @@
     "passed": 1857,
     "failed": 0,
     "skipped": 4,
-    "duration_s": 19.48,
+    "duration_s": 18.95,
     "log": "tmp/pytest_final.log",
     "parsed": true
   },

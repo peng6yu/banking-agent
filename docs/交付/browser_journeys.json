@@ -1,11 +1,11 @@
 {
-  "started_at": "2026-10-27T22:25:43+08:00",
-  "demo_db_sha256_before": "c08f7a528b8e14967b8dc23fd48344d43e49f129c0fbecd4472627140bf1def8",
+  "started_at": "2026-10-27T23:03:39+08:00",
+  "demo_db_sha256_before": "cef8d91767fab318866ddab1d29cb03365f135b78711df88674187e90e6f7462",
   "sandbox": "tmp/ui_journey_sandbox",
   "journeys": {
     "j1": {
       "status": "pass",
-      "session_id": "s_9995fd54",
+      "session_id": "s_a1c135d0",
       "balance_before_fen": 1286050,
       "balance_after_fen": 1276050,
       "node_states": {
@@ -30,7 +30,7 @@
     },
     "j2": {
       "status": "pass",
-      "session_id": "s_ae572e90",
+      "session_id": "s_3827b226",
       "challenges": 2,
       "balance_before_fen": 1286050,
       "balance_after_fen": 1086050,
@@ -57,7 +57,7 @@
     },
     "j4": {
       "status": "pass",
-      "plan_id": "pl_3629ecba",
+      "plan_id": "pl_d3a48ba4",
       "birthday": "2026-11-26",
       "budget_fen": 100000,
       "items": [
@@ -73,10 +73,10 @@
     },
     "j5": {
       "status": "pass",
-      "goal_id": "sg_50a901cb",
-      "alert_id": "pa_980c5e06",
+      "goal_id": "sg_46e393dc",
+      "alert_id": "pa_c1b317fa",
       "alert_reason": "cashflow_insufficient",
-      "alert_text_before": "结余不足以支撑目标\n待处理\n按最近几个月的平均收入与必要支出，每月可结余 9,859.20 元，低于目标要求的 40,000.00 元；建议延长目标日期、下调目标金额，或先压缩可选消费。\n相关计划\n明年装修存 12 万\n触发时间\n2026-10-27 22:25\n处理这条提醒",
+      "alert_text_before": "结余不足以支撑目标\n待处理\n按最近几个月的平均收入与必要支出，每月可结余 9,859.20 元，低于目标要求的 40,000.00 元；建议延长目标日期、下调目标金额，或先压缩可选消费。\n相关计划\n明年装修存 12 万\n触发时间\n2026-10-27 23:03\n处理这条提醒",
       "shots": [
         "docs/交付/截图/信息架构/journey_05_savings_alert.png",
         "docs/交付/截图/信息架构/journey_05_alert_resolved.png"
@@ -84,18 +84,18 @@
     },
     "j6": {
       "status": "pass",
-      "session_id": "s_5ad5597a",
+      "session_id": "s_2079648c",
       "picked_index": 1,
       "candidates": 2,
       "server_payee_tail": "6620",
       "server_amount_yuan": "500.00",
-      "confirmation_id": "cf_f17023f7",
+      "confirmation_id": "cf_1e637f90",
       "balance_unchanged": true,
       "shot": "docs/交付/截图/信息架构/journey_06_candidate_click.png"
     },
     "j7": {
       "status": "pass",
-      "session_id": "s_dc578441",
+      "session_id": "s_069d44e3",
       "server_status": "rejected",
       "audit_events": [
         "confirm.rejected",
@@ -114,7 +114,7 @@
       "status": "pass",
       "attempt": 1,
       "prompt": "我们 AA 一下，300 元分摊给张三和李静，一人一半",
-      "session_id": "s_a944346c",
+      "session_id": "s_48eb3545",
       "balance_unchanged_fen": 1286050,
       "node_states": {
         "resolve_payee": "pending",
@@ -161,9 +161,9 @@
       "shot": "docs/交付/截图/信息架构/journey_03_aa_blocked.png"
     }
   },
-  "demo_db_sha256_after": "c08f7a528b8e14967b8dc23fd48344d43e49f129c0fbecd4472627140bf1def8",
+  "demo_db_sha256_after": "cef8d91767fab318866ddab1d29cb03365f135b78711df88674187e90e6f7462",
   "demo_db_unchanged": true,
-  "finished_at": "2026-10-27T22:26:32+08:00",
+  "finished_at": "2026-10-27T23:04:29+08:00",
   "failures": [],
   "status": "pass"
 }
