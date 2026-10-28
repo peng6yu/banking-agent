@@ -6,6 +6,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 DATA = json.loads((ROOT / "tmp/cues.json").read_text())
 SHIFT, CUES = DATA["shift"], DATA["cues"]
+SCALE = float(DATA.get("scale", 1.0))  # 与 mux_final.py 同一个变速系数
 SILENT = ROOT / "tmp/final_silent.mp4"
 AUDIO = ROOT / "tmp/final_audio.m4a"
 OUT = ROOT / "tmp/final_voice_subs.mp4"
@@ -46,8 +47,8 @@ def ts(sec: float) -> str:
 filters, srt, n = [], [], 0
 for cue in CUES:
     segs = split(cue["text"])
-    t0 = cue["start"] + SHIFT
-    t1 = max(t0 + 1.0, cue["end"] + SHIFT)
+    t0 = (cue["start"] + SHIFT) / SCALE
+    t1 = max(t0 + 1.0, (cue["end"] + SHIFT) / SCALE)
     total = sum(len(s) for s in segs) or 1
     cur = t0
     for seg in segs:
