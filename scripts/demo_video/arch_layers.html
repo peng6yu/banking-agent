@@ -1,0 +1,259 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<title>银行 AI 智能体 · 系统分层总览</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: #f4f6fb; color: #0f172a;
+    font-family: "Microsoft YaHei", "PingFang SC", "Noto Sans CJK SC", system-ui, -apple-system, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { width: 1340px; margin: 0 auto; padding: 26px 0 60px; }
+  header {
+    background: linear-gradient(120deg, #1e3a8a 0%, #2563eb 62%, #3b82f6 100%);
+    color: #fff; border-radius: 18px; padding: 22px 30px;
+    display: flex; align-items: center; justify-content: space-between;
+    box-shadow: 0 8px 24px rgba(37, 99, 235, .22);
+  }
+  header h1 { margin: 0; font-size: 30px; letter-spacing: .5px; }
+  header p { margin: 8px 0 0; font-size: 16px; opacity: .92; }
+  .stamp {
+    text-align: right; font-size: 13px; line-height: 1.7; opacity: .92;
+    border-left: 1px solid rgba(255,255,255,.35); padding-left: 18px;
+  }
+  .stamp code { font-family: Consolas, "Courier New", monospace; }
+
+  .selfcheck { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+  .sc { background: #fff; border: 1px solid #e4e9f2; border-radius: 14px; padding: 14px 18px;
+        box-shadow: 0 1px 2px rgba(15, 23, 42, .04); }
+  .sc > span { font-size: 12.5px; color: #64748b; letter-spacing: 1px; }
+  .sc b { display: block; font-size: 22px; margin: 4px 0 6px; color: #0f172a; }
+  .sc b.ok { color: #16a34a; }
+  .sc p { margin: 0; font-size: 13px; color: #475569; line-height: 1.55; }
+
+  h2.sec { font-size: 19px; margin: 30px 0 12px; color: #1e293b; display: flex; align-items: center; gap: 10px; }
+  h2.sec .n {
+    background: #0f172a; color: #fff; border-radius: 7px; padding: 2px 10px;
+    font-size: 14px; font-weight: 700; letter-spacing: 1px;
+  }
+  h2.sec small { font-weight: 400; color: #64748b; font-size: 13px; }
+
+  .layers { display: flex; flex-direction: column; gap: 10px; }
+  .layer {
+    background: #fff; border: 1px solid #e4e9f2; border-radius: 14px;
+    padding: 13px 20px; display: grid; grid-template-columns: 62px 1fr 300px;
+    align-items: center; gap: 16px;
+    box-shadow: 0 1px 2px rgba(15, 23, 42, .04);
+  }
+  .badge {
+    width: 46px; height: 46px; border-radius: 13px; display: grid; place-items: center;
+    color: #fff; font-size: 21px; font-weight: 700;
+  }
+  .l1 .badge { background: #2563eb; } .l2 .badge { background: #f59e0b; }
+  .l3 .badge { background: #dc2626; } .l4 .badge { background: #16a34a; }
+  .l5 .badge { background: #7c3aed; }
+  .lname { font-size: 19px; font-weight: 700; }
+  .lname span { font-size: 13px; font-weight: 400; color: #64748b; margin-left: 10px; }
+  .ldesc { font-size: 14px; color: #475569; margin-top: 3px; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; }
+  .chip {
+    background: #f1f5f9; border: 1px solid #e2e8f0; color: #334155;
+    border-radius: 7px; padding: 3px 9px; font-size: 12px;
+    font-family: Consolas, "Courier New", monospace;
+  }
+  .cut {
+    grid-column: 1 / -1; margin-top: -2px; font-size: 12.5px; color: #b45309;
+    background: #fffbeb; border: 1px dashed #fcd34d; border-radius: 9px; padding: 7px 12px;
+  }
+  .cut b { color: #92400e; }
+
+  .flows { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+  .flow {
+    background: #fff; border: 1px solid #e4e9f2; border-radius: 14px; padding: 16px 18px;
+    box-shadow: 0 1px 2px rgba(15, 23, 42, .04);
+  }
+  .flow h3 { margin: 0 0 8px; font-size: 17px; display: flex; align-items: center; gap: 8px; }
+  .arrow { font-size: 19px; }
+  .f-down .arrow { color: #2563eb; } .f-auth .arrow { color: #dc2626; } .f-up .arrow { color: #16a34a; }
+  .flow p { margin: 0; font-size: 13.5px; color: #475569; line-height: 1.75; }
+  .flow code { font-family: Consolas, "Courier New", monospace; color: #0f172a; background: #f1f5f9; padding: 0 4px; border-radius: 4px; }
+  .nums {
+    margin-top: 14px; display: grid; grid-template-columns: repeat(7, 1fr); gap: 10px;
+  }
+  .num { background: #0f172a; color: #fff; border-radius: 12px; padding: 11px 6px; text-align: center; }
+  .num b { display: block; font-size: 22px; letter-spacing: .5px; }
+  .num span { font-size: 11.5px; opacity: .78; }
+
+  table.map { width: 100%; border-collapse: separate; border-spacing: 0; background: #fff;
+    border: 1px solid #e4e9f2; border-radius: 14px; overflow: hidden; box-shadow: 0 1px 2px rgba(15,23,42,.04); }
+  table.map th { background: #f8fafc; font-size: 14px; color: #334155; text-align: left; padding: 11px 16px; border-bottom: 1px solid #e4e9f2; }
+  table.map td { padding: 10px 16px; font-size: 14px; border-bottom: 1px solid #f1f5f9; }
+  table.map tr:last-child td { border-bottom: none; }
+  table.map td.k { font-weight: 700; width: 190px; }
+  table.map td.v { width: 210px; }
+  table.map td.d { color: #475569; }
+  .tag { display: inline-block; border-radius: 6px; padding: 2px 9px; font-size: 12.5px; color: #fff; }
+  .t2 { background: #f59e0b; } .t3 { background: #dc2626; } .t5 { background: #7c3aed; }
+
+  .code-layers { display: flex; gap: 10px; align-items: stretch; }
+  .cl {
+    flex: 1; background: #fff; border: 1px solid #e4e9f2; border-radius: 12px; padding: 12px 14px;
+    position: relative; box-shadow: 0 1px 2px rgba(15,23,42,.04);
+  }
+  .cl b { font-size: 16px; color: #1e293b; }
+  .cl p { margin: 6px 0 0; font-size: 12.5px; color: #64748b; line-height: 1.6; }
+  .cl .lv { font-size: 12px; color: #2563eb; font-weight: 700; letter-spacing: 1px; }
+  .cl:not(:last-child)::after {
+    content: "↓"; position: absolute; right: -11px; top: 50%; transform: translateY(-50%);
+    color: #94a3b8; font-size: 15px; z-index: 2;
+  }
+  .guard {
+    margin-top: 12px; background: #fff; border: 1px solid #e4e9f2; border-left: 4px solid #16a34a;
+    border-radius: 12px; padding: 12px 16px; font-size: 13.5px; color: #334155;
+  }
+  .guard code { font-family: Consolas, "Courier New", monospace; color: #0f172a; background: #f1f5f9; padding: 0 5px; border-radius: 4px; }
+  footer { margin-top: 26px; font-size: 12.5px; color: #94a3b8; text-align: center; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <div>
+      <h1>系统分层总览</h1>
+      <p>一次请求从上往下穿过 <b>5 层</b>，外加一条贯穿全链路的审计哈希链；只有裁决层能决定放行，只有执行层能动钱。</p>
+    </div>
+    <div class="stamp">
+      口径来源<br />
+      <code>docs/01_架构与数据流.md</code><br />
+      <code>docs/架构图.mmd</code> · <code>tests/test_imports.py</code>
+    </div>
+  </header>
+
+  <h2 class="sec"><span class="n">A</span> 运行时五层 <small>自上而下：请求进得来，钱出不去，中间那道闸门是纯代码</small></h2>
+  <div class="layers">
+    <div class="layer l1">
+      <div class="badge">①</div>
+      <div>
+        <div class="lname">接入层<span>浏览器 + HTTP 入口</span></div>
+        <div class="ldesc">决策剧场前端 + API 分组模块；<code style="font-family:Consolas,monospace">/api/*</code> 的第一道门是访问令牌</div>
+      </div>
+      <div class="chips">
+        <span class="chip">web/index.html</span><span class="chip">app/api/*</span><span class="chip">9 个分组模块</span><span class="chip">58 条路径</span>
+      </div>
+    </div>
+    <div class="layer l2">
+      <div class="badge">②</div>
+      <div>
+        <div class="lname">认知层 · 不可信区<span>LLM 只负责提申请，不碰钱</span></div>
+        <div class="ldesc">外部字符串先降级成数据；模型只产出结构化槽位与步骤图，产出的是 Action，不是代码也不是金额指令</div>
+      </div>
+      <div class="chips">
+        <span class="chip">security/envelope.py</span><span class="chip">planner/intent.py</span><span class="chip">planner/dag.py</span><span class="chip">9 个意图模板</span>
+      </div>
+    </div>
+    <div class="layer l3">
+      <div class="badge">③</div>
+      <div>
+        <div class="lname">裁决层 · 确定性闸门<span>不调模型、不读环境、不取时钟</span></div>
+        <div class="ldesc">纯函数裁决：规则未命中默认红灯；确认与多因子都在这里签发能力令牌；连续越界直接熔断</div>
+      </div>
+      <div class="chips">
+        <span class="chip">security/injection.py</span><span class="chip">policy/engine.py</span><span class="chip">security/token.py</span><span class="chip">security/breaker.py</span><span class="chip">R01–R13</span>
+      </div>
+    </div>
+    <div class="layer l4">
+      <div class="badge">④</div>
+      <div>
+        <div class="lname">执行层 · 只认令牌<span>自然语言进不来</span></div>
+        <div class="ldesc">工具网关按工具名与参数哈希校验令牌；资金一律两阶段：先预授权 hold，确认后 commit</div>
+      </div>
+      <div class="chips">
+        <span class="chip">tools/registry.py</span><span class="chip">funds.py（hold→commit）</span><span class="chip">35 个工具</span><span class="chip">SQLite 37 张表 + WAL</span>
+      </div>
+    </div>
+    <div class="layer l5">
+      <div class="badge">⑤</div>
+      <div>
+        <div class="lname">账本与证据层<span>每一步都留痕，可拉取、可校验</span></div>
+        <div class="ldesc">每次裁决、每次放行、每次落账都 append 一条审计；治理页把同一份数据的历史视图摊开给人看</div>
+      </div>
+      <div class="chips">
+        <span class="chip">audit.py（append-only）</span><span class="chip">/api/audit</span><span class="chip">/api/audit/verify</span>
+      </div>
+    </div>
+    <div class="cut">
+      <b>横切五层的一条链：</b>审计哈希链 <code style="font-family:Consolas,monospace">app/audit.py</code> —— 每条哈希把「前一条哈希 + 时间戳 + 事件类型 + 载荷」四元组一起算 sha256；改内容或改时间都会断链，断链即篡改。
+    </div>
+  </div>
+
+  <h2 class="sec"><span class="n">B</span> 三条线，分得清清楚楚 <small>数据往下走 · 授权往下发 · 证据往上回</small></h2>
+  <div class="flows">
+    <div class="flow f-down">
+      <h3><span class="arrow">↓</span> 数据流</h3>
+      <p>用户原话 → <code>envelope.wrap()</code> 标来源、外部字段标 <code>untrusted</code> → 意图槽位 → DAG 参数 → 只填白名单字段，模型说什么都跳不过这道过滤。</p>
+    </div>
+    <div class="flow f-auth">
+      <h3><span class="arrow">↓</span> 授权流</h3>
+      <p>裁决层判绿直接放行；判黄先出确认卡；判红要人脸＋短信＋动态口令。通过后签发能力令牌，工具名、参数哈希、金额、主体、<b>120 秒</b>有效期、一次性 nonce 全部冻进签名。</p>
+    </div>
+    <div class="flow f-up">
+      <h3><span class="arrow">↑</span> 证据流</h3>
+      <p>裁决、放行、落账各写一条审计，append-only；<code>/api/audit</code> 拉历史，<code>/api/audit/verify</code> 校链。拿到库权限的人改库也躲不过链。</p>
+    </div>
+  </div>
+  <div class="nums">
+    <div class="num"><b>59</b><span>条 API 路径</span></div>
+    <div class="num"><b>35</b><span>个工具</span></div>
+    <div class="num"><b>R01–R13</b><span>条裁决规则</span></div>
+    <div class="num"><b>9</b><span>个意图模板</span></div>
+    <div class="num"><b>37</b><span>张数据表</span></div>
+    <div class="num"><b>1857</b><span>条测试</span></div>
+    <div class="num"><b>43</b><span>条红队用例</span></div>
+  </div>
+
+  <h2 class="sec"><span class="n">C</span> 你在界面上看到的，就是这几层 <small>右栏五块 ↔ 分层对照</small></h2>
+  <table class="map">
+    <tr><th>界面上的块</th><th>对应哪一层</th><th>它替你看住了什么</th></tr>
+    <tr><td class="k">意图解析</td><td class="v"><span class="tag t2">② 认知层</span></td><td class="d">模型把自然语言拆成结构化槽位，缺什么就反问什么</td></tr>
+    <tr><td class="k">任务计划</td><td class="v"><span class="tag t2">② 认知层</span></td><td class="d">认知层排出的 DAG：这一步做完才轮到下一步</td></tr>
+    <tr><td class="k">权限裁决</td><td class="v"><span class="tag t3">③ 裁决层</span></td><td class="d">绿/黄/红三色与命中的规则编号；没命中规则默认红灯</td></tr>
+    <tr><td class="k">多因子验证</td><td class="v"><span class="tag t3">③ 裁决层</span></td><td class="d">能力令牌签发前的三样因子，服务端下发与校验</td></tr>
+    <tr><td class="k">审计链</td><td class="v"><span class="tag t5">⑤ 证据层</span></td><td class="d">同一份数据的历史视图：拉取、校验、发现断链</td></tr>
+  </table>
+
+  <h2 class="sec"><span class="n">D</span> 代码本身也分层 <small>模块依赖只能往下，反向要倒置</small></h2>
+  <div class="code-layers">
+    <div class="cl"><span class="lv">L5</span><b>接口 / 视图</b><p>app/api、app/views：解析请求、装配视图；不写 SQL、不直调工具</p></div>
+    <div class="cl"><span class="lv">L4</span><b>用例</b><p>app/use_cases：一个写操作 = 一个事务 + 一个 Outcome</p></div>
+    <div class="cl"><span class="lv">L3</span><b>领域</b><p>app/plans、app/funds、app/proactive… 业务规则与表读写</p></div>
+    <div class="cl"><span class="lv">L2</span><b>仓储 / 策略</b><p>app/handoff_store、app/policy：纯函数裁决与状态迁移</p></div>
+    <div class="cl"><span class="lv">L1</span><b>基础设施 / 工具</b><p>app/db、app/audit、app/clock、app/tools</p></div>
+    <div class="cl"><span class="lv">L0</span><b>内核</b><p>标准库与常量；db 不许认识任何上层模块</p></div>
+  </div>
+  <div class="guard">
+    <b>守门测试：</b><code>tests/test_imports.py</code> 逐模块校验依赖方向——policy 不许 import llm，tools 不许 import planner，db 不许认识任何上层；反向依赖豁免表必须为空，全项目禁止循环 import。
+  </div>
+
+  <h2 class="sec"><span class="n">E</span> 系统自检与数字 <small>跑着的服务 + 可复核的仓库口径</small></h2>
+  <div class="selfcheck">
+    <div class="sc"><span>探测</span><b class="ok">ok</b><p>服务在线，健康检查通过</p></div>
+    <div class="sc"><span>模型</span><b>deepseek-flash</b><p>认知层只走它；不写库、不动钱</p></div>
+    <div class="sc"><span>可用工具</span><b>35 个</b><p>执行层只认令牌的这批</p></div>
+    <div class="sc"><span>数据库</span><b class="ok">连得上</b><p>SQLite + WAL，37 张表</p></div>
+  </div>
+  <div class="nums">
+    <div class="num"><b>1857</b><span>条测试</span></div>
+    <div class="num"><b>43</b><span>条红队用例</span></div>
+    <div class="num"><b>37</b><span>张数据表</span></div>
+    <div class="num"><b>59</b><span>条 API 路径</span></div>
+  </div>
+
+  <div style="height: 220px"></div>
+
+  <footer>银行 AI 智能体 · 架构口径：docs/01_架构与数据流.md、docs/架构图.mmd、tests/test_imports.py；数字取自本仓库实测（openapi / 工具注册表 / 库表清单）</footer>
+</div>
+</body>
+</html>
