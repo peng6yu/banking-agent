@@ -121,9 +121,9 @@ make run     # 启动日志会打印一条带 #token= 的地址，打开那一�
 | 4 | **生日计划一次性预约授权**（P1） | 新增 `plan_authorizations`：绑定 `plan_version` + 账户 + 项目 + 金额，创建计划时用户显式勾选才保存；到点执行前重判，仅**仍合法的黄色**可用预授权自动执行，升级为红色或参数变化必须暂停并要求强验证/用户确认；取消计划即撤销授权，后台不再启动付款 | `tests/test_birthday_authorization.py`、`tests/test_birthday_api_authorization.py`（4 条：预留改变 available 不改 balance、授权行绑定计划版本、到期窗口前后、红日不自动扣） |
 | 5 | **沙箱条款的合规说明**（P1） | 审查完整调用链后确认主 Agent **不执行任意模型生成代码**（无 `eval`/`exec`，模型输出只进结构化参数）；`scripts/prove_no_exec_surface.py` 实测 75 文件 / 25,383 行、代码执行面 0 命中、出网 3 处（仅 `app/llm.py`）、动态 SQL 13 处逐条人工复核、离线 `subprocess` 9 处全部在测试/脚本侧；这是「消除执行面」的替代设计，**不是已部署的容器沙箱**，未宣称已实现沙箱 | `docs/security_sandbox.md`（149 行，含逐跳调用链 file:line 与剩余风险）、`tests/test_no_exec_surface.py`（14 条） |
 | 6 | **A/B 配对统计与浏览器回归**（P1） | 8 轮完整真实 80 例（mock=false）做配对统计：逐轮 intent B−A 为 −1.25 / +2.50 / 0 / +2.50 / +5.00（MiniMax）与 +5.00 / −2.50 / +8.75（DeepSeek），**符号翻转**；同配置 A 组复跑极差 6.25pp / 11.25pp；仅一轮的 +8.75pp 配对 bootstrap CI[+2.50,+16.25] 不含 0，但属单轮单次采样；**稳定成立的是知识引用（B 41–42/51 vs A=0），不宣称知识层稳定提升准确率** | `docs/benchmark/ab_paired_stats.md`、`scripts/ab_stats.py`；浏览器 7 条旅程由当前 `scripts/ui_journeys.py` 实际执行、失败 0（j3 单独用真模型后端，J4/J5 为 API 驱动流程级），见 `docs/交付/browser_journeys.json` 与 `docs/benchmark/browser_journey_audit.md` |
-| 7 | **交付材料统一** | 重新生成 `docs/benchmark/release_manifest.json`（从代码与运行日志取数），README / 验收报告 / 优先级 / 提交物对照表 / PPT 大纲 / 演示方案 / PROGRESS 全部引用同一份事实；旧数字一律标「历史基线」不删除 | 本轮最终验证：**pytest 1710 passed / 4 skipped**、红队 **43/43**、e2e **13/13**、浏览器旅程 **7/7**（全部 exit 0） |
+| 7 | **交付材料统一** | 重新生成 `docs/benchmark/release_manifest.json`（从代码与运行日志取数），README / 验收报告 / 优先级 / 提交物对照表 / PPT 大纲 / 演示方案 / PROGRESS 全部引用同一份事实；旧数字一律标「历史基线」不删除 | 本轮最终验证（历史轮）：**pytest 1710 passed / 4 skipped**、红队 **43/43**、`e2e` **13/13**、浏览器旅程 **7/7**（全部 exit 0）；终态复跑 **1857 passed / 4 skipped**（2026-10-28） |
 
-本轮规模（实测）：测试文件 **102**（`tests/test_*.py`；`tests/` 下 `.py` 文件共 110 个，含 8 个夹具/辅助文件）、数据库表 **33**、工具 **35**（只读 13 / 写 22）、审计事件 **66**、权限规则 **13**、API 路径 **47**。
+本轮规模（实测，2026-10-28 台账）：测试文件 **102**（`tests/test_*.py`；`tests/` 下 `.py` 文件共 110 个，含 8 个夹具/辅助文件）、数据库表 **37**、工具 **35**（只读 13 / 写 22）、审计事件 **73**、权限规则 **13**、API 路径 **59**。
 
 **必须主动交代的限制**：真实短信/人脸渠道尚未接入（未声明 `FACTOR_PROVIDER` 时 `issue()` 直接 503，不落挑战）；人工接管是本地操作员队列，`operator` 仅为审计字符串、无 RBAC、不对接坐席系统；沙箱是「不执行生成代码」的架构选择而非容器隔离；A/B 每轮单次采样，配对 bootstrap 只估计样本层面差值，不能替代重复采样方差。
 ## 快速开始（评委复现路径）
@@ -444,7 +444,7 @@ python3.12 -m app.smoke                    # 实测 4/4 PASS，主脑延迟约 1
 | `make setup` | 一键配置新电脑（.venv + 依赖 + .env + 选模型 + 建库 + 自检） | ✅ 幂等；`ARGS="--dry-run"` 可预演 |
 | `make run` | 启动服务（--reload） | ✅ |
 | `make seed` | 建库 + 种子（幂等） | ✅ |
-| `make test` | pytest 全跑 | ✅ 全绿（1710 passed / 4 skipped，2026-10-26 W5 前端拆分轮实测；历史基线 1336） |
+| `make test` | pytest 全跑 | ✅ 全绿（**1857 passed / 4 skipped**，2026-10-28 复跑 18.03s；历史 1710 / 1336） |
 | `make smoke` | 模型连通性自检 | ✅ 4/4 |
 | `make cov` | 覆盖率（未装 pytest-cov 时自动退回纯跑） | ✅ |
 | `make reset` | `POST /api/demo/reset` 演示前清场 | ✅ |
@@ -472,11 +472,12 @@ python3.12 -m app.smoke                    # 实测 4/4 PASS，主脑延迟约 1
 
 | 文件 | 用途 |
 |---|---|
-| [docs/交付/答辩PPT.pptx](docs/交付/答辩PPT.pptx) | **正式答辩 PPT 实件**：12 页（16:9），累计口播 8:55 / 10:00，**6 张嵌入图片（5 个文件，封面复用确认卡）**；零外链可离线放映。生成脚本 `docs/交付/build_ppt.py`、说明见 `docs/交付/交付说明.md` |
+| [docs/交付/答辩PPT.pptx](docs/交付/答辩PPT.pptx) | **正式答辩 PPT 实件**：**14 页 = 13 页计时主线累计 9:20 + 附录不计时**（16:9），**7 张嵌入图片（7 处，文件各不相同）**，1,364,462 B；零外链可离线放映。生成脚本 `docs/交付/build_ppt.py`、说明见 `docs/交付/交付说明.md` |
 | [docs/安全自评报告.md](docs/安全自评报告.md) | **安全自评报告**：权限分级实现说明、已知风险清单、对抗演示记录；跑不过的用例一条不藏（§2.2） |
 | [docs/技术文档.md](docs/技术文档.md) | **技术文档**：面向评审、可独立阅读的整合版技术说明（模块职责、关键数据结构与接口） |
 | [docs/提交物对照表.md](docs/提交物对照表.md) | **提交前自检**：赛题要求 ↔ 仓库产物逐条对照，✅/🟡/⛔ 状态与缺口说明 |
 | [docs/作品简介.md](docs/作品简介.md) | 200 字以内作品简介 |
+| [docs/交付/演示录屏_全功能.mp4](docs/交付/演示录屏_全功能.mp4) | **演示视频（可选件，已交付）**：3:28（207.72s）/ 1440×900，一句话办事 → 三色闸门 → 账单与计划 → 治理与审计链篡改实测；字幕 `docs/交付/演示录屏_字幕.srt`（22 条，无重复） |
 | [docs/benchmark/final_acceptance_report.md](docs/benchmark/final_acceptance_report.md) | **最终验收报告**：逐项标「已完成/测试不足/部分实现/未实现/环境受限」，附最终实测命令与数字 |
 | [docs/15_竞赛总报告.md](docs/15_竞赛总报告.md) | **竞赛总报告（8 问）**：AIR 启示、补强能力、知识层、主动财务、测试变化、安全边界、缺失项、启动演示 |
 
@@ -497,7 +498,7 @@ python3.12 -m app.smoke                    # 实测 4/4 PASS，主脑延迟约 1
 
 | 文件 | 用途 |
 |---|---|
-| [docs/答辩PPT大纲.md](docs/答辩PPT大纲.md) | 12 页答辩大纲，含每页耗时，累计 8:55（赛题上限 10:00；PPT 实件以其为准） |
+| [docs/答辩PPT大纲.md](docs/答辩PPT大纲.md) | deck 对应的 14 页讲稿（13 页计时主线累计 9:20 + 附录不计时；赛题上限 10:00） |
 | [docs/演示脚本.md](docs/演示脚本.md) | 3 分钟现场演示逐步操作与预期输出，含断网应急预案 |
 | [docs/技术方案总览.md](docs/技术方案总览.md) | 赛题深度分析与顶层规划（一页纸速读） |
 | [docs/05_安全层实现规格.md](docs/05_安全层实现规格.md) | 12 条安全规则 R01–R12 + 令牌七步（历史规格；当前实现 13 条含 R13，以 `app/policy/rules.py` 为准） |
