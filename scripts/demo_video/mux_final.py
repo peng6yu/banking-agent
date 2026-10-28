@@ -3,12 +3,12 @@
 用法：.venv/bin/python scripts/demo_video/mux_final.py
 """
 from __future__ import annotations
-import json, subprocess, sys
+import json, os, subprocess, sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-META = json.loads((ROOT / "tmp/voice5/meta.json").read_text())["items"]
-VOICE = ROOT / "tmp/voice5"  # 旁白已按 scale 预先变速（atempo），这里只做延时铺轨
+VOICE = Path(os.environ.get("DSH_VOICE_DST", ROOT / "tmp/voice5"))  # 旁白已按 scale 预先变速（atempo），这里只做延时铺轨
+META = json.loads((VOICE / "meta.json").read_text())["items"]
 DATA = json.loads((ROOT / "tmp/cues.json").read_text())
 VIDEO = DATA["video"]
 SHIFT = DATA["shift"]

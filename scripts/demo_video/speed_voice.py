@@ -12,13 +12,14 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-SRC = ROOT / "tmp/voice4"
-DST = ROOT / "tmp/voice5"
+SRC = Path(os.environ.get("DSH_VOICE_SRC", ROOT / "tmp/voice4"))
+DST = Path(os.environ.get("DSH_VOICE_DST", ROOT / "tmp/voice5"))
 CUES = ROOT / "tmp/cues.json"
 
 
@@ -31,7 +32,7 @@ def dur_of(path: Path) -> float:
 
 def main() -> None:
     if not (SRC / "meta.json").exists():
-        raise SystemExit("缺少 tmp/voice4/meta.json，先跑 synth_edge.py")
+        raise SystemExit("缺少 %s/meta.json，先跑合成脚本" % SRC)
     meta = json.loads((SRC / "meta.json").read_text())["items"]
     data = json.loads(CUES.read_text())
     scale = float(sys.argv[1]) if len(sys.argv) > 1 else float(data.get("scale", 1.0))
@@ -52,7 +53,7 @@ def main() -> None:
                       "chars": m.get("chars"), "orig_dur": m.get("dur")}
     (DST / "meta.json").write_text(json.dumps(
         {"total": round(total, 2), "scale": scale, "items": items}, ensure_ascii=False, indent=1))
-    print("voice5 meta 写入：%d 条，总长 %.2fs（scale=%.4f）" % (len(items), total, scale))
+    print("%s meta 写入：%d 条，总长 %.2fs（scale=%.4f）" % (DST.name, len(items), total, scale))
 
 
 if __name__ == "__main__":
