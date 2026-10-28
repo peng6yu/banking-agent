@@ -55,6 +55,11 @@ async function confirmAction(confirmationId, approve, factor, proofs, sid) {
     appendBubble('sys', '后端返回状态：' + (BX_TASK_LABEL[status] || status) + '。');
   }
 
+  /* 后端已给终态，这张卡当场收尾：停表、锁按钮。还在等因子时才留着卡。 */
+  if (typeof bxFinishConfirm === 'function' && status !== 'waiting_factor') {
+    bxFinishConfirm(confirmationId, approve ? 'approved' : 'rejected');
+  }
+
   panelBadge('panel-factor', '已提交');
   if (!approve) {
     bxCacheDrop();
@@ -224,6 +229,9 @@ async function pullAudit() {
     if (Array.isArray(json)) { rows = json; }
     else if (json && Array.isArray(json.items)) { rows = json.items; }
     else if (json && Array.isArray(json.rows)) { rows = json.rows; }
+    /* /api/audit 实际回 { ok, count, total, events:[...] }；只认 items/rows
+       时「拉取审计链」永远拉不到东西，面板只能靠实时流攒几行。 */
+    else if (json && Array.isArray(json.events)) { rows = json.events; }
     rows.forEach(function (row) {
       const box = row && typeof row === 'object' ? row : { event_type: textOf(row) };
       renderAudit({

@@ -323,8 +323,14 @@ def _start_run(
 
     async def emit(name: str, data: dict[str, Any]) -> None:
         if name == "done":
+            summary = str(data.get("summary") or "")
+            # 执行轮也要把助手的话记进对话记忆：只记用户那一句的话，下一轮模型看到的
+            # 就是一串连续的用户消息，会把新的一句当成上一句的补充（实测「查一下我这个
+            # 月花了多少」之后接「帮我给张三转 800 元」会被解析成账单分析）。
+            if summary:
+                _remember(session_id, "assistant", summary)
             # 执行完这一轮再学：用户说了什么、助手最后怎么回的，一起交给记忆抽取。
-            _learn(session_id, user_text, str(data.get("summary") or ""))
+            _learn(session_id, user_text, summary)
         await queue.put((name, data))
 
     async def driver() -> None:

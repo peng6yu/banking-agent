@@ -66,7 +66,28 @@ def main():
     base_tree = base_commit["tree"]["sha"]
     print(f"远端 tip: {base_sha[:8]}  tree: {base_tree[:8]}")
 
-    changed = git("diff", "--name-status", "--no-renames", f"{base_sha}..HEAD").strip().splitlines()
+    try:
+        changed = git("diff", "--name-status", "--no-renames", f"{base_sha}..HEAD").strip().splitlines()
+    except RuntimeError:
+        # 本地没有远端 tip 的 commit 对象（github.com:443 不通，无法 fetch）时，
+        # 改用 API 拿远端 tree 与本地 HEAD 的 blob sha 直接比对。
+        print("本地缺少远端 commit 对象，改用 API tree 比对…", flush=True)
+        data = gh([f"repos/{REPO}/git/trees/{base_tree}?recursive=1"])
+        if data.get("truncated"):
+            raise RuntimeError("远端 tree 过大被截断，无法比对")
+        remote = {e["path"]: e["sha"] for e in data["tree"] if e["type"] == "blob"}
+        changed = []
+        local = {}
+        for line in git("ls-tree", "-r", "HEAD").splitlines():
+            meta, path = line.split("\t", 1)
+            mode, typ, sha = meta.split()
+            local[path] = sha
+            if remote.get(path) != sha:
+                changed.append("M\t" + path)
+        for path in remote:
+            if path not in local:
+                changed.append("D\t" + path)
+        print(f"API 比对：本地 {len(local)} 文件 / 远端 {len(remote)} 文件 / 差异 {len(changed)}", flush=True)
     entries, n_blob, n_del = [], 0, 0
     for line in changed:
         parts = line.split("\t")
@@ -122,8 +143,14 @@ def main():
         tree_sha = got["sha"]
         print(f"  建树 {min(i + batch, len(entries))}/{len(entries)}", flush=True)
     tree = {"sha": tree_sha}
-    subjects = git("log", "--format=%s", f"{base_sha}..HEAD").strip().splitlines()
-    msg = ("界面重构全量同步：一条对话主线 + 五块常驻裁决栏 + 三色确认卡\n\n"
+    try:
+        subjects = git("log", "--format=%s", f"{base_sha}..HEAD").strip().splitlines()
+    except RuntimeError:
+        subjects = []
+    import os
+    msg = os.environ.get("PUSH_COMMIT_MSG") or (Path("tmp/push_msg.txt").read_text(encoding="utf-8").strip() if Path("tmp/push_msg.txt").exists() else None)
+    if not msg:
+        msg = ("界面重构全量同步：一条对话主线 + 五块常驻裁决栏 + 三色确认卡\n\n"
            f"本地 {len(subjects)} 个提交压缩为本次快进提交（历史仍在本地仓库）。\n"
            "主要内容：四入口导航、默认助手页、确认卡三档动作与授权绑定、审计链同屏与篡改检测、\n"
            "移动端/平板断点、接管队列动作、演示台重置、评委一页纸与答辩脚本、全量验收记录。")

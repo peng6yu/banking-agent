@@ -378,10 +378,10 @@ SLIDES = [
             (0, "异常熔断：5 分钟窗口 3 次安全拒绝 → 锁定 60 秒，半开只放行一次试探", "i"),
             (0, "审计链篡改当场被数据库触发器拒绝；verify 仍返回 ok=true", "i"),
         ],
-        "chips": [("43 / 43", "红队用例 PASS"), ("1719", "pytest passed"), ("7 / 7", "浏览器旅程"), ("13 / 13", "e2e 步数")],
+        "chips": [("43 / 43", "红队用例 PASS"), ("1857", "pytest passed"), ("7 / 7", "浏览器旅程"), ("13 / 13", "e2e 步数")],
         "talk": "安全不是「我们挡住了多少攻击」，是「攻击面在哪一层、失败时系统往哪边倒」。",
         "cum": "8:10",
-        "src": "出处：tests/redteam/cases.yaml（43 条）、scripts/redteam*；pytest 2026-10-26 终测；旅程 docs/交付/browser_journeys.json。",
+        "src": "出处：tests/redteam/cases.yaml（43 条）、scripts/redteam*；pytest 2026-10-28 终测 1857 passed / 4 skipped；旅程 docs/交付/browser_journeys.json。",
     },
     {
         "layout": "split",

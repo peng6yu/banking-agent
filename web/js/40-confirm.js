@@ -14,6 +14,10 @@ const CONFIRM_TOOL_LABEL = {
 /* 同一条确认单的验证挑战只申请一次：确认卡和右栏「多因子验证」都要画一遍，
    各请一次会撞上服务端 10 秒冷却，右边就空着报「刚发过一次，10 秒后再试」——评委点到就尴尬。 */
 const CONFIRM_FACTOR_CACHE = Object.create(null);
+/* 每张卡自己的收尾函数：确认/拒绝之后卡片必须停表、禁用按钮，
+   以前只有倒计时那条路会收尾，确认成功的卡还在后台数秒，
+   120 秒后突然冒出一句「超时作废」——用户在别处操作时被这句误导。 */
+const CONFIRM_CARD_FINISHERS = Object.create(null);
 const FACTOR_CACHE_MS = 9000;
 
 const CONFIRM_MONEY_TOOLS = {
@@ -127,6 +131,7 @@ function renderConfirm(data) {
   /* 卡片一旦结束（确认/拒绝/作废/超时）就不能再点：留着能点的按钮，
      等于让用户以为还能救回来。 */
   function finishCard(state, note) {
+    if (tick) { clearInterval(tick); tick = null; }
     okBtn.disabled = true;
     editBtn.disabled = true;
     noBtn.disabled = true;
@@ -135,10 +140,12 @@ function renderConfirm(data) {
   }
 
   appendNode(card);
+  CONFIRM_CARD_FINISHERS[cid] = finishCard;
 
   let left = parseInt(expiresRaw, 10);
+  let tick = null;
   if (left > 0) {
-    const tick = setInterval(function () {
+    tick = setInterval(function () {
       left -= 1;
       timer.textContent = '确认号 ' + cid + ' · 剩余 ' + Math.max(left, 0) + ' 秒 · 超时视为拒绝，不会执行';
       if (left <= 0) {
@@ -152,6 +159,15 @@ function renderConfirm(data) {
   panelBadge('panel-factor', '等待确认');
   setPanelLevel('panel-factor', 'yellow');
   flash('panel-factor');
+}
+
+/* 确认/拒绝之后由 50-actions.js 调用：把那张卡当场收尾（停表、禁用按钮），
+   而不是等倒计时到点再补一句「超时作废」。 */
+function bxFinishConfirm(cid, state, note) {
+  const finish = cid ? CONFIRM_CARD_FINISHERS[cid] : null;
+  if (!finish) { return; }
+  delete CONFIRM_CARD_FINISHERS[cid];
+  finish(state, note || '');
 }
 
 /* 多因子面板：验证码由服务端下发（POST /api/factor/challenge）、服务端校验，

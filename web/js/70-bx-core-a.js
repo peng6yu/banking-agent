@@ -349,6 +349,9 @@ function bxRenderSubnav(view) {
     btn.setAttribute('data-view', pair[0]);
     btn.setAttribute('aria-selected', pair[0] === view ? 'true' : 'false');
     btn.textContent = pair[1];
+    /* 二级标签以前只画出来没绑事件：点「账单」「业务管理」页面不动，
+       看起来就像这两页没加载出来。渲染即绑，一处就够。 */
+    btn.addEventListener('click', function () { bxSetView(pair[0]); });
     host.appendChild(btn);
   });
   host.hidden = false;
